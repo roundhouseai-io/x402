@@ -1,0 +1,45 @@
+name: Feature request
+description: A new flag, command, config key, chain, or asset
+labels: ['type: feature', 'needs: triage']
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do that you cannot do now? Describe the situation, not the solution.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed shape
+      description: What would the command, flag or route look like? Copy-pasteable is best.
+      render: shell
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - CLI surface (commands, flags, output)
+        - Payment path (402 parsing, gates, signing, idempotency)
+        - Telemetry and history
+        - serve (HTTP or MCP)
+        - Discovery and capabilities
+        - Chains and assets
+        - Docs
+    validations:
+      required: true
+  - type: checkboxes
+    id: contract
+    attributes:
+      label: Contract impact
+      description: Tick anything this would touch. These are the parts agents depend on.
+      options:
+        - label: Adds or changes an exit code
+        - label: Changes the JSON envelope
+        - label: Changes default behaviour (including default spend or telemetry behaviour)
+        - label: Would need a runtime dependency
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered

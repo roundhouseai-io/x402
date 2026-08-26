@@ -1,0 +1,92 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    name: version or publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # create tags and GitHub Releases
+      pull-requests: write # open the Version Packages PR
+      id-token: write # npm provenance
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      - run: npm ci
+
+      # Never publish something that does not build or pass its tests.
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+
+      - name: Create a Version Packages PR, or publish
+        id: changesets
+        uses: changesets/action@v1
+        with:
+          version: npx changeset version
+          publish: npx changeset publish
+          title: 'chore: version packages'
+          commit: 'chore: version packages'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: 'true'
+
+      # changesets/action creates the GitHub Release for the published tag.
+      # Pre-1.0 and pre-release versions are then flagged as pre-releases, so the
+      # "Latest" badge never points at something that has not promised stability.
+      - name: Flag pre-1.0 releases as pre-release
+        if: steps.changesets.outputs.published == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PUBLISHED: ${{ steps.changesets.outputs.publishedPackages }}
+        run: |
+          set -euo pipefail
+          VERSION=$(node -e "process.stdout.write(JSON.parse(process.env.PUBLISHED)[0].version)")
+          TAG="v$VERSION"
+          case "$VERSION" in
+            0.*|*-*)
+              echo "marking $TAG as a pre-release"
+              gh release edit "$TAG" --prerelease --latest=false
+              ;;
+            *)
+              echo "$TAG is a stable release"
+              ;;
+          esac
+
+      - name: Summarise
+        if: always()
+        env:
+          PUBLISHED: ${{ steps.changesets.outputs.published }}
+          PACKAGES: ${{ steps.changesets.outputs.publishedPackages }}
+        run: |
+          {
+            echo "### Release"
+            echo
+            if [ "${PUBLISHED:-false}" = "true" ]; then
+              echo "Published: \`$PACKAGES\`"
+              echo
+              echo "Verify with \`npm audit signatures\` — the tarball carries npm provenance."
+            else
+              echo "Nothing published. If changesets exist, a **Version Packages** PR is open or updated."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

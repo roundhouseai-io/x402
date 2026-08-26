@@ -1,0 +1,41 @@
+name: Spec change or open question
+description: Propose an amendment to docs/SPEC.md, or resolve one of the open questions
+labels: ['type: spec', 'needs: decision']
+body:
+  - type: input
+    id: section
+    attributes:
+      label: Spec section
+      placeholder: '§5.1 Idempotency'
+    validations:
+      required: true
+  - type: textarea
+    id: current
+    attributes:
+      label: What the spec says now
+    validations:
+      required: true
+  - type: textarea
+    id: proposed
+    attributes:
+      label: What it should say, and why
+      description: If the implementation already differs, link the row in docs/spec-deviations.md.
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Kind
+      options:
+        - Resolves a blocking open question (spec §12)
+        - Ratifies an existing implementation deviation
+        - Changes intended behaviour
+        - Clarification only
+    validations:
+      required: true
+  - type: checkboxes
+    id: impact
+    attributes:
+      label: Would this be a breaking change for agents?
+      options:
+        - label: Yes — it touches exit codes, the envelope, or default spend behaviour

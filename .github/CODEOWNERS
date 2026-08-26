@@ -1,0 +1,16 @@
+# Default owner for everything.
+*                       @roundhouseai-io/maintainers
+
+# The payment path, the exit-code contract and the security posture need a
+# maintainer review even when the rest of the PR is routine.
+/src/core/engine.ts     @roundhouseai-io/maintainers
+/src/core/gates.ts      @roundhouseai-io/maintainers
+/src/core/authcache.ts  @roundhouseai-io/maintainers
+/src/core/eip3009.ts    @roundhouseai-io/maintainers
+/src/core/errors.ts     @roundhouseai-io/maintainers
+/src/core/ows.ts        @roundhouseai-io/maintainers
+/src/serve/tokens.ts    @roundhouseai-io/maintainers
+/docs/SPEC.md           @roundhouseai-io/maintainers
+/SECURITY.md            @roundhouseai-io/maintainers
+/.github/workflows/     @roundhouseai-io/maintainers
+/package.json           @roundhouseai-io/maintainers

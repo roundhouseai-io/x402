@@ -1,0 +1,225 @@
+import { X402Error, ExitCode } from './errors.js';
+import { CHAINS, caip2, findAsset, findChain, formatUnits, parseUnits } from './assets.js';
+
+export interface PaymentOption {
+  scheme: string;
+  /** Network name as the provider spelled it. */
+  network: string;
+  chainId: number;
+  /** CAIP-2, e.g. eip155:8453. */
+  chain: string;
+  /** Token contract address. */
+  asset: string;
+  assetSymbol: string;
+  decimals: number;
+  amountAtomic: bigint;
+  /** Human decimal amount, e.g. "0.002". */
+  amount: string;
+  payTo: string;
+  resource: string | undefined;
+  description: string | undefined;
+  maxTimeoutSeconds: number;
+  /** EIP-712 domain name/version for the token contract. */
+  eip712: { name: string; version: string };
+  raw: Record<string, unknown>;
+}
+
+export interface PaymentRequired {
+  x402Version: number;
+  error: string | undefined;
+  options: PaymentOption[];
+  raw: unknown;
+}
+
+type Json = Record<string, unknown>;
+
+const isObj = (v: unknown): v is Json => typeof v === 'object' && v !== null && !Array.isArray(v);
+
+/** First present key, tolerating the naming drift seen across live providers. */
+function pick(obj: Json, keys: string[]): unknown {
+  for (const k of keys) {
+    if (obj[k] !== undefined && obj[k] !== null && obj[k] !== '') return obj[k];
+  }
+  return undefined;
+}
+
+const A_AMOUNT = ['maxAmountRequired', 'amountRequired', 'maxAmount', 'amount', 'price', 'value'];
+const A_PAYTO = ['payTo', 'payto', 'recipient', 'payee', 'address', 'to'];
+const A_NETWORK = ['network', 'chain', 'chainId', 'networkId'];
+const A_ASSET = ['asset', 'token', 'tokenAddress', 'currency', 'contract'];
+const A_SCHEME = ['scheme', 'type'];
+
+function normalizeOption(input: unknown, index: number): PaymentOption {
+  if (!isObj(input)) {
+    throw new X402Error(ExitCode.INVALID_402, `payment option ${index} is not an object`);
+  }
+
+  const scheme = String(pick(input, A_SCHEME) ?? 'exact');
+
+  const rawNetwork = pick(input, A_NETWORK);
+  const chain = findChain(rawNetwork as string | number | undefined);
+  if (!chain) {
+    throw new X402Error(
+      ExitCode.INVALID_402,
+      `unsupported or missing network in 402 payload: ${JSON.stringify(rawNetwork ?? null)}`,
+      { supported: CHAINS.map((c) => c.network) },
+    );
+  }
+
+  const payTo = pick(input, A_PAYTO);
+  if (typeof payTo !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(payTo)) {
+    throw new X402Error(ExitCode.INVALID_402, `missing or malformed payTo in 402 payload`);
+  }
+
+  const extra = isObj(input.extra) ? input.extra : {};
+  const assetRaw = pick(input, A_ASSET);
+  const known = findAsset(typeof assetRaw === 'string' ? assetRaw : undefined, chain.chainId);
+  const assetAddress =
+    typeof assetRaw === 'string' && assetRaw.startsWith('0x') ? assetRaw : known?.address;
+  if (!assetAddress) {
+    throw new X402Error(ExitCode.INVALID_402, `missing asset address in 402 payload`, {
+      asset: assetRaw ?? null,
+    });
+  }
+  const decimalsRaw = pick({ ...input, ...extra }, ['decimals', 'assetDecimals']);
+  const decimals = Number(decimalsRaw ?? known?.decimals ?? 6);
+  if (!Number.isInteger(decimals) || decimals < 0 || decimals > 36) {
+    throw new X402Error(ExitCode.INVALID_402, `implausible asset decimals: ${String(decimalsRaw)}`);
+  }
+
+  const amountRaw = pick(input, A_AMOUNT);
+  if (amountRaw === undefined) {
+    throw new X402Error(ExitCode.INVALID_402, 'missing amount in 402 payload');
+  }
+  const amountStr = String(amountRaw);
+  let amountAtomic: bigint;
+  try {
+    // A dotted value is a human amount; a bare integer is atomic units.
+    amountAtomic = amountStr.includes('.') ? parseUnits(amountStr, decimals) : BigInt(amountStr);
+  } catch (err) {
+    throw new X402Error(
+      ExitCode.INVALID_402,
+      `unparseable amount "${amountStr}": ${(err as Error).message}`,
+    );
+  }
+  if (amountAtomic < 0n)
+    throw new X402Error(ExitCode.INVALID_402, 'negative amount in 402 payload');
+
+  const timeout = Number(
+    pick(input, ['maxTimeoutSeconds', 'timeoutSeconds', 'validForSeconds']) ?? 60,
+  );
+
+  return {
+    scheme,
+    network: typeof rawNetwork === 'string' ? rawNetwork : chain.network,
+    chainId: chain.chainId,
+    chain: caip2(chain.chainId),
+    asset: assetAddress,
+    assetSymbol: known?.symbol ?? (typeof assetRaw === 'string' ? assetRaw : 'unknown'),
+    decimals,
+    amountAtomic,
+    amount: formatUnits(amountAtomic, decimals),
+    payTo,
+    resource: typeof input.resource === 'string' ? input.resource : undefined,
+    description: typeof input.description === 'string' ? input.description : undefined,
+    maxTimeoutSeconds: Number.isFinite(timeout) && timeout > 0 ? Math.floor(timeout) : 60,
+    eip712: {
+      name: String(extra.name ?? known?.eip712.name ?? 'USD Coin'),
+      version: String(extra.version ?? known?.eip712.version ?? '2'),
+    },
+    raw: input,
+  };
+}
+
+/**
+ * Parse an x402 402 body. Accepts the canonical `{x402Version, accepts:[...]}`
+ * envelope, a bare requirements object, or a bare array of options — the three
+ * shapes live providers actually emit today.
+ */
+export function parsePaymentRequired(body: unknown): PaymentRequired {
+  let candidates: unknown[];
+  let version = 1;
+  let error: string | undefined;
+
+  if (Array.isArray(body)) {
+    candidates = body;
+  } else if (isObj(body)) {
+    version = Number(body.x402Version ?? body.version ?? 1);
+    error = typeof body.error === 'string' ? body.error : undefined;
+    const accepts = pick(body, ['accepts', 'paymentRequirements', 'options', 'requirements']);
+    if (Array.isArray(accepts)) candidates = accepts;
+    else if (isObj(accepts)) candidates = [accepts];
+    else candidates = [body];
+  } else {
+    throw new X402Error(ExitCode.INVALID_402, 'response body is not a 402 payment payload');
+  }
+
+  if (candidates.length === 0) {
+    throw new X402Error(ExitCode.INVALID_402, '402 payload lists no payment options');
+  }
+
+  const options: PaymentOption[] = [];
+  const problems: string[] = [];
+  for (const [i, c] of candidates.entries()) {
+    try {
+      options.push(normalizeOption(c, i));
+    } catch (err) {
+      problems.push((err as Error).message);
+    }
+  }
+  if (options.length === 0) {
+    throw new X402Error(ExitCode.INVALID_402, `no usable payment option: ${problems.join('; ')}`, {
+      problems,
+    });
+  }
+
+  return { x402Version: Number.isFinite(version) ? version : 1, error, options, raw: body };
+}
+
+export interface SelectOptions {
+  /** Acceptable chains (names, aliases or CAIP-2). Empty means any supported. */
+  chains?: string[];
+  /** Preferred chain from config `defaults.chain`, tried before price. */
+  preferChain?: string;
+  /** Schemes this build can settle. */
+  schemes?: string[];
+}
+
+/**
+ * Selection order per spec 12.4: preferred chain first, then cheapest.
+ * Ties break on the provider's own ordering, which keeps selection deterministic.
+ */
+export function selectOption(required: PaymentRequired, opts: SelectOptions = {}): PaymentOption {
+  const schemes = opts.schemes ?? ['exact'];
+  let pool = required.options.filter((o) => schemes.includes(o.scheme));
+  if (pool.length === 0) {
+    throw new X402Error(
+      ExitCode.INVALID_402,
+      `no supported payment scheme (offered: ${[...new Set(required.options.map((o) => o.scheme))].join(', ')})`,
+    );
+  }
+
+  if (opts.chains && opts.chains.length > 0) {
+    const allowed = new Set(
+      opts.chains.map((c) => findChain(c)?.chainId).filter((id): id is number => id !== undefined),
+    );
+    const filtered = pool.filter((o) => allowed.has(o.chainId));
+    if (filtered.length === 0) {
+      throw new X402Error(
+        ExitCode.INVALID_402,
+        `no payment option on allowed chains (offered: ${[...new Set(pool.map((o) => o.network))].join(', ')})`,
+      );
+    }
+    pool = filtered;
+  }
+
+  const preferred = findChain(opts.preferChain)?.chainId;
+  const cheapest = (list: PaymentOption[]) =>
+    list.reduce((best, o) => (o.amountAtomic < best.amountAtomic ? o : best), list[0]!);
+
+  if (preferred !== undefined) {
+    const onPreferred = pool.filter((o) => o.chainId === preferred);
+    if (onPreferred.length > 0) return cheapest(onPreferred);
+  }
+  return cheapest(pool);
+}

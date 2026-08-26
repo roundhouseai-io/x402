@@ -1,6 +1,7 @@
 import { X402Error, ExitCode } from './errors.js';
 import { request, parseJsonBody } from './http.js';
 import type { TypedData } from './eip3009.js';
+import type { SignerAccount, SignerBackend, SignerBalance, SignerCapabilities } from './signer.js';
 
 /**
  * Client for the Open Wallet Standard agent access layer.
@@ -28,15 +29,6 @@ export interface OwsClientOptions {
   endpoint: string;
   apiKey?: string | undefined;
   timeoutMs?: number;
-}
-
-export interface Signer {
-  /** Wallet name or id used in ledger records. */
-  readonly wallet: string;
-  address(): Promise<string>;
-  signTypedData(typedData: TypedData): Promise<string>;
-  /** undefined when the backend cannot report a balance. */
-  balance?(asset: string, chain: string): Promise<OwsBalance | undefined>;
 }
 
 const isObj = (v: unknown): v is Record<string, unknown> =>
@@ -184,6 +176,26 @@ export class OwsClient {
     return signature;
   }
 
+  /**
+   * Ask OWS what it can do. A backend that does not implement capability
+   * discovery returns undefined, and support is assumed rather than declared.
+   */
+  async capabilities(): Promise<{ typedData: boolean; policies: boolean } | undefined> {
+    try {
+      const body = await this.call('GET', '/v1/capabilities');
+      if (!isObj(body)) return undefined;
+      const methods = Array.isArray(body.methods) ? body.methods.map(String) : [];
+      const typedData =
+        body.typedData === true ||
+        body.signTypedData === true ||
+        methods.includes('signTypedData') ||
+        methods.includes('sign-typed-data');
+      return { typedData, policies: body.policies === true || Array.isArray(body.policies) };
+    } catch {
+      return undefined;
+    }
+  }
+
   async health(): Promise<{ ok: boolean; detail: string }> {
     try {
       await this.call('GET', '/v1/wallets');
@@ -194,13 +206,36 @@ export class OwsClient {
   }
 }
 
-export class OwsSigner implements Signer {
+/** The reference backend: API-key auth, policy-gated signing. */
+export class OwsSigner implements SignerBackend {
+  readonly backend = 'ows';
+  private caps: SignerCapabilities | undefined;
+
   constructor(
     private readonly client: OwsClient,
     readonly wallet: string,
   ) {}
 
-  async address(): Promise<string> {
+  async capabilities(): Promise<SignerCapabilities> {
+    if (this.caps) return this.caps;
+    const declared = await this.client.capabilities();
+    this.caps = declared
+      ? { ...declared, balances: true, accounts: true, declared: true }
+      : // OWS does not advertise capabilities yet, so typed-data support is
+        // assumed and a missing method surfaces as exit 47 at signing time.
+        { typedData: true, policies: true, balances: true, accounts: true, declared: false };
+    return this.caps;
+  }
+
+  async getAccounts(): Promise<SignerAccount[]> {
+    return (await this.client.listWallets()).map((w) => ({
+      id: w.name ?? w.id,
+      address: w.address,
+      chains: w.chains,
+    }));
+  }
+
+  async getAddress(): Promise<string> {
     return (await this.client.getWallet(this.wallet)).address;
   }
 
@@ -208,7 +243,7 @@ export class OwsSigner implements Signer {
     return this.client.signTypedData(this.wallet, typedData);
   }
 
-  async balance(asset: string, chain: string): Promise<OwsBalance | undefined> {
+  async getBalance(asset: string, chain: string): Promise<SignerBalance | undefined> {
     try {
       return await this.client.balance(this.wallet, asset, chain);
     } catch {

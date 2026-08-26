@@ -20,7 +20,25 @@ export {
 } from './core/eip3009.js';
 export type { TypedData, PaymentPayload } from './core/eip3009.js';
 export { OwsClient, OwsSigner, mapOwsError } from './core/ows.js';
-export type { Signer, OwsWallet, OwsBalance } from './core/ows.js';
+export type { OwsWallet, OwsBalance } from './core/ows.js';
+export type {
+  SignerBackend,
+  SignerFactory,
+  SignerSelector,
+  SignerAccount,
+  SignerBalance,
+  SignerCapabilities,
+} from './core/signer.js';
+export {
+  resolveSigner,
+  signerFactory,
+  BUILTIN_BACKENDS,
+  thirdPartyPackage,
+} from './core/signers/index.js';
+export { LocalSigner } from './core/signers/local.js';
+export { ExecSigner, EXEC_PROTOCOL_VERSION, exitCodeForExecError } from './core/signers/exec.js';
+export { readKeystore, addEntry, decryptEntry, findEntry, readKeyFile } from './core/keystore.js';
+export type { KeystoreEntry, KeystoreFile } from './core/keystore.js';
 export { runGates, SessionBudget, domainAllowed } from './core/gates.js';
 export { authKey, readAuth, writeAuth, pruneAuthCache } from './core/authcache.js';
 export type { AuthCacheEntry } from './core/authcache.js';

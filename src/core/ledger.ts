@@ -7,6 +7,8 @@ export interface LedgerRecord {
   url: string;
   method: string;
   wallet: string | null;
+  /** Signer backend that produced the authorization. */
+  backend?: string;
   capability?: string;
   provider?: string;
   request: {

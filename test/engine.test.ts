@@ -8,7 +8,7 @@ import { SessionBudget } from '../src/core/gates.js';
 import { ExitCode } from '../src/core/errors.js';
 import { decodePaymentHeader } from '../src/core/eip3009.js';
 import { readRecords } from '../src/core/ledger.js';
-import type { Signer } from '../src/core/ows.js';
+import type { SignerBackend } from '../src/core/signer.js';
 import type { TypedData } from '../src/core/eip3009.js';
 
 const PAY_TO = '0x1831f336585a6C67B6A954d28f3E07F44C4EEBbd';
@@ -41,11 +41,18 @@ function jsonResponse(
   });
 }
 
-class FakeSigner implements Signer {
+class FakeSigner implements SignerBackend {
+  readonly backend = 'fake';
   readonly wallet = 'test-wallet';
   signed: TypedData[] = [];
   constructor(private readonly opts: { balance?: string; fail?: Error } = {}) {}
-  async address(): Promise<string> {
+  async capabilities() {
+    return { typedData: true, policies: true, balances: true, accounts: true, declared: true };
+  }
+  async getAccounts() {
+    return [{ id: this.wallet, address: await this.getAddress() }];
+  }
+  async getAddress(): Promise<string> {
     return '0x000000000000000000000000000000000000dEaD';
   }
   async signTypedData(typedData: TypedData): Promise<string> {
@@ -53,7 +60,7 @@ class FakeSigner implements Signer {
     this.signed.push(typedData);
     return `0x${'ab'.repeat(32)}${(this.signed.length - 1).toString(16).padStart(2, '0')}`;
   }
-  async balance() {
+  async getBalance() {
     return this.opts.balance === undefined
       ? undefined
       : { asset: 'usdc', amount: this.opts.balance, decimals: 6 };
@@ -65,7 +72,7 @@ let fetchMock: ReturnType<typeof vi.fn>;
 
 function makeEngine(
   overrides: Partial<X402Config> = {},
-  signer: Signer = new FakeSigner(),
+  signer: SignerBackend = new FakeSigner(),
   budget?: SessionBudget,
 ) {
   const config = mergeDeep(DEFAULT_CONFIG, overrides);
@@ -74,6 +81,7 @@ function makeEngine(
     signer: async () => signer,
     budget,
     walletName: signer.wallet,
+    backendName: signer.backend,
     now: () => 1_700_000_000_000,
   });
 }

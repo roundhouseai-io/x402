@@ -19,7 +19,7 @@ With a wallet configured, that one line does: GET with a query param → receive
 
 Paying for an HTTP call from an agent normally means gluing together a 402 parser, an EVM signer, a nonce policy, a spend cap and an audit log — and then hoping the agent does not pay twice. This does all of that in one command, with:
 
-- **No raw private keys.** All signing is delegated to an [Open Wallet Standard](https://github.com/open-wallet-standard) agent access layer. Keys never appear in argv, env vars, or logs.
+- **Wallet-agnostic, no raw private keys.** Signing goes through a pluggable backend — [OWS](https://github.com/open-wallet-standard) is the reference, not a dependency, and any wallet that can produce an EIP-712 signature plugs in. Keys never appear in argv, env vars, or logs.
 - **Idempotent retries.** Signed authorizations are cached and reused, so a timed-out retry does not become a second payment.
 - **Spend limits that fail fast.** Per-call, per-session and per-day caps, plus payTo and domain allowlists, all checked before anything is signed.
 - **Every call observable.** An append-only local ledger, always on, hashed by default. Optional remote sink for fleet telemetry.
@@ -33,13 +33,15 @@ npm i -g @roundhouseai/x402      # then: x402 <url>
 npx @roundhouseai/x402 <url>     # or zero-install
 ```
 
-Node 20.10+ is required. Then point it at your OWS endpoint and pick a wallet:
+Node 20.10+ is required. Then point it at a wallet:
 
 ```bash
-x402 config set wallet.owsEndpoint http://127.0.0.1:8402
-x402 config set wallet.apiKey env:OWS_API_KEY   # stored as an indirection, never the secret
+x402 config set wallet.backend ows
+x402 config set wallet.backends.ows.endpoint http://127.0.0.1:8402
+x402 config set wallet.backends.ows.apiKey env:OWS_API_KEY   # an indirection, never the secret
 x402 config set wallet.default my-agent
 x402 config set limits.maxPerCall 0.05
+x402 signer check     # does this backend do what x402 needs?
 x402 wallet list
 ```
 
@@ -125,9 +127,9 @@ Checked in this order, before anything is signed:
 2. **`--max`** per-call cap → exit `44`
 3. **`--budget`** for this process → exit `45`
 4. **`limits.dailyCap`**, computed from the ledger → exit `45`
-5. **OWS policy**, the authoritative control → exit `42`
+5. **The signer backend's policy layer**, the authoritative control → exit `42`
 
-The CLI-side checks are fail-fast conveniences. The OWS policy is binding; mirror your caps there too.
+The CLI-side checks are fail-fast conveniences. The backend policy is binding; mirror your caps there too.
 
 ```bash
 x402 call https://api.example.com/v1/lei --max 0.01 --budget 0.50 --dry-run
@@ -221,6 +223,25 @@ Routes: `POST /v1/call`, `POST /v1/probe`, `GET /v1/discover`, `GET /v1/history`
 
 **Treat it like a hot wallet API even on localhost.** It binds to `127.0.0.1`; anything that can reach it can spend. Callers need tokens (stored hashed) with their own daily and per-call budgets. Full details, including why `--host 0.0.0.0` demands `--i-understand-this-exposes-spending`, in [`docs/serve.md`](docs/serve.md).
 
+## Wallets: bring your own
+
+Signing goes through a **signer backend**, which sees one EIP-712 payload and nothing else — no URL, no request body, no response body. Four ship with the CLI:
+
+| Backend              | What it is                                                                                                                                                                           |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ows`                | Open Wallet Standard agent access layer: API-key auth, policy-gated signing. The default.                                                                                            |
+| `local`              | Encrypted keystore (scrypt + AES-256-GCM), `0600`, warns on every signature. **Development and CI only** — it has no policy layer.                                                   |
+| `exec`               | Any executable speaking [JSON over stdio](docs/exec-signer.md), in the style of git credential helpers. A hardware bridge, an MPC service or a KMS wrapper is one small script away. |
+| `x402-signer-<name>` | Third-party backends, auto-discovered from npm.                                                                                                                                      |
+
+```bash
+x402 signer list                        # what is available, what is active
+x402 signer check                       # capabilities, and whether this backend can do x402 at all
+x402 call <url> --signer local --wallet dev
+```
+
+A backend that declares it cannot sign EIP-712 typed data fails when the signer is resolved (exit `47`) — before any request goes out, not halfway through a payment. A backend that refuses on policy grounds fails with exit `42`, and there is no second backend to fall back to. Details in [`docs/signers.md`](docs/signers.md).
+
 ## Configuration
 
 `~/.x402/config.json`, overridden per project by `.x402rc`, overridden by flags. `env:`-prefixed values resolve from the environment at runtime, so secrets stay out of the file.
@@ -228,9 +249,11 @@ Routes: `POST /v1/call`, `POST /v1/probe`, `GET /v1/discover`, `GET /v1/history`
 ```json
 {
   "wallet": {
+    "backend": "ows",
     "default": "my-agent",
-    "owsEndpoint": "http://127.0.0.1:8402",
-    "apiKey": "env:OWS_API_KEY"
+    "backends": {
+      "ows": { "endpoint": "http://127.0.0.1:8402", "apiKey": "env:OWS_API_KEY" }
+    }
   },
   "limits": { "maxPerCall": "0.05", "dailyCap": "5.00" },
   "allowlist": { "payTo": [], "domains": [] },
@@ -251,7 +274,8 @@ See [`docs/configuration.md`](docs/configuration.md).
 - [`docs/SPEC.md`](docs/SPEC.md) — the design contract
 - [`SKILL.md`](SKILL.md) — agent onboarding: three flows, both surfaces
 - [`docs/architecture.md`](docs/architecture.md) — how the pieces fit
-- [`docs/exit-codes.md`](docs/exit-codes.md), [`docs/idempotency.md`](docs/idempotency.md), [`docs/telemetry.md`](docs/telemetry.md), [`docs/serve.md`](docs/serve.md), [`docs/configuration.md`](docs/configuration.md), [`docs/ows.md`](docs/ows.md)
+- [`docs/signers.md`](docs/signers.md) — wallet backends, and how to write one; [`docs/exec-signer.md`](docs/exec-signer.md) — the external signer protocol
+- [`docs/exit-codes.md`](docs/exit-codes.md), [`docs/idempotency.md`](docs/idempotency.md), [`docs/telemetry.md`](docs/telemetry.md), [`docs/serve.md`](docs/serve.md), [`docs/configuration.md`](docs/configuration.md)
 - [`CONTRIBUTING.md`](CONTRIBUTING.md), [`SECURITY.md`](SECURITY.md), [`docs/releasing.md`](docs/releasing.md)
 
 ## Licence

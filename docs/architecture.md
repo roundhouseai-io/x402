@@ -10,8 +10,10 @@ One engine, three surfaces. The CLI, the HTTP endpoint and the MCP server are th
                                 │
                          core/engine.ts
       ┌──────────┬──────────┬───┴────┬───────────┬──────────┐
-   data.ts    x402.ts    gates.ts  ows.ts   authcache.ts  ledger.ts
+   data.ts    x402.ts    gates.ts signers/  authcache.ts  ledger.ts
   (payload)  (402 parse) (limits) (signing) (idempotency) (telemetry)
+                                      │
+                            ows │ local │ exec │ x402-signer-*
 ```
 
 ## The call flow
@@ -23,7 +25,7 @@ One engine, three surfaces. The CLI, the HTTP endpoint and the MCP server are th
 3. **Send it unpaid.** Any status other than 402 ends the call: the response is returned and a ledger record written with `amount: "0"`. Free endpoints cost one round trip and no wallet contact.
 4. **Parse the 402.** `x402.ts` normalises the payload into `PaymentOption`s, tolerating the naming drift live providers show (`maxAmountRequired`/`price`/`amount`, `payTo`/`recipient`, `network`/`chainId`), then selects one: configured chain first, then cheapest. A payload it cannot use is exit `40`, not a guess.
 5. **Gate.** `gates.ts` runs domain → payTo → `--max` → session budget → daily cap. First failure aborts with its own exit code, before any wallet contact. `--dry-run` stops here and reports the price.
-6. **Authorize.** `eip3009.ts` builds the `TransferWithAuthorization` typed-data document; `ows.ts` asks the wallet to sign it. Before signing, `authcache.ts` is consulted — a live entry for this request identity is reused. Signing is serialised per engine, so two concurrent identical calls produce one authorization.
+6. **Authorize.** `eip3009.ts` builds the `TransferWithAuthorization` typed-data document; the resolved signer backend signs it — and receives nothing else. Before signing, `authcache.ts` is consulted — a live entry for this request identity is reused. Signing is serialised per engine, so two concurrent identical calls produce one authorization.
 7. **Retry paid.** The same request with an `X-PAYMENT` header (base64 of the payment payload). A second 402 means the provider rejected the authorization: exit `40`, and the cache entry is not reused for a fresh attempt. A network failure here is exit `50` — money may have moved, so the authorization stays cached for an identical re-run.
 8. **Record.** `ledger.ts` appends one JSONL record per call, at the configured payload level, with auth headers always redacted. `telemetry.ts` optionally queues it for the remote sink.
 
@@ -31,7 +33,9 @@ One engine, three surfaces. The CLI, the HTTP endpoint and the MCP server are th
 
 **Zero runtime dependencies.** This tool holds an API key that can spend money. Every dependency is another party who can reach that key through an update. Node 20+ gives us `fetch`, `node:crypto`, `node:http` and enough JSON to implement JSON-RPC by hand — so the CLI ships with nothing. `ethers` is an _optional_ peer dependency used only by the local development signer, so a default install carries no signing code at all.
 
-**The engine never signs.** `Signer` is a two-method interface (`address`, `signTypedData`). `OwsSigner` is the production implementation; `UnsafeLocalSigner` is a warned, file-only development path; tests implement it directly. There is no code path that turns a private key into a signature inside `core/engine.ts`, which makes the "no fallback signing" invariant structural rather than aspirational.
+**The engine never signs, and never chooses a wallet.** `SignerBackend` is a four-method interface (`capabilities`, `getAccounts`, `getAddress`, `signTypedData`, plus an optional `getBalance`). `ows` is the reference implementation, `local` a warned keystore for development, `exec` any executable; tests implement the interface directly. There is no code path that turns a private key into a signature inside `core/engine.ts`, which makes the "no fallback signing" invariant structural rather than aspirational.
+
+**Backends see one EIP-712 payload and nothing else.** No URL, no request body, no response body — so a hostile or buggy backend cannot exfiltrate call content. The capability check runs when the signer is resolved, so a backend that cannot sign typed data fails at config time (exit 47) rather than halfway through a payment. Signing is serialised per backend _and_ wallet, so concurrent identical calls share one authorization.
 
 **Amounts are `bigint` atomic units internally, decimal strings at the edges.** `assets.ts` owns the conversion, refuses more precision than the asset has, and never lets a price through `Number`. Ledger amounts are decimal strings; the sum helpers scale to integer micro-units before adding.
 
@@ -52,7 +56,10 @@ One engine, three surfaces. The CLI, the HTTP endpoint and the MCP server are th
 | Chains, assets, unit conversion            | `core/assets.ts`    |
 | Typed data, `X-PAYMENT`, settlement decode | `core/eip3009.ts`   |
 | Spend gates                                | `core/gates.ts`     |
-| Wallet client and error mapping            | `core/ows.ts`       |
+| Signer interface                           | `core/signer.ts`    |
+| Backend registry and capability gate       | `core/signers/`     |
+| OWS client and error mapping               | `core/ows.ts`       |
+| Encrypted development keystore             | `core/keystore.ts`  |
 | Idempotency                                | `core/authcache.ts` |
 | Ledger and history queries                 | `core/ledger.ts`    |
 | Payload levels, redaction, sink, outbox    | `core/telemetry.ts` |

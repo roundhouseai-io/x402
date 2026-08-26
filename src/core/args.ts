@@ -26,7 +26,7 @@ export const FLAGS: Record<string, { kind: FlagKind; alias?: string }> = {
   'dry-run': { kind: 'boolean' },
   'receipt-out': { kind: 'string' },
   'no-cache': { kind: 'boolean' },
-  'unsafe-private-key-file': { kind: 'string' },
+  signer: { kind: 'string' },
   // telemetry
   'telemetry-payload': { kind: 'string' },
   // output / global
@@ -56,6 +56,10 @@ export const FLAGS: Record<string, { kind: FlagKind; alias?: string }> = {
   // verify / pay
   receipt: { kind: 'string' },
   file: { kind: 'string' },
+  // signer / keystore
+  'key-file': { kind: 'string' },
+  keystore: { kind: 'string' },
+  replace: { kind: 'boolean' },
 };
 
 const ALIASES: Record<string, string> = Object.fromEntries(
@@ -83,6 +87,7 @@ export const COMMANDS = [
   'history',
   'discover',
   'serve',
+  'signer',
   'config',
   'help',
   'version',

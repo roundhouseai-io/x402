@@ -25,6 +25,8 @@ export async function callCommand(parsed: ParsedArgs): Promise<number> {
     data,
     headers: parseHeaders(list(parsed.flags, 'header')),
     payloadLevel: ctx.payloadLevel,
+    wallet: ctx.walletName,
+    signer: ctx.backendName,
     ...callOptionsFrom(parsed),
   });
 

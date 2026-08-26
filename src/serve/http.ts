@@ -147,6 +147,8 @@ export function createServeServer(deps: ServeDeps): Server {
       noCache: body.noCache === true,
       form: body.form === true,
       bodyAlways: body.bodyAlways === true,
+      wallet: body.wallet === undefined ? undefined : String(body.wallet),
+      signer: body.signer === undefined ? undefined : String(body.signer),
       agentToken: token?.name,
     });
 
@@ -239,10 +241,25 @@ export function createServeServer(deps: ServeDeps): Server {
   }
 
   async function handleHealth(res: ServerResponse): Promise<void> {
-    const ows = await deps.ows.health();
-    sendJson(res, ows.ok ? 200 : 503, {
-      ok: ows.ok,
-      ows,
+    const backend = deps.config.wallet.backend;
+    // Only the OWS backend exposes a reachability probe; others report the
+    // capability check performed when the signer was resolved.
+    const signer =
+      backend === 'ows'
+        ? await deps.ows.health()
+        : await (async () => {
+            try {
+              const resolved = await deps.engine.signerFor();
+              const caps = await resolved.capabilities();
+              return { ok: caps.typedData, detail: `${backend}: typedData=${caps.typedData}` };
+            } catch (err) {
+              return { ok: false, detail: messageOf(err) };
+            }
+          })();
+    sendJson(res, signer.ok ? 200 : 503, {
+      ok: signer.ok,
+      backend,
+      signer,
       wallet: deps.config.wallet.default ?? null,
       outboxDepth: outboxDepth(),
       payloadLevel: deps.config.telemetry.payload,

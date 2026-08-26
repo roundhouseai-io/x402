@@ -1,12 +1,18 @@
-import { loadConfig, type X402Config, type PayloadLevel } from '../core/config.js';
+import {
+  loadConfig,
+  type X402Config,
+  type PayloadLevel,
+  type OwsBackendConfig,
+} from '../core/config.js';
 import { X402Error, ExitCode } from '../core/errors.js';
 import { Engine } from '../core/engine.js';
 import { SessionBudget } from '../core/gates.js';
 import { TelemetrySink } from '../core/telemetry.js';
-import { OwsClient, OwsSigner, type Signer } from '../core/ows.js';
-import { UnsafeLocalSigner } from '../core/unsafe-signer.js';
+import { OwsClient } from '../core/ows.js';
+import { signerFactory } from '../core/signers/index.js';
 import { parseUnits } from '../core/assets.js';
 import { bool, num, str, type ParsedArgs } from '../core/args.js';
+import type { SignerFactory } from '../core/signer.js';
 
 export interface Context {
   config: X402Config;
@@ -14,9 +20,13 @@ export interface Context {
   engine: Engine;
   sink: TelemetrySink;
   budget: SessionBudget;
+  /** Active wallet within the active backend. */
   walletName: string | undefined;
+  /** Active signer backend name. */
+  backendName: string;
+  /** Client for the OWS backend specifically, used by `wallet` and health checks. */
   ows: OwsClient;
-  signer: () => Promise<Signer>;
+  signer: SignerFactory;
   payloadLevel: PayloadLevel | undefined;
 }
 
@@ -26,7 +36,7 @@ function payloadLevelOf(value: string | undefined): PayloadLevel | undefined {
   throw new X402Error(ExitCode.GENERIC, `--telemetry-payload must be none|hash|full, got ${value}`);
 }
 
-/** Assemble config, wallet, engine and telemetry from parsed flags. */
+/** Assemble config, signer backend, engine and telemetry from parsed flags. */
 export function buildContext(parsed: ParsedArgs): Context {
   const overrides: Record<string, unknown> = {};
   const chain = str(parsed.flags, 'chain');
@@ -40,31 +50,30 @@ export function buildContext(parsed: ParsedArgs): Context {
   const level = payloadLevelOf(str(parsed.flags, 'telemetry-payload'));
   if (level) overrides.telemetry = { payload: level };
 
+  const backendFlag = str(parsed.flags, 'signer');
+  const walletFlag = str(parsed.flags, 'wallet');
+  const keystoreFlag = str(parsed.flags, 'keystore');
+  const wallet: Record<string, unknown> = {};
+  if (backendFlag) wallet.backend = backendFlag;
+  if (walletFlag) wallet.default = walletFlag;
+  if (keystoreFlag) wallet.backends = { local: { keystore: keystoreFlag } };
+  if (Object.keys(wallet).length > 0) overrides.wallet = wallet;
+
   const { config, sources } = loadConfig({
     file: str(parsed.flags, 'config'),
     overrides,
   });
 
-  const walletName = str(parsed.flags, 'wallet') ?? config.wallet.default;
-  const ows = new OwsClient({ endpoint: config.wallet.owsEndpoint, apiKey: config.wallet.apiKey });
+  const backendName = config.wallet.backend;
+  const walletName = config.wallet.default;
+  const owsConfig = (config.wallet.backends.ows ?? {}) as OwsBackendConfig;
+  const ows = new OwsClient({
+    endpoint: owsConfig.endpoint,
+    apiKey: owsConfig.apiKey,
+    ...(owsConfig.timeoutMs ? { timeoutMs: owsConfig.timeoutMs } : {}),
+  });
 
-  const keyFile = str(parsed.flags, 'unsafe-private-key-file');
-  let cached: Signer | undefined;
-  const signer = async (): Promise<Signer> => {
-    if (cached) return cached;
-    if (keyFile) {
-      cached = new UnsafeLocalSigner(keyFile);
-      return cached;
-    }
-    if (!walletName) {
-      throw new X402Error(
-        ExitCode.OWS_UNREACHABLE,
-        'no wallet selected: pass --wallet or set wallet.default in ~/.x402/config.json',
-      );
-    }
-    cached = new OwsSigner(ows, walletName);
-    return cached;
-  };
+  const signer = signerFactory(config);
 
   const budgetFlag = str(parsed.flags, 'budget');
   // Session budgets are denominated in the asset being paid; USDC's 6 decimals
@@ -77,7 +86,8 @@ export function buildContext(parsed: ParsedArgs): Context {
     signer,
     sink,
     budget,
-    walletName: keyFile ? 'unsafe-local' : walletName,
+    walletName,
+    backendName,
   });
 
   return {
@@ -87,6 +97,7 @@ export function buildContext(parsed: ParsedArgs): Context {
     sink,
     budget,
     walletName,
+    backendName,
     ows,
     signer,
     payloadLevel: level,

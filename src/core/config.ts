@@ -5,11 +5,37 @@ import { X402Error, ExitCode } from './errors.js';
 
 export type PayloadLevel = 'none' | 'hash' | 'full';
 
+export interface OwsBackendConfig {
+  endpoint: string;
+  apiKey?: string;
+  timeoutMs?: number;
+}
+
+export interface LocalBackendConfig {
+  /** Encrypted keystore path; `~` is expanded. Defaults to `$X402_HOME/keystore.json`. */
+  keystore?: string;
+  passphrase?: string;
+}
+
+export interface ExecBackendConfig {
+  command: string;
+  args?: string[];
+  timeoutMs?: number;
+}
+
 export interface X402Config {
   wallet: {
+    /** Active signer backend. See docs/signers.md. */
+    backend: string;
+    /** Wallet name or id within the active backend. */
     default?: string;
-    owsEndpoint: string;
-    apiKey?: string;
+    backends: {
+      ows: OwsBackendConfig;
+      local: LocalBackendConfig;
+      exec?: ExecBackendConfig;
+      /** Third-party backends resolved as `x402-signer-<name>`. */
+      [name: string]: unknown;
+    };
   };
   limits: {
     maxPerCall?: string;
@@ -51,7 +77,13 @@ export interface X402Config {
 }
 
 export const DEFAULT_CONFIG: X402Config = {
-  wallet: { owsEndpoint: 'http://127.0.0.1:8402' },
+  wallet: {
+    backend: 'ows',
+    backends: {
+      ows: { endpoint: 'http://127.0.0.1:8402' },
+      local: {},
+    },
+  },
   limits: {},
   allowlist: { payTo: [], domains: [] },
   telemetry: {

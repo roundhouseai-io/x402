@@ -17,7 +17,7 @@ import {
   tokenAllowsCapability,
 } from '../src/serve/tokens.js';
 import { paths } from '../src/core/paths.js';
-import type { Signer } from '../src/core/ows.js';
+import type { SignerBackend } from '../src/core/signer.js';
 
 const PAY_TO = '0x1831f336585a6C67B6A954d28f3E07F44C4EEBbd';
 const USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
@@ -36,10 +36,17 @@ const requirements = (amountAtomic = '2000') => ({
   ],
 });
 
-class FakeSigner implements Signer {
+class FakeSigner implements SignerBackend {
+  readonly backend = 'fake';
   readonly wallet = 'test-wallet';
   count = 0;
-  async address() {
+  async capabilities() {
+    return { typedData: true, policies: false, balances: false, accounts: true, declared: true };
+  }
+  async getAccounts() {
+    return [{ id: this.wallet, address: await this.getAddress() }];
+  }
+  async getAddress() {
     return '0x000000000000000000000000000000000000dEaD';
   }
   async signTypedData() {
@@ -123,6 +130,7 @@ describe('serve HTTP API', () => {
       config,
       signer: async () => new FakeSigner(),
       walletName: 'test-wallet',
+      backendName: 'fake',
     });
     const server = createServeServer({
       engine,
@@ -295,6 +303,7 @@ describe('MCP server', () => {
       config: DEFAULT_CONFIG,
       signer: async () => new FakeSigner(),
       walletName: 'test-wallet',
+      backendName: 'fake',
     }),
     config: DEFAULT_CONFIG,
     version: '0.1.0',

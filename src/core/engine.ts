@@ -23,7 +23,7 @@ import { resolveTarget, type Provider } from './discover.js';
 import { parseUnits, formatUnits } from './assets.js';
 import { ulid, tagged } from './ids.js';
 import type { PayloadLevel, X402Config } from './config.js';
-import type { Signer } from './ows.js';
+import type { SignerBackend, SignerFactory } from './signer.js';
 
 export interface CallOptions {
   /** Absolute URL or `x402:<capability>`. */
@@ -41,6 +41,10 @@ export interface CallOptions {
   form?: boolean;
   bodyAlways?: boolean;
   payloadLevel?: PayloadLevel | undefined;
+  /** Wallet within the signer backend. Defaults to config `wallet.default`. */
+  wallet?: string | undefined;
+  /** Signer backend for this call. Defaults to config `wallet.backend`. */
+  signer?: string | undefined;
   /** Caller identity recorded in the ledger `agent` block (serve tokens). */
   agentToken?: string | undefined;
   /** Explicit body, bypassing data placement. */
@@ -53,6 +57,7 @@ export interface Receipt {
   url: string;
   method: string;
   wallet: string;
+  backend: string;
   scheme: string;
   network: string;
   chain: string;
@@ -95,12 +100,14 @@ export interface CallResult {
 
 export interface EngineDeps {
   config: X402Config;
-  /** Lazily created so free calls never touch OWS. */
-  signer: () => Promise<Signer>;
+  /** Lazily resolved so a free call never touches the wallet layer. */
+  signer: SignerFactory;
   sink?: TelemetrySink | undefined;
   budget?: SessionBudget | undefined;
   /** Wallet label recorded in the ledger. */
   walletName?: string | undefined;
+  /** Backend label recorded in the ledger. */
+  backendName?: string | undefined;
   now?: () => number;
 }
 
@@ -167,8 +174,8 @@ export function prepareRequest(
 export class Engine {
   private readonly config: X402Config;
   private readonly deps: EngineDeps;
-  /** Serialises signing per wallet so concurrent callers share one authorization. */
-  private signQueue: Promise<unknown> = Promise.resolve();
+  /** One signing queue per backend and wallet, so concurrent callers share one authorization. */
+  private readonly signQueues = new Map<string, Promise<unknown>>();
 
   constructor(deps: EngineDeps) {
     this.deps = deps;
@@ -177,6 +184,11 @@ export class Engine {
 
   private now(): number {
     return this.deps.now ? this.deps.now() : Date.now();
+  }
+
+  /** Resolve a signer without paying anything. Used by health checks. */
+  async signerFor(selector: { backend?: string; wallet?: string } = {}): Promise<SignerBackend> {
+    return this.deps.signer(selector);
   }
 
   private payloadLevel(override?: PayloadLevel): PayloadLevel {
@@ -384,6 +396,7 @@ export class Engine {
     record.payment.authHash = tagged(auth.signature);
     record.payment.cacheHit = auth.cacheHit === true;
     record.wallet = auth.wallet;
+    record.backend = auth.backend;
     const paymentLatencyMs = this.now() - signStarted;
 
     // 6. Paid retry.
@@ -509,9 +522,12 @@ export class Engine {
     prepared: PreparedRequest,
     opts: CallOptions,
   ): Promise<AuthCacheEntry & { cacheHit?: boolean }> {
-    const run = this.signQueue.then(async () => {
-      const signer = await this.deps.signer();
-      const from = await signer.address();
+    const signer = await this.deps.signer({ backend: opts.signer, wallet: opts.wallet });
+    const queueKey = `${signer.backend}:${signer.wallet}`;
+    const previous = this.signQueues.get(queueKey) ?? Promise.resolve();
+
+    const run = previous.then(async () => {
+      const from = await signer.getAddress();
       const key = authKey({
         url: prepared.url,
         method: prepared.method,
@@ -521,6 +537,7 @@ export class Engine {
         asset: option.asset,
         chain: option.chain,
         wallet: signer.wallet,
+        backend: signer.backend,
       });
 
       if (!opts.noCache) {
@@ -542,6 +559,7 @@ export class Engine {
         url: prepared.url,
         method: prepared.method,
         wallet: signer.wallet,
+        backend: signer.backend,
         payTo: option.payTo,
         amountAtomic: option.amountAtomic.toString(),
         asset: option.asset,
@@ -563,13 +581,16 @@ export class Engine {
       }
       return { ...entry, cacheHit: false };
     });
-    this.signQueue = run.catch(() => undefined);
+    this.signQueues.set(
+      queueKey,
+      run.catch(() => undefined),
+    );
     return run;
   }
 
-  private async assertBalance(signer: Signer, option: PaymentOption): Promise<void> {
-    if (!signer.balance) return;
-    const balance = await signer.balance(option.asset, option.chain);
+  private async assertBalance(signer: SignerBackend, option: PaymentOption): Promise<void> {
+    if (!signer.getBalance) return;
+    const balance = await signer.getBalance(option.asset, option.chain);
     if (!balance) return;
     let atomic: bigint;
     try {
@@ -598,6 +619,7 @@ export class Engine {
       url: auth.url,
       method: auth.method,
       wallet: auth.wallet,
+      backend: auth.backend,
       scheme: option.scheme,
       network: option.network,
       chain: option.chain,
@@ -641,6 +663,7 @@ export class Engine {
       url: args.url,
       method: args.method,
       wallet: this.deps.walletName ?? null,
+      ...(this.deps.backendName ? { backend: this.deps.backendName } : {}),
       ...(args.capability ? { capability: args.capability } : {}),
       ...(args.provider ? { provider: args.provider } : {}),
       request: {

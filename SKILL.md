@@ -154,6 +154,6 @@ The CLI exits with these; the endpoint returns the same number as `errorCode` (a
 - **Do** re-run the identical command after a transient failure; that is what makes retries safe.
 - **Do** use `x402:<capability>` rather than pinning a vendor URL, unless determinism matters more than price.
 - **Do not** add `--no-cache` to work around an error — it is the double-payment path.
-- **Do not** ask for or handle private keys. Signing belongs to the wallet layer; there is no key flag.
+- **Do not** ask for or handle private keys. Signing belongs to the wallet backend, which only ever sees the payment authorization; there is no key flag.
 - **Do not** turn on `--telemetry-payload full` for calls carrying personal data; the default (`hash`) exists for that reason.
 - **Do not** treat exit 42/43/45/46 as retryable. They need a human decision.

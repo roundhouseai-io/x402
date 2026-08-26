@@ -46,13 +46,13 @@ The scope is `@roundhouseai`, matching the `roundhouseai-io` GitHub org. The spe
 
 **Why:** a bare 402 payload carries no request identity (no url, method or body), so there is nothing stable to key a cache entry on. Caching on the payload alone would risk returning an authorization for a _different_ request that happened to quote the same price. `pay` is a header-building primitive; callers that need idempotency should use `call`.
 
-## 6. `--unsafe-private-key-file` also warns on group-readable files
+## 6. The `local` keystore refuses group-readable files too, and takes its passphrase from the environment only
 
-**Spec:** §9.1 requires a refusal for a world-readable key file.
+**Spec:** §9.1 requires a refusal for a world-readable keystore; §5.3 says the passphrase comes "from env or prompt".
 
-**Implementation:** refuses world-readable (as specified) and additionally prints a warning for group-readable files.
+**Implementation:** the keystore refuses a group- _or_ world-readable file, and the passphrase comes from `X402_KEYSTORE_PASS` or a config `env:` indirection. There is no interactive prompt.
 
-**Why:** strictly additive, and a group-readable key on a shared machine is nearly as bad.
+**Why:** a group-readable key on a shared machine is nearly as bad as a world-readable one, so the stricter check is free. The prompt is deliberately absent for now: the primary user is an agent with no terminal, a hidden-input prompt is easy to get wrong, and a half-working prompt is worse than a clear error telling you which variable to set. Worth adding when a human actually asks for it.
 
 ## 7. stdin is only consumed when it is genuinely readable
 
@@ -62,7 +62,15 @@ The scope is `@roundhouseai`, matching the `roundhouseai-io` GitHub org. The spe
 
 **Why:** reading a character-device stdin can block forever, which to an agent is indistinguishable from a hung payment. `cat payload.json | x402 call <url> --json -` and `x402 call <url> < payload.json` both work.
 
-## 8. MCP transport is stdio only
+## 8. `signer` is an extra command, and the keystore has one too
+
+**Spec:** §3's command table does not list a signer command; §5.3 defines the backends but no way to inspect or populate them.
+
+**Implementation:** `x402 signer list`, `x402 signer check [backend]`, `x402 signer keystore list` and `x402 signer keystore add <name> --key-file <path>`.
+
+**Why:** §5.3 rule 2 requires the CLI to fail at _config_ time when a backend cannot sign typed data, which needs a command that resolves a backend and reports its capabilities — `signer check` is that command. And a `local` backend with no way to create a keystore entry is unusable. Keys are read from a file, never from argv, and the passphrase comes from the environment.
+
+## 9. MCP transport is stdio only
 
 **Spec:** §10 mentions "stdio or SSE".
 

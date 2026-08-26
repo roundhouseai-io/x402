@@ -56,7 +56,7 @@ export async function payCommand(parsed: ParsedArgs): Promise<number> {
   });
 
   const signer = await ctx.signer();
-  const from = await signer.address();
+  const from = await signer.getAddress();
   const built = buildAuthorization({ option, from });
   const signature = await signer.signTypedData(built.typedData);
   const payload = buildPaymentPayload(option, built.typedData, signature);
@@ -66,6 +66,7 @@ export async function payCommand(parsed: ParsedArgs): Promise<number> {
     id: ulid(),
     ts: new Date().toISOString(),
     wallet: signer.wallet,
+    backend: signer.backend,
     from,
     payTo: option.payTo,
     amount: option.amount,

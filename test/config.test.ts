@@ -57,8 +57,11 @@ describe('config precedence', () => {
 
   it('resolves env: indirections at read time', () => {
     process.env.TEST_OWS_KEY = 'secret-key';
-    writeFileSync(paths.config(), JSON.stringify({ wallet: { apiKey: 'env:TEST_OWS_KEY' } }));
-    expect(loadConfig({ cwd }).config.wallet.apiKey).toBe('secret-key');
+    writeFileSync(
+      paths.config(),
+      JSON.stringify({ wallet: { backends: { ows: { apiKey: 'env:TEST_OWS_KEY' } } } }),
+    );
+    expect(loadConfig({ cwd }).config.wallet.backends.ows.apiKey).toBe('secret-key');
   });
 
   it('treats a missing env var as absent, not as a literal', () => {
@@ -88,6 +91,7 @@ describe('authorization cache', () => {
       asset: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
       chain: 'eip155:8453',
       wallet: 'my-agent',
+      backend: 'ows',
     });
 
   it('is stable for the same request identity and case-insensitive on addresses', () => {
@@ -101,6 +105,7 @@ describe('authorization cache', () => {
       asset: '0x833589FCD6EDB6E08F4C7C32D4F71B54BDA02913',
       chain: 'eip155:8453',
       wallet: 'my-agent',
+      backend: 'ows',
     });
     expect(upper).toBe(key());
   });
@@ -115,6 +120,7 @@ describe('authorization cache', () => {
       asset: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
       chain: 'eip155:8453',
       wallet: 'my-agent',
+      backend: 'ows',
     });
     expect(other).not.toBe(key());
   });
@@ -125,6 +131,7 @@ describe('authorization cache', () => {
       url: 'https://api.example.com/v1/lei',
       method: 'GET',
       wallet: 'my-agent',
+      backend: 'ows',
       payTo: '0x1831f336585a6C67B6A954d28f3E07F44C4EEBbd',
       amountAtomic: '2000',
       asset: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',

@@ -56,7 +56,9 @@ curl -s -X POST http://127.0.0.1:8403/v1/call \
       }'
 ```
 
-Body fields: `url` (required; a URL or `x402:<capability>`), `method`, `data`, `headers`, `timeout`, `max`, `chain`, `dryRun`, `noCache`, `form`, `bodyAlways`.
+Body fields: `url` (required; a URL or `x402:<capability>`), `method`, `data`, `headers`, `timeout`, `max`, `chain`, `dryRun`, `noCache`, `form`, `bodyAlways`, `wallet`, `signer`.
+
+`wallet` and `signer` select the wallet and the [signer backend](signers.md) for that one call. Both are still subject to the caller token's own limits — a token cannot widen its budget by choosing a different wallet.
 
 The response is the CLI envelope: `ok`, `status`, `paid`, `amount`, `asset`, `receiptId`, `body`, plus `capability`/`provider` when a capability was resolved.
 
@@ -74,11 +76,11 @@ Ledger queries: `since`, `until`, `paidOnly`, `limit`, `sum`, `by`. Filtered to 
 
 ### `GET /v1/health`
 
-OWS reachability, the default wallet, outbox depth, payload level and configured limits. Returns 503 when OWS is unreachable, which makes it usable as a readiness probe.
+Signer backend reachability, the active backend and wallet, outbox depth, payload level and configured limits. For the `ows` backend that is a live probe; for others it reports the capability check. Returns 503 when the wallet layer is unusable, which makes it a readiness probe.
 
 ## Concurrency and idempotency
 
-Signing is serialised per wallet and the authorization cache is shared with the CLI, so two callers requesting the identical call concurrently produce one authorization, not two.
+Signing is serialised per backend and wallet, and the authorization cache is shared with the CLI, so two callers requesting the identical call concurrently produce one authorization, not two.
 
 Send an `Idempotency-Key` and a replay within the authorization's validity window returns the original receipt without touching the provider. Response bodies are replayable only when `telemetry.payload` is `full`; otherwise the replay returns `bodyReplay: false` and no body — see [`telemetry.md`](telemetry.md) for why that trade is the right way round.
 
@@ -107,7 +109,7 @@ Example client configuration:
 }
 ```
 
-In `--mcp` mode stdout belongs to the protocol; all diagnostics go to stderr. MCP mode has no caller tokens — the client owns the process, so its spend authority is the wallet's own policy plus the global caps. Do not expose an MCP process to callers you would not hand a token to.
+In `--mcp` mode stdout belongs to the protocol; all diagnostics go to stderr. MCP mode has no caller tokens — the client owns the process, so its spend authority is the signer backend's own policy plus the global caps. Do not expose an MCP process to callers you would not hand a token to.
 
 Per the spec's open question 5, MCP is expected to stabilise in v1.1; the HTTP surface with token budgets is the v1 target.
 

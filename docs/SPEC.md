@@ -5,7 +5,7 @@
 **Owner:** Roundhouse AI Ltd
 **Date:** 26 August 2026
 
-> This is the design contract for the tool. The implementation follows it; where it knowingly departs, the departure is recorded in [`spec-deviations.md`](spec-deviations.md) with the reason. Change this document by PR, with a `spec` label.
+> This is the design contract for the tool. The implementation follows it; where it knowingly departs, the departure is recorded in [`spec-deviations.md`](spec-deviations.md) with the reason. Change this document by PR, with a `type: spec` label.
 
 ---
 
@@ -16,7 +16,7 @@ A single CLI that lets any agent make x402-paid HTTP requests with one command. 
 Design goals, in priority order:
 
 1. **One command for the whole flow.** `npx x402 <url>` should work with zero config beyond a wallet.
-2. **No raw private keys.** All signing goes through the Open Wallet Standard (OWS) agent access layer. Keys never appear in argv, env vars, or logs.
+2. **Wallet-agnostic, no raw private keys.** Signing goes through a pluggable signer backend. OWS is the reference backend, not a dependency: any wallet that can produce an EIP-712 signature can plug in. Keys never appear in argv, env vars, or logs. This is a deliberate contrast with Coinbase's `awal`, which is x402-capable but ties the agent to Coinbase custody.
 3. **Agents are the primary user.** Machine-readable output, stable exit codes, idempotent retries, and predictable failure modes matter more than pretty output.
 4. **Every transaction is observable.** Local ledger always. Remote telemetry sink (IOI indexer) optional.
 
@@ -119,8 +119,8 @@ cat payload.json | x402 call <url> --json -   # from stdin
 1. Send the request.
 2. On non-402: return response, log ledger entry with `amount: 0`.
 3. On 402: parse the x402 payment-required payload (scheme, asset, chain, amount, payTo, nonce window).
-4. **Gate checks, in order:** payTo allowlist (if configured) → `--max` per-call cap → session `--budget` → OWS policy engine. First failure aborts with the matching exit code. The OWS policy is the authoritative control; CLI-side caps are fail-fast conveniences.
-5. Build the EIP-3009 `transferWithAuthorization` typed-data payload and request a signature from OWS (`signTypedData` on the named wallet).
+4. **Gate checks, in order:** payTo allowlist (if configured) → `--max` per-call cap → session `--budget` → the signer backend's own policy layer (e.g. OWS policies). First failure aborts with the matching exit code. The backend policy is the authoritative control; CLI-side caps are fail-fast conveniences.
+5. Build the EIP-3009 `transferWithAuthorization` typed-data payload and request a signature from the configured signer backend for the named wallet.
 6. Retry the request with the `X-PAYMENT` header.
 7. Return the response and log the full ledger entry.
 
@@ -132,14 +132,44 @@ The signed authorization is cached at `~/.x402/authcache/` keyed by `hash(url + 
 
 ### 5.2 Payment flags
 
-| Flag                   | Meaning                                                            |
-| ---------------------- | ------------------------------------------------------------------ |
-| `--wallet, -w`         | OWS wallet name or id (default: config `wallet.default`)           |
-| `--max`                | Refuse if the quoted price exceeds this (asset units, e.g. `0.01`) |
-| `--budget`             | Cumulative cap for this process's lifetime                         |
-| `--chain`              | Restrict acceptable payment chains (default `base`)                |
-| `--dry-run`            | Show payment requirements, do not pay                              |
-| `--receipt-out <file>` | Write the payment receipt JSON to a file                           |
+| Flag                   | Meaning                                                                               |
+| ---------------------- | ------------------------------------------------------------------------------------- |
+| `--wallet, -w`         | Wallet name or id within the active signer backend (default: config `wallet.default`) |
+| `--signer`             | Signer backend to use for this call (default: config `wallet.backend`)                |
+| `--max`                | Refuse if the quoted price exceeds this (asset units, e.g. `0.01`)                    |
+| `--budget`             | Cumulative cap for this process's lifetime                                            |
+| `--chain`              | Restrict acceptable payment chains (default `base`)                                   |
+| `--dry-run`            | Show payment requirements, do not pay                                                 |
+| `--receipt-out <file>` | Write the payment receipt JSON to a file                                              |
+
+### 5.3 Signer backends (wallet-agnostic by design)
+
+The payment engine never touches key material. It talks to a **signer backend** through a minimal interface:
+
+```
+getAccounts()                      -> [{ id, address, chains[] }]
+getAddress(walletId, chain)        -> address
+signTypedData(walletId, payload)   -> signature      // EIP-712, required
+capabilities()                     -> { typedData: true, policies: bool, ... }
+```
+
+Anything that implements this can be the wallet. The CLI ships with:
+
+| Backend | What it is                                                                                                                              | Status          |
+| ------- | --------------------------------------------------------------------------------------------------------------------------------------- | --------------- |
+| `ows`   | Open Wallet Standard agent access layer: API-key auth, policy-gated signing                                                             | Default, v1     |
+| `local` | Encrypted keystore file (scrypt + AES-GCM), passphrase from env or prompt. Development and CI only; prints a warning on every signature | v1              |
+| `exec`  | External signer protocol: any executable speaking JSON over stdio, in the style of git credential helpers                               | v1              |
+| `awal`  | Adapter over Coinbase's Agentic Wallet CLI for teams already on it                                                                      | Candidate, v1.1 |
+
+The `exec` protocol is the escape hatch that keeps this genuinely agnostic: a hardware wallet bridge, an MPC service, a KMS wrapper, or a bespoke corporate signer is one small executable away, in any language, with no changes to the CLI. Third parties can also publish npm packages named `x402-signer-<name>` which the CLI auto-discovers.
+
+Rules for all backends:
+
+1. The interface is signature-only. Backends never receive HTTP request or response data, only the EIP-712 payload, so a malicious or buggy backend cannot exfiltrate call content.
+2. A backend that cannot do EIP-712 typed-data signing cannot be used for the x402 `exact` scheme, and the CLI fails at config time (exit 47), not at payment time.
+3. Backends may enforce their own policies and refuse to sign; refusal maps to exit 42.
+4. Backend choice is per-call (`--signer`), per-project (`.x402rc`), or global (config). Ledger records include the backend name.
 
 ---
 
@@ -234,9 +264,13 @@ x402 history --by payTo --sum          # spend grouped by recipient
 ```json
 {
   "wallet": {
+    "backend": "ows",
     "default": "my-agent",
-    "owsEndpoint": "http://127.0.0.1:8402",
-    "apiKey": "env:OWS_API_KEY"
+    "backends": {
+      "ows": { "endpoint": "http://127.0.0.1:8402", "apiKey": "env:OWS_API_KEY" },
+      "local": { "keystore": "~/.x402/keystore.json", "passphrase": "env:X402_KEYSTORE_PASS" },
+      "exec": { "command": "/usr/local/bin/my-signer" }
+    }
   },
   "limits": { "maxPerCall": "0.05", "dailyCap": "5.00" },
   "allowlist": { "payTo": [], "domains": [] },
@@ -245,7 +279,7 @@ x402 history --by payTo --sum          # spend grouped by recipient
 }
 ```
 
-Empty allowlists mean allow-all. `limits.dailyCap` is enforced CLI-side from the ledger **and** should be mirrored as an OWS policy; the CLI check is advisory, the OWS policy is binding.
+Empty allowlists mean allow-all. `limits.dailyCap` is enforced CLI-side from the ledger **and** should be mirrored in the signer backend's policy layer where one exists; the CLI check is advisory, the backend policy is binding. Backends without a policy layer (e.g. `local`) have only the CLI-side caps, which is one reason `local` is dev-only.
 
 ---
 
@@ -272,12 +306,12 @@ With a TTY, human-readable output. Without one (the agent case), a JSON envelope
 | 0    | Success (paid or free)                                                                                   |
 | 1    | Generic / network error                                                                                  |
 | 40   | Invalid 402 payload (endpoint not x402-compliant)                                                        |
-| 42   | Denied by OWS policy                                                                                     |
+| 42   | Denied by signer backend policy                                                                          |
 | 43   | Denied by payTo/domain allowlist                                                                         |
 | 44   | Price exceeds `--max`                                                                                    |
 | 45   | Session budget or daily cap exhausted                                                                    |
 | 46   | Insufficient wallet balance                                                                              |
-| 47   | OWS unreachable or auth failed                                                                           |
+| 47   | Signer backend unreachable, auth failed, or lacks typed-data capability                                  |
 | 50   | Payment sent, but no valid response returned (receipt logged, investigate before retrying without cache) |
 
 Agents branch on exit codes; the codes are a stability contract from v1.
@@ -286,11 +320,11 @@ Agents branch on exit codes; the codes are a stability contract from v1.
 
 ## 9. Security requirements
 
-1. **No raw key flags.** There is no `--private-key`. A `--unsafe-private-key-file <path>` flag exists for local development only, reads from file (never argv), prints a warning to stderr on every use, and refuses to run if the file is world-readable.
-2. All signing via OWS `signTypedData`. The CLI holds an OWS API key, scoped to the named wallet, with policies attached.
+1. **No raw key flags.** There is no `--private-key`. Development keys live only in the `local` backend's encrypted keystore; the keystore refuses to load if the file is world-readable, and every `local` signature prints a warning to stderr.
+2. All signing via a signer backend's `signTypedData` (section 5.3). The CLI holds a backend credential (e.g. an OWS API key) scoped to the named wallet, never key material. Backends receive only the EIP-712 payload, never request or response data.
 3. Auth headers redacted from all telemetry, all levels.
-4. Ledger and authcache files created `0600`.
-5. The CLI never escalates: if OWS denies, the call fails. No fallback signing path.
+4. Ledger, authcache, and keystore files created `0600`.
+5. The CLI never escalates: if the backend denies or lacks the capability, the call fails. No fallback signing path, and no automatic fallback from one backend to another.
 
 ---
 
@@ -327,7 +361,7 @@ Response is the same JSON envelope as the CLI (section 8): `ok`, `status`, `paid
 
 **`GET /v1/history`** - ledger queries, filtered to the calling token's own records unless the token has the `admin` scope.
 
-**`GET /v1/health`** - OWS reachability, wallet balance summary, outbox depth.
+**`GET /v1/health`** - signer backend reachability, wallet balance summary, outbox depth.
 
 ### 10.2 Capability addressing
 
@@ -355,7 +389,7 @@ The unified endpoint is a spend-authorized proxy. Anything that can reach it can
 
 - Binds to `127.0.0.1` by default. `--host 0.0.0.0` requires `--i-understand-this-exposes-spending` and TLS config, and is still discouraged; put real network exposure behind your own gateway.
 - Callers authenticate with tokens minted via `x402 serve token create <name> --budget-daily 1.00 --max-per-call 0.01 [--capabilities lei,kyb] [--admin]`. Tokens are stored hashed.
-- Per-token budgets are enforced by the server from the ledger, on top of (not instead of) the global caps and the OWS policy layer. Ledger records carry the token name in the `agent` block, so `x402 history --by agent --sum` gives per-agent spend.
+- Per-token budgets are enforced by the server from the ledger, on top of (not instead of) the global caps and any signer backend policy layer. Ledger records carry the token name in the `agent` block, so `x402 history --by agent --sum` gives per-agent spend.
 - Token limits fail with the same exit-code taxonomy (`45` budget exhausted, `44` over per-call max) surfaced as `errorCode`.
 
 ### 10.5 Concurrency and idempotency
@@ -372,8 +406,10 @@ Ship a `SKILL.md` with the package documenting exactly three flows: `probe` (wha
 
 ## 12. Open questions (blocking v1)
 
-1. **Does OWS expose EIP-712 typed-data signing?** The published core types show `signMessage` with `utf8`/`hex` encodings only. EIP-3009 requires typed-data signing. If absent, this is an upstream OWS issue to raise before any CLI code is written; without it the tool cannot exist in its intended form.
+1. **Does OWS expose EIP-712 typed-data signing?** The published core types show `signMessage` with `utf8`/`hex` encodings only. EIP-3009 requires typed-data signing. The signer abstraction (5.3) means this no longer blocks the CLI itself (the `local` backend can ship first), but OWS as the flagship backend needs it; raise upstream early.
 2. **402 payload variance.** How strictly do live providers follow the x402 spec? `probe` should be run against the current IOI index to size the compatibility shim needed in the 402 parser.
 3. **Receipt verification.** Facilitator settlement confirmation vs direct on-chain lookup for `verify`. Facilitator is simpler; on-chain is trustless. Proposal: facilitator in v1, on-chain in v1.1.
 4. **Multi-option 402s.** When a provider offers several payment options (chains/assets), selection order is: config `defaults.chain`, then cheapest. Confirm this is the right tiebreak.
 5. **Serve scope for v1.** Shipping CLI + serve + MCP together is three surfaces to stabilise at once. Proposal: v1 ships CLI and `serve` HTTP with token budgets; MCP mode and capability pinning land in v1.1 unless an agent fleet needs MCP on day one.
+6. **Prior art on the signer abstraction.** Solana Foundation's `pay` already describes a model where the CLI prepares the payment and asks a local "wallet backend" to authorize the signature. Review its backend interface before finalising 5.3: adopting or staying compatible with an existing signer protocol is better than inventing a fourth one, and contributing an OWS backend to `pay` remains a live alternative to building the whole CLI.
+7. **`exec` signer protocol spec.** The JSON-over-stdio protocol needs its own one-page spec (framing, timeout, error mapping, version negotiation) before third parties can build against it.

@@ -44,3 +44,5 @@ Two of these need care:
 **Exit 50 is the one that costs money.** It means the authorization was handed to the provider and the response was lost. The authorization is cached, so re-running the identical command is safe and is the correct response — it either gets the paid response the first attempt missed or fails cleanly. Adding `--no-cache` after a 50 is how you pay twice.
 
 **Exits 42, 43, 45 and 46 are human decisions.** They are not transient. Retrying them wastes calls and, in the case of 42, generates policy-denial noise in the wallet audit log. Report and stop.
+
+**Exit 47 covers the whole wallet layer.** It means the signer backend is unreachable, rejected the CLI's credential, or cannot sign EIP-712 typed data at all. The last case is caught when the signer is resolved — before any HTTP request — so a backend that cannot do x402 fails at config time rather than mid-payment. Retry once, then treat the wallet layer as down.

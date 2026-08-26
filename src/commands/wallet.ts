@@ -2,40 +2,42 @@ import { X402Error, ExitCode } from '../core/errors.js';
 import { writeJson, isTty } from '../core/output.js';
 import { str, type ParsedArgs } from '../core/args.js';
 import { buildContext } from './context.js';
-import { findAsset } from '../core/assets.js';
-import { findChain, caip2 } from '../core/assets.js';
+import { findAsset, findChain, caip2 } from '../core/assets.js';
 
-/** Passthrough to OWS: list wallets, show an address, read a balance. */
+/** Wallet queries against the active signer backend. */
 export async function walletCommand(parsed: ParsedArgs): Promise<number> {
   const ctx = buildContext(parsed);
   const sub = parsed.positionals[0] ?? 'list';
 
   if (sub === 'list') {
-    const wallets = await ctx.ows.listWallets();
+    const signer = await ctx.signer();
+    const accounts = await signer.getAccounts();
     if (isTty()) {
-      if (wallets.length === 0) process.stdout.write('no wallets\n');
-      for (const w of wallets) {
-        const mark = w.name === ctx.walletName || w.id === ctx.walletName ? '*' : ' ';
-        process.stdout.write(`${mark} ${w.name ?? w.id}  ${w.address}\n`);
+      if (accounts.length === 0) process.stdout.write('no wallets\n');
+      for (const a of accounts) {
+        const mark = a.id === ctx.walletName ? '*' : ' ';
+        process.stdout.write(`${mark} ${a.id}  ${a.address}\n`);
       }
     } else {
-      writeJson({ ok: true, default: ctx.walletName, wallets });
+      writeJson({
+        ok: true,
+        backend: signer.backend,
+        default: ctx.walletName ?? null,
+        wallets: accounts,
+      });
     }
     return ExitCode.OK;
   }
 
   if (sub === 'address') {
     const signer = await ctx.signer();
-    const address = await signer.address();
+    const address = await signer.getAddress();
     if (isTty()) process.stdout.write(`${address}\n`);
-    else writeJson({ ok: true, wallet: signer.wallet, address });
+    else writeJson({ ok: true, backend: signer.backend, wallet: signer.wallet, address });
     return ExitCode.OK;
   }
 
   if (sub === 'balance') {
-    if (!ctx.walletName) {
-      throw new X402Error(ExitCode.OWS_UNREACHABLE, 'no wallet selected: pass --wallet');
-    }
     const chainName = str(parsed.flags, 'chain') ?? ctx.config.defaults.chain;
     const chain = findChain(chainName);
     if (!chain) throw new X402Error(ExitCode.GENERIC, `unknown chain: ${chainName}`);
@@ -46,16 +48,25 @@ export async function walletCommand(parsed: ParsedArgs): Promise<number> {
         `unknown asset on ${chain.network}: ${parsed.positionals[1]}`,
       );
     }
-    const balance = await ctx.ows.balance(ctx.walletName, asset.address, caip2(chain.chainId));
+
+    const signer = await ctx.signer();
+    if (!signer.getBalance) {
+      throw new X402Error(
+        ExitCode.OWS_UNREACHABLE,
+        `the ${signer.backend} backend cannot report balances`,
+      );
+    }
+    const balance = await signer.getBalance(asset.address, caip2(chain.chainId));
     if (isTty()) {
       process.stdout.write(`${balance?.amount ?? 'unknown'} ${asset.symbol} on ${chain.network}\n`);
     } else {
       writeJson({
         ok: balance !== undefined,
-        wallet: ctx.walletName,
+        backend: signer.backend,
+        wallet: signer.wallet,
         asset: asset.symbol,
         chain: caip2(chain.chainId),
-        amount: balance?.amount,
+        amount: balance?.amount ?? null,
       });
     }
     return balance ? ExitCode.OK : ExitCode.GENERIC;

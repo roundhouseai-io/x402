@@ -17,6 +17,7 @@ export interface AuthCacheEntry {
   url: string;
   method: string;
   wallet: string;
+  backend: string;
   payTo: string;
   amountAtomic: string;
   asset: string;
@@ -40,6 +41,7 @@ export interface AuthKeyInput {
   asset: string;
   chain: string;
   wallet: string;
+  backend: string;
 }
 
 export function authKey(input: AuthKeyInput): string {
@@ -52,6 +54,7 @@ export function authKey(input: AuthKeyInput): string {
       input.amountAtomic.toString(),
       input.asset.toLowerCase(),
       input.chain,
+      input.backend,
       input.wallet,
     ].join('|'),
   );

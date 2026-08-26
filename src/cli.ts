@@ -10,6 +10,7 @@ import { walletCommand } from './commands/wallet.js';
 import { historyCommand } from './commands/history.js';
 import { discoverCommand } from './commands/discover.js';
 import { configCommand } from './commands/config.js';
+import { signerCommand } from './commands/signer.js';
 import { serveCommand } from './commands/serve.js';
 
 const HELP = `x402 ${VERSION} — one command for the whole x402 payment loop
@@ -20,11 +21,13 @@ usage
   x402 probe <url>                    fetch payment requirements only; never pays
   x402 pay <402-json|@file|->         build a signed X-PAYMENT header; no HTTP
   x402 verify <receiptId|@file>       confirm settlement of a prior payment
-  x402 wallet <list|balance|address>  passthrough to OWS
+  x402 wallet <list|balance|address>  wallet queries against the signer backend
   x402 history [urlSubstring]         query the local ledger
   x402 discover <capability>          providers for a capability, cheapest first
   x402 serve [--mcp]                  run the unified local endpoint
   x402 serve token <create|list|revoke>
+  x402 signer <list|check>            inspect signer backends and capabilities
+  x402 signer keystore <list|add>     manage the local development keystore
   x402 config <get|set|list>          manage ~/.x402/config.json
 
 data
@@ -44,7 +47,8 @@ request
       --body-always                   force a body on GET/HEAD/DELETE
 
 payment
-  -w, --wallet <name>                 OWS wallet (default: config wallet.default)
+  -w, --wallet <name>                 wallet within the backend (default: config wallet.default)
+      --signer <backend>              signer backend: ows | local | exec | x402-signer-<name>
       --max <amount>                  refuse if the quoted price exceeds this
       --budget <amount>               cumulative cap for this process
       --chain <name>                  acceptable chain (default base)
@@ -54,8 +58,8 @@ payment
       --telemetry-payload <level>     none | hash | full (default hash)
 
 exit codes
-  0 ok   1 error   40 invalid 402   42 OWS policy   43 allowlist   44 over --max
-  45 budget/daily cap   46 balance   47 OWS unreachable   50 paid, no valid response
+  0 ok   1 error   40 invalid 402   42 signer policy   43 allowlist   44 over --max
+  45 budget/daily cap   46 balance   47 signer unavailable   50 paid, no valid response
 
 docs  https://github.com/roundhouseai-io/x402
 `;
@@ -78,6 +82,8 @@ async function run(parsed: ParsedArgs): Promise<number> {
       return discoverCommand(parsed);
     case 'serve':
       return serveCommand(parsed);
+    case 'signer':
+      return signerCommand(parsed);
     case 'config':
       return configCommand(parsed);
     case 'version':

@@ -115,3 +115,7 @@ Tests never touch the network and never touch a real `~/.x402`: they stub `fetch
 Seven questions block v1 and are tracked as issues; they are listed in [`docs/roadmap.md`](docs/roadmap.md). **OWS must expose EIP-712 typed-data signing** (`signTypedData`): its published core types show `signMessage` with `utf8`/`hex` only, and EIP-3009 cannot be signed with either. `core/ows.ts` calls `POST /v1/wallets/:wallet/sign-typed-data` and maps a 404/405/501 onto a clear exit 47. Since the signer abstraction landed this no longer blocks the tool — `local` and `exec` work today — but it does block OWS as the flagship backend. Two newer questions matter before the interface sets: reviewing prior art (Solana's `pay` describes a similar wallet-backend split) and pinning down the `exec` protocol, drafted in [`docs/exec-signer.md`](docs/exec-signer.md).
 
 Also note `npx x402` cannot resolve to this package: the unscoped `x402` name on npm belongs to another project. The zero-install form is `npx @roundhouseai/x402 <url>`; a global install still gives you the `x402` binary. Do not write docs that promise otherwise.
+
+## Workflow gotcha worth remembering
+
+A job-level `permissions:` block in a GitHub Actions workflow **replaces** the workflow-level one; it does not merge. A job that needs `contents: read` must say so even when the workflow already grants it, or `actions/checkout` fails with `remote: Repository not found` — which reads like a missing repo rather than a missing scope. `.github/workflows/codeql.yml` learned this the hard way.

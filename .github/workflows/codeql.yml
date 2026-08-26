@@ -16,6 +16,10 @@ jobs:
     name: analyze
     runs-on: ubuntu-latest
     permissions:
+      # A job-level block replaces the workflow-level one rather than merging
+      # with it, so contents: read has to be repeated here or checkout cannot
+      # fetch the repository.
+      contents: read
       security-events: write
       actions: read
     steps:

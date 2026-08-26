@@ -3,17 +3,17 @@
 **One command for the whole x402 payment loop.** Request, 402, sign, retry, receipt — with spend limits, a local ledger, and no private keys anywhere near your shell.
 
 [![CI](https://github.com/roundhouseai-io/x402/actions/workflows/ci.yml/badge.svg)](https://github.com/roundhouseai-io/x402/actions/workflows/ci.yml)
-[![npm](https://img.shields.io/npm/v/@roundhouse/x402.svg)](https://www.npmjs.com/package/@roundhouse/x402)
-[![node](https://img.shields.io/node/v/@roundhouse/x402.svg)](https://nodejs.org)
+[![npm](https://img.shields.io/npm/v/@roundhouseai/x402.svg)](https://www.npmjs.com/package/@roundhouseai/x402)
+[![node](https://img.shields.io/node/v/@roundhouseai/x402.svg)](https://nodejs.org)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 ```bash
-npx @roundhouse/x402 https://api.example.com/v1/lei --data.query "Amplify Limited"
+npx @roundhouseai/x402 https://api.example.com/v1/lei --data.query "Amplify Limited"
 ```
 
 With a wallet configured, that one line does: GET with a query param → receives 402 → checks the price against your limits → signs an EIP-3009 authorization via your OWS wallet → retries with `X-PAYMENT` → prints the JSON body → writes a ledger entry.
 
-> **On `npx x402`** — the unscoped `x402` name on npm belongs to another project, so the zero-install form is `npx @roundhouse/x402`. A global install (`npm i -g @roundhouse/x402`) gives you the short `x402` command.
+> **On `npx x402`** — the unscoped `x402` name on npm belongs to another project, so the zero-install form is `npx @roundhouseai/x402`. A global install (`npm i -g @roundhouseai/x402`) gives you the short `x402` command.
 
 ## Why
 
@@ -29,8 +29,8 @@ Paying for an HTTP call from an agent normally means gluing together a 402 parse
 ## Install
 
 ```bash
-npm i -g @roundhouse/x402      # then: x402 <url>
-npx @roundhouse/x402 <url>     # or zero-install
+npm i -g @roundhouseai/x402      # then: x402 <url>
+npx @roundhouseai/x402 <url>     # or zero-install
 ```
 
 Node 20.10+ is required. Then point it at your OWS endpoint and pick a wallet:

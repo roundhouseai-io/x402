@@ -47,9 +47,9 @@ Before 1.0 the same rules apply, but breaking changes go in a minor. `0.x` means
 ## Checking a release
 
 ```bash
-npm view @roundhouse/x402 version
-npm view @roundhouse/x402 dist.tarball
-npx @roundhouse/x402@latest --version
+npm view @roundhouseai/x402 version
+npm view @roundhouseai/x402 dist.tarball
+npx @roundhouseai/x402@latest --version
 ```
 
 The npm page shows the provenance badge; `npm audit signatures` verifies it locally.
@@ -77,7 +77,7 @@ Then create the GitHub Release by hand from the tag, with the changelog section 
 Do not unpublish. Deprecate and supersede:
 
 ```bash
-npm deprecate @roundhouse/x402@0.1.3 "double-payment bug; upgrade to 0.1.4"
+npm deprecate @roundhouseai/x402@0.1.3 "double-payment bug; upgrade to 0.1.4"
 ```
 
 Then release the fix, and note it in the affected GitHub Release. If the bug can cost users money, follow `SECURITY.md` and issue an advisory as well.

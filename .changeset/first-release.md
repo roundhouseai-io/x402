@@ -1,5 +1,5 @@
 ---
-'@roundhouse/x402': minor
+'@roundhouseai/x402': minor
 ---
 
 First release. One command for the whole x402 payment loop.

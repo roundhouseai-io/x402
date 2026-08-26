@@ -28,7 +28,7 @@ Non-goals for v1: non-Base chains, non-USDC assets, streaming responses, browser
 
 ```bash
 npx x402 <url> [flags]          # zero-install via npx
-npm i -g @roundhouse/x402       # or global install
+npm i -g @roundhouseai/x402     # or global install
 ```
 
 The bare form `npx x402 <url>` is sugar for `npx x402 call <url>`. If the first argument looks like a URL, `call` is assumed. This is the "very easy" path:

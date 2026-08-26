@@ -4,7 +4,7 @@ Guidance for Claude Code and other agents working in this repository. Humans sho
 
 ## What this is
 
-`@roundhouse/x402` is a CLI that makes x402-paid HTTP requests in one command. It runs the whole payment loop (request → 402 → gate → sign → retry → receipt), delegates all signing to an [Open Wallet Standard](https://github.com/open-wallet-standard) (OWS) agent access layer, enforces spend limits, and records every call in a local ledger.
+`@roundhouseai/x402` is a CLI that makes x402-paid HTTP requests in one command. It runs the whole payment loop (request → 402 → gate → sign → retry → receipt), delegates all signing to an [Open Wallet Standard](https://github.com/open-wallet-standard) (OWS) agent access layer, enforces spend limits, and records every call in a local ledger.
 
 The primary user is an **agent**, not a human. Machine-readable output, stable exit codes, idempotent retries and predictable failure modes matter more than pretty output.
 
@@ -108,4 +108,4 @@ Tests never touch the network and never touch a real `~/.x402`: they stub `fetch
 
 Five questions block v1 and are tracked as issues; they are listed in [`docs/roadmap.md`](docs/roadmap.md). The load-bearing one: **OWS must expose EIP-712 typed-data signing** (`signTypedData`). Its published core types show `signMessage` with `utf8`/`hex` only, and EIP-3009 cannot be signed with either. `core/ows.ts` calls `POST /v1/wallets/:wallet/sign-typed-data` and maps a 404/405/501 onto a clear error, so the CLI degrades honestly until upstream confirms the method.
 
-Also note `npx x402` cannot resolve to this package: the unscoped `x402` name on npm belongs to another project. The zero-install form is `npx @roundhouse/x402 <url>`; a global install still gives you the `x402` binary. Do not write docs that promise otherwise.
+Also note `npx x402` cannot resolve to this package: the unscoped `x402` name on npm belongs to another project. The zero-install form is `npx @roundhouseai/x402 <url>`; a global install still gives you the `x402` binary. Do not write docs that promise otherwise.

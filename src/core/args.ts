@@ -1,0 +1,210 @@
+import { X402Error, ExitCode } from './errors.js';
+import type { DataFlag } from './data.js';
+
+export type FlagKind = 'string' | 'number' | 'boolean' | 'list';
+
+/**
+ * Flag table. Explicit kinds keep `--dry-run <url>` from swallowing the URL,
+ * which is the classic hand-rolled-parser bug.
+ */
+export const FLAGS: Record<string, { kind: FlagKind; alias?: string }> = {
+  // request
+  method: { kind: 'string', alias: 'X' },
+  header: { kind: 'list', alias: 'H' },
+  timeout: { kind: 'number' },
+  out: { kind: 'string' },
+  raw: { kind: 'boolean' },
+  json: { kind: 'string' },
+  form: { kind: 'boolean' },
+  'body-always': { kind: 'boolean' },
+  'data-strings': { kind: 'boolean' },
+  // payment
+  wallet: { kind: 'string', alias: 'w' },
+  max: { kind: 'string' },
+  budget: { kind: 'string' },
+  chain: { kind: 'string' },
+  'dry-run': { kind: 'boolean' },
+  'receipt-out': { kind: 'string' },
+  'no-cache': { kind: 'boolean' },
+  'unsafe-private-key-file': { kind: 'string' },
+  // telemetry
+  'telemetry-payload': { kind: 'string' },
+  // output / global
+  config: { kind: 'string' },
+  help: { kind: 'boolean', alias: 'h' },
+  version: { kind: 'boolean', alias: 'V' },
+  quiet: { kind: 'boolean', alias: 'q' },
+  verbose: { kind: 'boolean', alias: 'v' },
+  // history
+  since: { kind: 'string' },
+  until: { kind: 'string' },
+  'paid-only': { kind: 'boolean' },
+  sum: { kind: 'boolean' },
+  by: { kind: 'string' },
+  limit: { kind: 'number' },
+  // discover
+  capability: { kind: 'string' },
+  // serve
+  host: { kind: 'string' },
+  port: { kind: 'number' },
+  mcp: { kind: 'boolean' },
+  'i-understand-this-exposes-spending': { kind: 'boolean' },
+  'budget-daily': { kind: 'string' },
+  'max-per-call': { kind: 'string' },
+  capabilities: { kind: 'string' },
+  admin: { kind: 'boolean' },
+  // verify / pay
+  receipt: { kind: 'string' },
+  file: { kind: 'string' },
+};
+
+const ALIASES: Record<string, string> = Object.fromEntries(
+  Object.entries(FLAGS)
+    .filter(([, spec]) => spec.alias)
+    .map(([name, spec]) => [spec.alias!, name]),
+);
+
+export interface ParsedArgs {
+  command: string | undefined;
+  positionals: string[];
+  flags: Record<string, string | number | boolean | string[]>;
+  dataFlags: DataFlag[];
+}
+
+const looksLikeUrl = (s: string) => /^(https?:\/\/|x402:)/i.test(s);
+
+/** Commands that exist. Used to decide whether argv[0] is a command or a URL. */
+export const COMMANDS = [
+  'call',
+  'probe',
+  'pay',
+  'verify',
+  'wallet',
+  'history',
+  'discover',
+  'serve',
+  'config',
+  'help',
+  'version',
+] as const;
+
+export function parseArgs(argv: string[]): ParsedArgs {
+  const flags: ParsedArgs['flags'] = {};
+  const dataFlags: DataFlag[] = [];
+  const positionals: string[] = [];
+  let sawTerminator = false;
+
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i]!;
+
+    if (sawTerminator) {
+      positionals.push(arg);
+      continue;
+    }
+    if (arg === '--') {
+      sawTerminator = true;
+      continue;
+    }
+
+    if (arg.startsWith('--data.') || arg.startsWith('--data[')) {
+      const body = arg.slice('--data'.length).replace(/^\./, '');
+      const eq = body.indexOf('=');
+      if (eq >= 0) {
+        dataFlags.push({ path: body.slice(0, eq), value: body.slice(eq + 1) });
+      } else {
+        const next = argv[++i];
+        if (next === undefined) throw new X402Error(ExitCode.GENERIC, `${arg} needs a value`);
+        dataFlags.push({ path: body, value: next });
+      }
+      continue;
+    }
+
+    if (arg.startsWith('--') || (arg.startsWith('-') && arg.length > 1 && !looksLikeUrl(arg))) {
+      const isLong = arg.startsWith('--');
+      let name = isLong ? arg.slice(2) : arg.slice(1);
+      let inline: string | undefined;
+      const eq = name.indexOf('=');
+      if (eq >= 0) {
+        inline = name.slice(eq + 1);
+        name = name.slice(0, eq);
+      }
+      if (!isLong) name = ALIASES[name] ?? name;
+
+      let negated = false;
+      let spec = FLAGS[name];
+      if (!spec && name.startsWith('no-')) {
+        const positive = name.slice(3);
+        if (FLAGS[positive]?.kind === 'boolean') {
+          spec = FLAGS[positive];
+          name = positive;
+          negated = true;
+        }
+      }
+      if (!spec) throw new X402Error(ExitCode.GENERIC, `unknown flag: ${arg}`);
+
+      if (spec.kind === 'boolean') {
+        flags[name] = negated ? false : inline === undefined ? true : inline !== 'false';
+        continue;
+      }
+
+      const value = inline ?? argv[++i];
+      if (value === undefined) throw new X402Error(ExitCode.GENERIC, `${arg} needs a value`);
+      if (spec.kind === 'number') {
+        const n = Number(value);
+        if (!Number.isFinite(n)) throw new X402Error(ExitCode.GENERIC, `${arg} needs a number`);
+        flags[name] = n;
+      } else if (spec.kind === 'list') {
+        const existing = Array.isArray(flags[name]) ? (flags[name] as string[]) : [];
+        flags[name] = [...existing, value];
+      } else {
+        flags[name] = value;
+      }
+      continue;
+    }
+
+    positionals.push(arg);
+  }
+
+  let command: string | undefined;
+  const first = positionals[0];
+  if (first !== undefined) {
+    if ((COMMANDS as readonly string[]).includes(first)) {
+      command = positionals.shift();
+    } else if (looksLikeUrl(first)) {
+      // `x402 <url>` is sugar for `x402 call <url>`.
+      command = 'call';
+    }
+  }
+
+  return { command, positionals, flags, dataFlags };
+}
+
+export function str(flags: ParsedArgs['flags'], name: string): string | undefined {
+  const v = flags[name];
+  return typeof v === 'string' ? v : undefined;
+}
+
+export function num(flags: ParsedArgs['flags'], name: string): number | undefined {
+  const v = flags[name];
+  return typeof v === 'number' ? v : undefined;
+}
+
+export function bool(flags: ParsedArgs['flags'], name: string): boolean {
+  return flags[name] === true;
+}
+
+export function list(flags: ParsedArgs['flags'], name: string): string[] {
+  const v = flags[name];
+  return Array.isArray(v) ? v : [];
+}
+
+/** Parse repeatable `-H "Name: value"` into a header map. */
+export function parseHeaders(raw: string[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const item of raw) {
+    const idx = item.indexOf(':');
+    if (idx <= 0) throw new X402Error(ExitCode.GENERIC, `malformed --header: ${item}`);
+    out[item.slice(0, idx).trim()] = item.slice(idx + 1).trim();
+  }
+  return out;
+}

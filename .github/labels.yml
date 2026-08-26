@@ -1,0 +1,79 @@
+# Source of truth for repository labels. Synced by .github/workflows/labels.yml
+# on push to main. Add labels here, not in the UI.
+
+# --- type: what kind of change is this ---
+- name: 'type: bug'
+  color: d73a4a
+  description: Behaves differently from the spec or the docs
+- name: 'type: feature'
+  color: 0e8a16
+  description: New capability, flag, command or route
+- name: 'type: provider-compat'
+  color: fbca04
+  description: A live provider's 402 payload or settlement does not work
+- name: 'type: spec'
+  color: 5319e7
+  description: Change to docs/SPEC.md, or an open question
+- name: 'type: docs'
+  color: 006b75
+  description: Documentation only
+- name: 'type: chore'
+  color: ededed
+  description: Tooling, dependencies, CI
+
+# --- area: where in the code ---
+- name: 'area: payment-path'
+  color: b60205
+  description: 402 parsing, gates, signing, X-PAYMENT, idempotency
+- name: 'area: cli'
+  color: 1d76db
+  description: Commands, flags, argv parsing, output
+- name: 'area: serve'
+  color: 1d76db
+  description: The unified HTTP endpoint and caller tokens
+- name: 'area: mcp'
+  color: 1d76db
+  description: The MCP surface
+- name: 'area: telemetry'
+  color: 1d76db
+  description: Ledger, payload levels, redaction, sink
+- name: 'area: ows'
+  color: 1d76db
+  description: Wallet integration and signing
+- name: 'area: discovery'
+  color: 1d76db
+  description: IOI index, capabilities, pins
+
+# --- state: what needs to happen next ---
+- name: 'needs: triage'
+  color: e4e669
+  description: Not yet assessed
+- name: 'needs: decision'
+  color: e4e669
+  description: Blocked on a maintainer decision
+- name: 'needs: upstream'
+  color: e4e669
+  description: Blocked on OWS, a provider, or a facilitator
+- name: 'needs: repro'
+  color: e4e669
+  description: Cannot act without a reproduction
+
+# --- risk and process ---
+- name: 'breaking'
+  color: b60205
+  description: Changes exit codes, the envelope, or default behaviour
+- name: 'security'
+  color: b60205
+  description: Security-relevant, but not an embargoed vulnerability
+- name: 'blocks: v1'
+  color: 5319e7
+  description: One of the spec's blocking open questions
+- name: 'release: skip'
+  color: ededed
+  description: Deliberately ships without a changeset
+- name: 'good first issue'
+  color: 7057ff
+  description: Small, self-contained, well-specified
+- name: 'help wanted'
+  color: 008672
+  description: Maintainers would welcome a PR

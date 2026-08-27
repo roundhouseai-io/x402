@@ -171,14 +171,22 @@ describe('discover', () => {
     expect((await resolveTarget('x402:lei', config())).url).toBe('https://a.example/lei');
   });
 
-  it('passes an unrecognised network through unchanged', async () => {
-    stubIndex({ endpoints: [endpoint({ network: 'eip155:999999', asset: undefined })] });
+  it('passes an unrecognised network and asset through verbatim', async () => {
+    const unknownAsset = '0xdEaD00000000000000000000000000000000BEEF';
+    stubIndex({ endpoints: [endpoint({ network: 'eip155:999999', asset: unknownAsset })] });
 
     const [p] = await discover('lei', config());
 
+    // Neither is in the tables, so neither is renamed — and neither is dropped.
     expect(p?.chain).toBe('eip155:999999');
-    // An asset that is not in the tables is not renamed either.
-    expect(p?.asset).toBe('usdc');
+    expect(p?.asset).toBe(unknownAsset);
+  });
+
+  it('falls back to usdc only when the index states no asset at all', async () => {
+    stubIndex({ endpoints: [endpoint({ asset: undefined })] });
+
+    // The price came from `price_usdc`, so the asset is implied rather than read.
+    expect((await discover('lei', config()))[0]?.asset).toBe('usdc');
   });
 
   it('fabricates nothing from null fields, and falls back for a null service_name', async () => {

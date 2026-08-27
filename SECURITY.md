@@ -40,5 +40,5 @@ Pre-1.0, only the latest published version is supported. Fixes ship as a new rel
 ## Our side of the deal
 
 - Advisories are published through GitHub Security Advisories with a CVE where one is warranted.
-- Packages are published from CI with [npm provenance](https://docs.npmjs.com/generating-provenance-statements), so you can verify that a tarball came from this repository and this commit (`npm audit signatures`).
+- Packages are published from CI, never from a laptop, and every release runs the full test suite first. They currently carry **no** [npm provenance](https://docs.npmjs.com/generating-provenance-statements): npm only attests builds from a public source repository and this one is private, so `npm audit signatures` has nothing to check. [`docs/releasing.md`](docs/releasing.md) records what that costs and how to restore it.
 - We do not unpublish. A bad version is deprecated with a message pointing at the fix, so lockfiles keep resolving while telling you what happened.

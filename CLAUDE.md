@@ -111,7 +111,7 @@ Tests never touch the network and never touch a real `~/.x402`: they stub `fetch
 - **Branches:** `claude/<topic>` for agent work, `feat/<topic>`, `fix/<topic>` otherwise. `main` is protected; every change lands by PR.
 - **Commits:** imperative subject, no model or tool names in the message.
 - **Issues:** use the forms in `.github/ISSUE_TEMPLATE/`. Labels are declared in `.github/labels.yml` and synced by a workflow — add labels there, not by hand in the UI.
-- **Releases:** [Changesets](https://github.com/changesets/changesets) → npm + a GitHub Release. Every user-visible PR carries a changeset (`npx changeset`); **merging it to `main` publishes**, with no approval step in between, so the changeset's bump is a reviewable part of the PR. Full process in [`docs/releasing.md`](docs/releasing.md). Do not bump the version in `package.json` by hand and do not publish from a laptop; CI publishes with npm provenance.
+- **Releases:** [Changesets](https://github.com/changesets/changesets) → npm + a GitHub Release. Every user-visible PR carries a changeset (`npx changeset`); **merging it to `main` publishes**, with no approval step in between, so the changeset's bump is a reviewable part of the PR. Full process in [`docs/releasing.md`](docs/releasing.md). Do not bump the version in `package.json` by hand and do not publish from a laptop. CI publishes without npm provenance — it needs a public source repository and this one is private; [`docs/releasing.md`](docs/releasing.md) has the detail.
 - **Security:** never open a public issue for a spend-affecting bug. See `SECURITY.md`.
 
 ## Known open questions

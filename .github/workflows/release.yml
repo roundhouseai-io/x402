@@ -25,7 +25,8 @@ jobs:
     if: "!startsWith(github.event.head_commit.message, 'chore: release v')"
     permissions:
       contents: write # push the version commit and tag, create the Release
-      id-token: write # npm provenance
+      # No id-token: npm provenance is off, because it requires a public source
+      # repository and this one is private. See docs/releasing.md.
     steps:
       - uses: actions/checkout@v4
         with:
@@ -94,7 +95,6 @@ jobs:
       - name: Publish to npm
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NPM_CONFIG_PROVENANCE: 'true'
         run: npx changeset publish
 
       # `changeset publish` tags locally; push what it made.
@@ -159,7 +159,7 @@ jobs:
             if [ "$STATUS" = "success" ]; then
               echo "\`@roundhouseai/x402@${VERSION}\` is on npm."
               echo
-              echo "Verify with \`npm audit signatures\`."
+              echo "Published without provenance — see docs/releasing.md."
             else
               echo "**Not released.** Local version is \`${VERSION:-unknown}\`, ${COUNT:-0} changeset(s) were pending at the start."
               echo

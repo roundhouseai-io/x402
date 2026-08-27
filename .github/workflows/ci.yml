@@ -29,6 +29,9 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run format:check
+      # anti-slop over src and test. Fails on the enforced rules; the rest
+      # print as warnings. See docs/linting.md.
+      - run: npm run lint
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
@@ -76,6 +79,42 @@ jobs:
               process.exit(1);
             }
           "
+
+  lint:
+    name: anti-slop
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      # Enforced rules fail the job. Everything else is reported, and the
+      # counts go to the step summary so a PR can be judged on whether it
+      # moved them rather than on whether it happened to touch a linted file.
+      - name: Lint src and test
+        run: |
+          set -uo pipefail
+          STATUS=0
+          npm run lint 2>&1 | tee lint.log || STATUS=$?
+          # grep exits 1 on no matches, which is the clean case, not a failure —
+          # so every count below tolerates it and only STATUS decides the job.
+          ERRORS=$(grep -c 'error anti-slop' lint.log || true)
+          WARNINGS=$(grep -c 'warning anti-slop' lint.log || true)
+          {
+            echo "### anti-slop"
+            echo
+            echo "${ERRORS:-0} enforced, ${WARNINGS:-0} outstanding."
+            echo
+            echo '| count | rule | level |'
+            echo '| ----: | ---- | ----- |'
+            grep -oE '(error|warning) anti-slop\([^)]+\)' lint.log \
+              | sed -E 's/^(error|warning) anti-slop\((.+)\)$/\2 \1/' \
+              | sort | uniq -c | sort -rn \
+              | awk '{ printf "| %s | `%s` | %s |\n", $1, $2, $3 }' || true
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$STATUS"
 
   install:
     name: install from tarball

@@ -48,6 +48,7 @@ src/
     mcp.ts               MCP server over stdio (JSON-RPC 2.0, no SDK dependency)
     tokens.ts            caller tokens: hashed at rest, per-token budgets
 test/                    vitest; mirrors src/ concerns, not its file tree
+tools/oxlint/anti-slop/  vendored lint rules, maintained here (docs/linting.md)
 docs/                    spec, architecture, operational docs
 .github/                 issue forms, workflows, labels, CODEOWNERS
 ```
@@ -81,14 +82,17 @@ These are not preferences. Breaking one is a breaking change to the product, and
 ```bash
 npm install
 npm run typecheck     # tsc --noEmit over src + test
-npm test              # vitest run (99+ tests, no network)
+npm run lint          # oxlint + vendored anti-slop rules over src + test
+npm test              # vitest run (146 tests, no network)
 npm run build         # tsc → dist/
 npm run format:check  # prettier
 node dist/cli.js --help
 npm run dev -- probe https://example.com/v1/thing   # tsx, no build step
 ```
 
-Before pushing, run `npm run typecheck && npm test && npm run format:check`. CI runs exactly that on Node 20 and 22.
+Before pushing, run `npm run typecheck && npm run lint && npm test && npm run format:check`. CI runs exactly that on Node 20 and 22.
+
+`lint` fails only on the rules the codebase already satisfies; the rest report as warnings. Do not demote a rule to make it pass — see [`docs/linting.md`](docs/linting.md).
 
 Tests never touch the network and never touch a real `~/.x402`: they stub `fetch` and point `X402_HOME` at a temp dir. Keep it that way. When a test needs a signer, implement the small `Signer` interface rather than mocking OWS over HTTP.
 

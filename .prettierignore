@@ -2,3 +2,6 @@ dist/
 coverage/
 node_modules/
 CHANGELOG.md
+
+# Vendored third-party lint rules; kept as upstream ships them.
+tools/oxlint/anti-slop/

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { parsePaymentRequired, selectOption } from '../src/core/x402.js';
+import { parsePaymentRequired, requirementsFromHeaders, selectOption } from '../src/core/x402.js';
 import { formatUnits, parseUnits } from '../src/core/assets.js';
 import { X402Error, ExitCode } from '../src/core/errors.js';
 
@@ -147,5 +147,56 @@ describe('amount conversion', () => {
 
   it('refuses more precision than the asset has', () => {
     expect(() => parseUnits('0.0000001', 6)).toThrow();
+  });
+});
+
+describe('requirementsFromHeaders (x402 v2)', () => {
+  const V2 = {
+    x402Version: 2,
+    accepts: [
+      {
+        scheme: 'exact',
+        network: 'eip155:8453',
+        amount: '11000',
+        asset: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+        payTo: '0xe9030014F5DAe217d0A152f02A043567b16c1aBf',
+        maxTimeoutSeconds: 300,
+        extra: { name: 'USD Coin', version: '2' },
+      },
+    ],
+  };
+  const b64 = Buffer.from(JSON.stringify(V2), 'utf8').toString('base64');
+
+  it('decodes the Payment-Required header', () => {
+    const payload = requirementsFromHeaders({ 'payment-required': b64 });
+    const required = parsePaymentRequired(payload);
+    expect(required.x402Version).toBe(2);
+    expect(required.options[0]?.amount).toBe('0.011');
+    expect(required.options[0]?.payTo).toBe('0xe9030014F5DAe217d0A152f02A043567b16c1aBf');
+  });
+
+  it('decodes the WWW-Authenticate challenge form, quoted or bare', () => {
+    for (const value of [`X402 requirements="${b64}"`, `x402 requirements=${b64}`]) {
+      const required = parsePaymentRequired(requirementsFromHeaders({ 'www-authenticate': value }));
+      expect(required.options[0]?.amountAtomic).toBe(11000n);
+    }
+  });
+
+  it('returns undefined when no header carries a payload, leaving the body to answer', () => {
+    expect(requirementsFromHeaders({})).toBeUndefined();
+    expect(requirementsFromHeaders({ 'www-authenticate': 'Bearer realm="x"' })).toBeUndefined();
+    expect(requirementsFromHeaders({ 'payment-required': 'not-base64-json!!' })).toBeUndefined();
+  });
+
+  it('prefers the header, whose price is the binding one', () => {
+    // BlockRun.AI really does serve a body saying 0.01 beside a header saying 0.011.
+    const body = { error: 'Payment Required', paymentInfo: { price: 0.01, network: 'base' } };
+    const headers = { 'payment-required': b64 };
+
+    const fromHeader = parsePaymentRequired(requirementsFromHeaders(headers) ?? body);
+
+    expect(fromHeader.options[0]?.amount).toBe('0.011');
+    // The body alone is not a usable payload at all — it carries no network.
+    expect(() => parsePaymentRequired(body)).toThrow(/network/);
   });
 });

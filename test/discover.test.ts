@@ -1,6 +1,12 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { DEFAULT_CONFIG, mergeDeep, type X402Config } from '../src/core/config.js';
-import { discover, filterByAllowlist, capabilityOf, resolveTarget } from '../src/core/discover.js';
+import {
+  discover,
+  discoverMarket,
+  filterByAllowlist,
+  capabilityOf,
+  resolveTarget,
+} from '../src/core/discover.js';
 import { ExitCode, X402Error } from '../src/core/errors.js';
 
 const PAY_TO = '0x1831f336585a6C67B6A954d28f3E07F44C4EEBbd';
@@ -38,13 +44,36 @@ const endpoint = (over: Record<string, unknown> = {}) => ({
 
 let calledUrls: string[] = [];
 
-function stubIndex(body: unknown, status = 200) {
+/**
+ * Route by URL: `unified.json` and `/endpoints` are different surfaces and the
+ * code tries them in that order.
+ */
+function stubRoutes(routes: { unified?: [number, unknown]; endpoints?: [number, unknown] }) {
   calledUrls = [];
   vi.stubGlobal('fetch', async (input: unknown) => {
-    calledUrls.push(String(input instanceof Request ? input.url : input));
+    const url = String(input instanceof Request ? input.url : input);
+    calledUrls.push(url);
+    // The two surfaces are told apart by their query param, not their host:
+    // unified.json takes `?capability=`, the keyword search takes `?q=`.
+    const [status, body] = url.includes('capability=')
+      ? (routes.unified ?? [404, { error: 'unknown_capability' }])
+      : (routes.endpoints ?? [404, { error: 'not found' }]);
     return jsonResponse(status, body);
   });
 }
+
+/** The capability is not a registered slug, so only `/endpoints` answers. */
+function stubIndex(body: unknown, status = 200) {
+  stubRoutes({ endpoints: [status, body] });
+}
+
+/** The capability is a registered slug, so `unified.json` answers. */
+function stubUnified(body: unknown, status = 200) {
+  stubRoutes({ unified: [status, body] });
+}
+
+const endpointsUrl = (cap = 'lei') => `https://www.roundhouse.studio/api/v0/endpoints?q=${cap}`;
+const unifiedUrl = (cap = 'lei') => `https://www.roundhouse.studio/unified.json?capability=${cap}`;
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -64,7 +93,8 @@ describe('discover', () => {
 
     const providers = await discover('lei', config());
 
-    expect(calledUrls).toEqual(['https://www.roundhouse.studio/api/v0/endpoints?q=lei']);
+    // unified.json is asked first; an unknown slug falls back to /endpoints.
+    expect(calledUrls).toEqual([unifiedUrl(), endpointsUrl()]);
     expect(providers).toEqual([
       {
         url: 'https://provider.example/v1/lei',
@@ -88,7 +118,7 @@ describe('discover', () => {
   it('trims a trailing slash off the configured base URL', async () => {
     stubIndex({ endpoints: [] });
     await discover('lei', config({ discover: { indexUrl: 'https://index.example/api/v0/' } }));
-    expect(calledUrls).toEqual(['https://index.example/api/v0/endpoints?q=lei']);
+    expect(calledUrls.at(-1)).toBe('https://index.example/api/v0/endpoints?q=lei');
   });
 
   it('sorts live providers ahead of down ones, cheapest first within each', async () => {
@@ -227,6 +257,148 @@ describe('discover', () => {
   it('fails with the queried URL when the index errors', async () => {
     stubIndex({ error: 'nope' }, 503);
     await expect(discover('lei', config())).rejects.toThrow(/HTTP 503.*endpoints\?q=lei/);
+  });
+});
+
+describe('discoverMarket', () => {
+  /** Shaped as the live `unified.json?capability=web-search` document. */
+  const unified = (over: Record<string, unknown> = {}) => ({
+    version: '1',
+    capability: {
+      slug: 'web-search',
+      name: 'Web search',
+      group: 'Web & Content',
+      summary: 'Search the open web and get ranked results.',
+      unit: 'per search',
+    },
+    stats: {
+      offers: 122,
+      providers: 68,
+      live: 121,
+      price: {
+        min: 0.001,
+        median: 0.01,
+        max: 0.63,
+        spread: 630,
+        spot: 0.01638678621659635,
+        spotBasis: 'calls',
+        p25: 0.005,
+        p75: 0.02,
+      },
+    },
+    offers: [
+      {
+        resource: 'https://blockrun.ai/api/v1/exa/search',
+        service_name: 'BlockRun.AI',
+        host: 'blockrun.ai',
+        pay_to: PAY_TO,
+        network: 'eip155:8453',
+        price_usdc: 0.011,
+        l30_total_calls: 2411,
+        l30_unique_payers: 42,
+        last_called_at: '2026-08-27T12:53:08.364+00:00',
+        is_live: true,
+        confidence: 'strong',
+        gateway: false,
+      },
+    ],
+    ...over,
+  });
+
+  it('prefers unified.json and returns the market stats with the offers', async () => {
+    stubUnified(unified());
+
+    const market = await discoverMarket('web-search', config());
+
+    // Only one call: a known slug never needs the /endpoints fallback.
+    expect(calledUrls).toEqual([unifiedUrl('web-search')]);
+    expect(market.from).toBe('unified');
+    expect(market.capability).toBe('web-search');
+    expect(market.name).toBe('Web search');
+    expect(market.unit).toBe('per search');
+    expect(market.stats).toEqual({
+      min: '0.001',
+      p25: '0.005',
+      median: '0.01',
+      p75: '0.02',
+      max: '0.63',
+      spread: 630,
+      spot: '0.01638678621659635',
+      spotBasis: 'calls',
+      offers: 122,
+      providers: 68,
+      live: 121,
+    });
+  });
+
+  it('maps the richer fields unified.json carries', async () => {
+    stubUnified(unified());
+
+    const [p] = (await discoverMarket('web-search', config())).providers;
+
+    expect(p?.url).toBe('https://blockrun.ai/api/v1/exa/search');
+    expect(p?.price).toBe('0.011');
+    expect(p?.chain).toBe('base');
+    expect(p?.calls30d).toBe(2411);
+    expect(p?.payers30d).toBe(42);
+    expect(p?.lastCalledAt).toBe('2026-08-27T12:53:08.364+00:00');
+    expect(p?.confidence).toBe('strong');
+    expect(p?.gateway).toBe(false);
+  });
+
+  it('falls back to /endpoints for a capability unified.json does not know', async () => {
+    stubRoutes({
+      unified: [200, { error: 'unknown_capability', capability: 'lei' }],
+      endpoints: [200, { endpoints: [endpoint()] }],
+    });
+
+    const market = await discoverMarket('lei', config());
+
+    expect(calledUrls).toEqual([unifiedUrl(), endpointsUrl()]);
+    expect(market.from).toBe('endpoints');
+    expect(market.providers).toHaveLength(1);
+    // The keyword surface carries no market-wide pricing.
+    expect(market.stats).toBeUndefined();
+    expect(market.unit).toBeUndefined();
+  });
+
+  it('falls back when unified.json errors rather than failing the lookup', async () => {
+    stubRoutes({
+      unified: [503, { error: 'upstream' }],
+      endpoints: [200, { endpoints: [endpoint()] }],
+    });
+
+    const market = await discoverMarket('lei', config());
+
+    expect(market.from).toBe('endpoints');
+    expect(market.providers).toHaveLength(1);
+  });
+
+  it('only fails once both surfaces do', async () => {
+    stubRoutes({ unified: [503, {}], endpoints: [503, {}] });
+
+    await expect(discoverMarket('lei', config())).rejects.toThrow(/HTTP 503.*endpoints\?q=lei/);
+  });
+
+  it('honours a configured unifiedUrl', async () => {
+    stubRoutes({ unified: [200, unified()] });
+
+    await discoverMarket(
+      'web-search',
+      config({ discover: { unifiedUrl: 'https://u.example/u.json' } }),
+    );
+
+    expect(calledUrls).toEqual(['https://u.example/u.json?capability=web-search']);
+  });
+
+  it('tolerates a unified document with no stats block', async () => {
+    stubUnified(unified({ stats: undefined }));
+
+    const market = await discoverMarket('web-search', config());
+
+    expect(market.from).toBe('unified');
+    expect(market.stats).toBeUndefined();
+    expect(market.providers).toHaveLength(1);
   });
 });
 

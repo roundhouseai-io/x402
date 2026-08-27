@@ -34,10 +34,10 @@ npm i -g @roundhouseai/x402            # or global install, then: x402 <url>
 The bare form `npx @roundhouseai/x402 <url>` is sugar for `npx @roundhouseai/x402 call <url>`. If the first argument looks like a URL, `call` is assumed. This is the "very easy" path:
 
 ```bash
-npx @roundhouseai/x402 https://mcpfax-utility.bowling-anthony.workers.dev/v1/lei --data.query "Roundhouse AI Ltd."
+npx @roundhouseai/x402 https://blockrun.ai/api/v1/exa/answer --data.query "What is the LEI of Roundhouse AI Ltd.?"
 ```
 
-With a default wallet configured (section 7), that one line does: GET with query param, receive 402, check price against limits, sign EIP-3009 authorization via OWS, retry with `X-PAYMENT`, print JSON body, write ledger entry.
+With a default wallet configured (section 7), that one line does: POST with a JSON body, receive 402, check price against limits, sign EIP-3009 authorization via OWS, retry with `X-PAYMENT`, print JSON body, write ledger entry. The endpoint is real and listed on the Roundhouse index at $0.011 USDC on Base.
 
 ---
 
@@ -51,7 +51,7 @@ With a default wallet configured (section 7), that one line does: GET with query
 | `x402 verify <receipt>`                | Confirm settlement of a prior payment                                                             |
 | `x402 wallet <list\|balance\|address>` | Passthrough to OWS                                                                                |
 | `x402 history [query]`                 | Query the local ledger                                                                            |
-| `x402 discover <capability>`           | Query the Roundhouse index for providers by capability, price-sorted                              |
+| `x402 discover <capability>`           | Providers for a capability, price-sorted, with the market's min/median/spot/max and spread        |
 | `x402 serve`                           | Run the unified endpoint: a local HTTP gateway and MCP server wrapping the full flow (section 10) |
 | `x402 config <get\|set\|list>`         | Manage `~/.x402/config.json`                                                                      |
 
@@ -185,8 +185,8 @@ Append-only JSONL at `~/.x402/ledger.jsonl`. One record per call (paid or not):
 {
   "id": "01J8ZK3M9Q...",
   "ts": "2026-08-26T13:43:02.114Z",
-  "url": "https://mcpfax-utility.bowling-anthony.workers.dev/v1/lei",
-  "method": "GET",
+  "url": "https://blockrun.ai/api/v1/exa/answer",
+  "method": "POST",
   "wallet": "my-agent",
   "request": {
     "dataHash": "sha256:9f2c...",
@@ -345,10 +345,10 @@ All routes require `Authorization: Bearer <caller-token>` (section 10.4).
 
 ```json
 {
-  "url": "https://mcpfax-utility.bowling-anthony.workers.dev/v1/lei",
-  "method": "GET",
-  "data": { "query": "Roundhouse AI Ltd." },
-  "max": "0.01",
+  "url": "https://blockrun.ai/api/v1/exa/answer",
+  "method": "POST",
+  "data": { "query": "What is the LEI of Roundhouse AI Ltd.?" },
+  "max": "0.02",
   "wallet": "my-agent"
 }
 ```
@@ -368,13 +368,13 @@ Response is the same JSON envelope as the CLI (section 8): `ok`, `status`, `paid
 `/v1/call` and the CLI both accept a capability URI in place of a URL:
 
 ```json
-{ "url": "x402:lei", "data": { "query": "Roundhouse AI Ltd." } }
+{ "url": "x402:web-search", "data": { "query": "What is the LEI of Roundhouse AI Ltd.?" } }
 ```
 
 Resolution: query the Roundhouse index for live providers of that capability, filter by allowlist, pick the cheapest, call it. The resolved provider and its price appear in the response envelope and the ledger record. `pin` in config maps a capability to a fixed provider when determinism matters more than price:
 
 ```json
-"pins": { "lei": "https://mcpfax-utility.bowling-anthony.workers.dev/v1/lei" }
+"pins": { "web-search": "https://blockrun.ai/api/v1/exa/answer" }
 ```
 
 This is the piece that makes Roundhouse skills provider-agnostic: a skill says "do an LEI lookup", not "call this vendor's URL", and pricing pressure stays on the providers.
@@ -407,7 +407,7 @@ Ship a `SKILL.md` with the package documenting exactly three flows: `probe` (wha
 ## 12. Open questions (blocking v1)
 
 1. **Does OWS expose EIP-712 typed-data signing?** The published core types show `signMessage` with `utf8`/`hex` encodings only. EIP-3009 requires typed-data signing. The signer abstraction (5.3) means this no longer blocks the CLI itself (the `local` backend can ship first), but OWS as the flagship backend needs it; raise upstream early.
-2. **402 payload variance.** How strictly do live providers follow the x402 spec? `probe` should be run against the current Roundhouse index to size the compatibility shim needed in the 402 parser.
+2. **402 payload variance.** How strictly do live providers follow the x402 spec? `probe` should be run against the current Roundhouse index to size the compatibility shim needed in the 402 parser. Partly answered: x402 v2 providers carry the requirements in a `Payment-Required` or `WWW-Authenticate: X402 requirements="…"` header, base64-encoded, and leave only a human-readable stub in the body — the parser reads the header first and treats it as authoritative where both are present.
 3. **Receipt verification.** Facilitator settlement confirmation vs direct on-chain lookup for `verify`. Facilitator is simpler; on-chain is trustless. Proposal: facilitator in v1, on-chain in v1.1.
 4. **Multi-option 402s.** When a provider offers several payment options (chains/assets), selection order is: config `defaults.chain`, then cheapest. Confirm this is the right tiebreak.
 5. **Serve scope for v1.** Shipping CLI + serve + MCP together is three surfaces to stabilise at once. Proposal: v1 ships CLI and `serve` HTTP with token budgets; MCP mode and capability pinning land in v1.1 unless an agent fleet needs MCP on day one.

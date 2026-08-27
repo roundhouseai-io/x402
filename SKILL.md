@@ -109,27 +109,61 @@ Numbers, `true`/`false` and `null` are coerced; anything else is a string. Force
 CLI:
 
 ```bash
-x402 discover lei
-x402 call x402:lei --data.query "Roundhouse AI Ltd." --max 0.01
+x402 discover web-search
+x402 call x402:web-search --data.query "..." --max 0.02
 ```
 
 Endpoint:
 
 ```bash
 curl -s -H "Authorization: Bearer $X402_TOKEN" \
-  'http://127.0.0.1:8403/v1/discover?capability=lei'
+  'http://127.0.0.1:8403/v1/discover?capability=web-search'
 ```
 
 ```json
 {
   "ok": true,
-  "capability": "lei",
+  "capability": "web-search",
+  "unit": "per search",
   "count": 2,
-  "providers": [{ "url": "https://provider.example/v1/lei", "price": "0.002", "asset": "usdc" }]
+  "stats": {
+    "min": "0.001",
+    "p25": "0.005",
+    "median": "0.01",
+    "p75": "0.02",
+    "max": "0.63",
+    "spread": 630,
+    "spot": "0.0164",
+    "spotBasis": "calls",
+    "offers": 122,
+    "providers": 68,
+    "live": 121
+  },
+  "providers": [
+    {
+      "url": "https://blockrun.ai/api/v1/exa/search",
+      "price": "0.011",
+      "asset": "usdc",
+      "chain": "base",
+      "live": true,
+      "calls30d": 2411,
+      "payers30d": 42
+    }
+  ]
 }
 ```
 
-A capability URI (`x402:lei`) can be used anywhere a URL can. It resolves through configured pins first, then the index, picking the cheapest allowed provider the index reports as live. The provider actually used appears in the response envelope, so prefer capabilities over hard-coded vendor URLs.
+**Selecting.** `stats` is the whole market for that capability, so you can price one offer against it rather than against nothing:
+
+- `median` — the going rate. Paying far above it needs a reason.
+- `spot` — the average actually paid, weighted by calls. Above `median` means demand sits on the dearer offers.
+- `spread` — `max / min`. A wide spread means the cheapest offer is not automatically the sane one; read the list.
+- `payers30d` — distinct wallets that paid this endpoint. Corroboration, and harder to fake than call count.
+- `live` — `false` means the index could not reach it last probe. `discover` still lists it, marked `[down]`; resolution never routes to it.
+
+`stats` is `null` when the capability is not a registered slug — the index then answers from a keyword search, which returns offers but no market-wide pricing. Figures are an indexed snapshot: always read the live 402 before paying.
+
+A capability URI (`x402:web-search`) can be used anywhere a URL can. It resolves through configured pins first, then the index, picking the cheapest allowed provider the index reports as live. The provider actually used appears in the response envelope, so prefer capabilities over hard-coded vendor URLs.
 
 ## Exit codes
 

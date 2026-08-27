@@ -59,8 +59,14 @@ export {
   ALWAYS_REDACTED_HEADERS,
 } from './core/telemetry.js';
 export { buildData, parsePath, coerce, toQueryParams } from './core/data.js';
-export { discover, resolveTarget, capabilityOf, filterByAllowlist } from './core/discover.js';
-export type { Provider } from './core/discover.js';
+export {
+  discover,
+  discoverMarket,
+  resolveTarget,
+  capabilityOf,
+  filterByAllowlist,
+} from './core/discover.js';
+export type { Provider, Market, MarketStats } from './core/discover.js';
 export { formatUnits, parseUnits, findChain, findAsset, CHAINS, ASSETS } from './core/assets.js';
 export { createServeServer, statusForCode } from './serve/http.js';
 export { runMcpStdio, TOOLS as MCP_TOOLS } from './serve/mcp.js';

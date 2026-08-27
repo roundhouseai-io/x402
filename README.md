@@ -8,10 +8,10 @@
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 ```bash
-npx @roundhouseai/x402 https://api.example.com/v1/lei --data.query "Roundhouse AI Ltd."
+npx @roundhouseai/x402 https://blockrun.ai/api/v1/exa/answer --data.query "What is the LEI of Roundhouse AI Ltd.?"
 ```
 
-With a wallet configured, that one line does: GET with a query param → receives 402 → checks the price against your limits → signs an EIP-3009 authorization via your OWS wallet → retries with `X-PAYMENT` → prints the JSON body → writes a ledger entry.
+That is a real, live endpoint — $0.011 USDC on Base, listed on the [Roundhouse index](https://www.roundhouse.studio). With a wallet configured, that one line does: POST with a JSON body → receives 402 → checks the price against your limits → signs an EIP-3009 authorization via your OWS wallet → retries with `X-PAYMENT` → prints the JSON body → writes a ledger entry.
 
 > **On `npx x402`** — the unscoped `x402` name on npm belongs to another project, so the zero-install form is `npx @roundhouseai/x402`. A global install (`npm i -g @roundhouseai/x402`) gives you the short `x402` command.
 
@@ -63,12 +63,17 @@ x402 call https://api.example.com/v1/lei --data.query "Roundhouse AI Ltd." --max
 #  "receiptId":"01J8ZK…","body":{"lei":"213800…"}}
 ```
 
-**Who sells this cheapest?** `discover` asks the Roundhouse index (`https://www.roundhouse.studio/api/v0`).
+**Who sells this cheapest?** `discover` asks the Roundhouse index, and reports the whole market — not just a list — so an agent can tell a fair price from a gouging one before it spends.
 
 ```bash
-x402 discover lei                                      # live providers first, cheapest first
-x402 call x402:lei --data.query "Roundhouse AI Ltd."   # resolve, then call the cheapest live allowed provider
+x402 discover web-search
+# min 0.001 · median 0.01 · spot 0.0164 · max 0.63 per search (630x spread over 122 offers)
+#      0.011 usdc  https://blockrun.ai/api/v1/exa/search 42 payers
+
+x402 call x402:web-search --data.query "..."   # resolve, then call the cheapest live allowed provider
 ```
+
+`stats` carries `min`, `p25`, `median`, `p75`, `max`, `spread` (max ÷ min) and `spot` (the average actually paid, call-weighted). Judge an offer against `median` for the going rate and against `spot` for what the market really pays; a wide `spread` means the list needs reading rather than trusting.
 
 ## Commands
 

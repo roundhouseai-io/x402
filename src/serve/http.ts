@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
 import { X402Error, ExitCode, ExitCodeName, exitCodeOf, messageOf } from '../core/errors.js';
 import { toEnvelope, type Envelope } from '../core/output.js';
-import { capabilityOf, discover, filterByAllowlist } from '../core/discover.js';
+import { capabilityOf, discoverMarket, filterByAllowlist } from '../core/discover.js';
 import {
   readRecords,
   queryRecords,
@@ -205,13 +205,17 @@ export function createServeServer(deps: ServeDeps): Server {
     const capability = url.searchParams.get('capability');
     if (!capability)
       throw new X402Error(ExitCode.GENERIC, 'capability query parameter is required');
-    const all = await discover(capability, deps.config);
-    const providers = filterByAllowlist(all, deps.config);
+    const market = await discoverMarket(capability, deps.config);
+    const providers = filterByAllowlist(market.providers, deps.config);
     sendJson(res, 200, {
       ok: true,
       capability,
+      name: market.name ?? null,
+      unit: market.unit ?? null,
       pinned: deps.config.pins[capability] ?? null,
       count: providers.length,
+      stats: market.stats ?? null,
+      indexSurface: market.from,
       providers,
     });
   }

@@ -67,13 +67,19 @@ Three layers, later wins:
 
 ## Discovery
 
-`x402 discover <capability>` and `x402:<capability>` resolution both call the Roundhouse index:
+`x402 discover <capability>` and `x402:<capability>` resolution both call the Roundhouse index, across two surfaces tried in order:
 
 ```bash
+# 1. The capability document — offers plus market-wide pricing. Registered slugs only.
+curl -sL 'https://www.roundhouse.studio/unified.json?capability=web-search'
+
+# 2. Fallback keyword search, for anything unified.json answers `unknown_capability` for.
 curl -sL 'https://www.roundhouse.studio/api/v0/endpoints?q=lei'
 ```
 
-Each entry in the returned `endpoints` array is mapped onto a provider:
+`unified.json` is asked first because it is the only surface that reports the market, not just the list. When it does not know the slug the keyword search answers instead, and `stats` comes back `null`.
+
+Each entry in the returned `offers` (or `endpoints`) array is mapped onto a provider:
 
 | Index field         | Provider field | Used for                                                             |
 | ------------------- | -------------- | -------------------------------------------------------------------- |
@@ -90,6 +96,20 @@ Each entry in the returned `endpoints` array is mapped onto a provider:
 An unrecognised network or asset is passed through verbatim rather than dropped. `scheme`, `description`, `tags`, `icon_url` and `onchain_volume_usdc` are returned by the index but not currently mapped.
 
 Providers are sorted live-first, then cheapest. `x402 discover` lists every provider the allowlist permits, marking down ones `[down]`; resolving `x402:<capability>` for an actual call skips them. A `pins` entry bypasses the index entirely.
+
+### Market stats
+
+`unified.json` also reports the capability as a whole, surfaced as `stats` on `x402 discover`, `GET /v1/discover` and the `x402_discover` MCP tool. It is what lets an agent price one offer against the market instead of against nothing:
+
+| Field                           | Meaning                                                                      |
+| ------------------------------- | ---------------------------------------------------------------------------- |
+| `min` / `max`                   | Cheapest and dearest listed price, in the capability's `unit`                |
+| `p25` / `median` / `p75`        | The distribution. `median` is the going rate                                 |
+| `spread`                        | `max / min`. Wide means the cheapest offer is not automatically the sane one |
+| `spot`                          | Average price actually paid, weighted by `spotBasis` (usually calls)         |
+| `offers` / `providers` / `live` | How many offers, distinct providers, and reachable endpoints                 |
+
+`spot` above `median` means demand sits on the dearer offers — often one expensive endpoint taking a large share of calls. These are an indexed snapshot, not a quote: the price that binds is the one in the live 402.
 
 ## Secrets
 

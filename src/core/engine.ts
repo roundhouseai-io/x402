@@ -3,6 +3,7 @@ import { request, parseJsonBody, type HttpResponse } from './http.js';
 import { toQueryParams, topLevelKeys } from './data.js';
 import {
   parsePaymentRequired,
+  requirementsFromHeaders,
   selectOption,
   type PaymentOption,
   type PaymentRequired,
@@ -220,7 +221,9 @@ export class Engine {
         body: parseJsonBody(res.body) ?? res.body,
       };
     }
-    const requirements = parsePaymentRequired(parseJsonBody(res.body) ?? res.body);
+    const requirements = parsePaymentRequired(
+      requirementsFromHeaders(res.headers) ?? parseJsonBody(res.body) ?? res.body,
+    );
     const selected = selectOption(requirements, {
       chains: opts.chains ?? [this.config.defaults.chain],
       preferChain: this.config.defaults.chain,
@@ -318,7 +321,9 @@ export class Engine {
     let requirements: PaymentRequired;
     let option: PaymentOption;
     try {
-      requirements = parsePaymentRequired(parseJsonBody(first.body) ?? first.body);
+      requirements = parsePaymentRequired(
+        requirementsFromHeaders(first.headers) ?? parseJsonBody(first.body) ?? first.body,
+      );
       option = selectOption(requirements, {
         chains: opts.chains ?? [this.config.defaults.chain],
         preferChain: this.config.defaults.chain,

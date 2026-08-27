@@ -132,6 +132,46 @@ function normalizeOption(input: unknown, index: number): PaymentOption {
 }
 
 /**
+ * x402 v2 moved the payment requirements out of the body and into a header,
+ * base64-encoded, in one of two spellings:
+ *
+ * ```
+ * Payment-Required: eyJ4NDAyVmVyc2lvbiI6Miwi...
+ * WWW-Authenticate: X402 requirements="eyJ4NDAyVmVyc2lvbiI6Miwi..."
+ * ```
+ *
+ * Providers that do this leave a human-readable stub in the body — often with a
+ * rounded or stale price — so the header is authoritative where both are present.
+ * Returns undefined when neither header carries a decodable payload, leaving the
+ * body as the v1 path.
+ */
+export function requirementsFromHeaders(headers: Record<string, string>): unknown | undefined {
+  const candidates: string[] = [];
+
+  const direct = headers['payment-required'];
+  if (direct) candidates.push(direct.trim());
+
+  const auth = headers['www-authenticate'];
+  if (auth) {
+    // `X402 requirements="<base64>"`, quoted or bare.
+    const m = /x402\s+requirements\s*=\s*"?([A-Za-z0-9+/_=-]+)"?/i.exec(auth);
+    if (m?.[1]) candidates.push(m[1]);
+  }
+
+  for (const raw of candidates) {
+    try {
+      const json = Buffer.from(raw, 'base64').toString('utf8');
+      const parsed: unknown = JSON.parse(json);
+      // A payload with no options is no better than the body; let the body try.
+      if (isObj(parsed) || Array.isArray(parsed)) return parsed;
+    } catch {
+      // Not decodable — fall through to the next candidate, then to the body.
+    }
+  }
+  return undefined;
+}
+
+/**
  * Parse an x402 402 body. Accepts the canonical `{x402Version, accepts:[...]}`
  * envelope, a bare requirements object, or a bare array of options — the three
  * shapes live providers actually emit today.

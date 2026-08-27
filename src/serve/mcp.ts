@@ -1,7 +1,7 @@
 import { createInterface } from 'node:readline';
 import { messageOf, exitCodeOf, ExitCodeName } from '../core/errors.js';
 import { toEnvelope } from '../core/output.js';
-import { discover, filterByAllowlist } from '../core/discover.js';
+import { discoverMarket, filterByAllowlist } from '../core/discover.js';
 import { readRecords, queryRecords, sumRecords, type GroupKey } from '../core/ledger.js';
 import type { Engine } from '../core/engine.js';
 import type { X402Config } from '../core/config.js';
@@ -61,7 +61,9 @@ export const TOOLS = [
   },
   {
     name: 'x402_discover',
-    description: 'List providers of a capability from the Roundhouse index, cheapest first.',
+    description:
+      'List providers of a capability from the Roundhouse index, cheapest first, with the ' +
+      'capability-wide min/median/spot/max price and spread to judge an offer against.',
     inputSchema: {
       type: 'object',
       properties: { capability: { type: 'string' } },
@@ -204,8 +206,18 @@ async function callTool(
     }
     case 'x402_discover': {
       const capability = String(args.capability ?? '');
-      const providers = filterByAllowlist(await discover(capability, deps.config), deps.config);
-      return { ok: true, capability, count: providers.length, providers };
+      const market = await discoverMarket(capability, deps.config);
+      const providers = filterByAllowlist(market.providers, deps.config);
+      return {
+        ok: true,
+        capability,
+        name: market.name ?? null,
+        unit: market.unit ?? null,
+        count: providers.length,
+        stats: market.stats ?? null,
+        indexSurface: market.from,
+        providers,
+      };
     }
     case 'x402_history': {
       const records = queryRecords(readRecords(), {

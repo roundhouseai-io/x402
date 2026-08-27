@@ -39,7 +39,7 @@ Before 1.0 the same rules apply, but breaking changes go in a minor. `0.x` means
 
 | Secret         | Used for                                                                                                   |
 | -------------- | ---------------------------------------------------------------------------------------------------------- |
-| `NPM_TOKEN`    | An npm **automation** token for the `@roundhouse` scope, stored as a repository secret                     |
+| `NPM_TOKEN`    | An npm **automation** token for the `@roundhouseai` scope, stored as a repository secret                   |
 | `GITHUB_TOKEN` | Provided automatically; the workflow needs `contents: write`, `pull-requests: write` and `id-token: write` |
 
 `id-token: write` is what makes [npm provenance](https://docs.npmjs.com/generating-provenance-statements) work: the published package carries a signed attestation linking it to this repository, this workflow and this commit. `provenance` is set in `publishConfig`, so a publish from anywhere without an OIDC token fails rather than quietly shipping an unattested tarball. That is deliberate — for a package that can spend money, "where did this build come from" should be answerable by anyone.

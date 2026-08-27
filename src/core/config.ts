@@ -62,6 +62,8 @@ export interface X402Config {
   };
   discover: {
     indexUrl: string;
+    /** Capability documents, which carry the market stats `indexUrl` does not. */
+    unifiedUrl: string;
   };
   /** Settlement confirmation source for `x402 verify`. */
   facilitator: {
@@ -92,7 +94,10 @@ export const DEFAULT_CONFIG: X402Config = {
     sink: { enabled: false, batchSize: 50, batchIntervalMs: 10_000 },
   },
   defaults: { chain: 'base', timeout: 30 },
-  discover: { indexUrl: 'https://www.roundhouse.studio/api/v0' },
+  discover: {
+    indexUrl: 'https://www.roundhouse.studio/api/v0',
+    unifiedUrl: 'https://www.roundhouse.studio/unified.json',
+  },
   facilitator: {},
   pins: {},
   serve: { host: '127.0.0.1', port: 8403 },

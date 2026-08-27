@@ -70,7 +70,7 @@ The alternative, `@changesets/changelog-github`, credits each entry to its pull 
 
 The package ships **without** [npm provenance](https://docs.npmjs.com/generating-provenance-statements). That is a downgrade, recorded here rather than left to be discovered.
 
-The intent was the opposite: for a package that can spend money, "where did this build come from" should be answerable by anyone, so `publishConfig.provenance` was set and the job carried `id-token: write`. The first real release run was rejected by the registry:
+The intent was the opposite: for a package that can spend money, "where did this build come from" should be answerable by anyone, so it was switched on in three places — `publishConfig.provenance`, `provenance=true` in `.npmrc`, and `id-token: write` on the release job. The first real release run was rejected by the registry:
 
 ```
 npm error 422 — Error verifying sigstore provenance bundle:
@@ -82,7 +82,7 @@ npm will only attest builds from a public source repository, and this repository
 
 **What that costs.** Nothing links the published tarball to a commit, a workflow or this repository, and `npm audit signatures` has nothing to verify. A consumer takes the registry's word that the tarball is what the maintainers uploaded.
 
-**How to get it back.** Make the repository public, then restore `publishConfig.provenance: true` and `id-token: write` on the release job. Nothing else has to change — the failed run proved every other part of the publish path works. Worth doing: the repository is Apache-2.0 and written throughout as an open-source project, so privacy is the thing out of place here, not the attestation.
+**How to get it back.** Make the repository public, then restore `publishConfig.provenance: true`, `provenance=true` in `.npmrc`, and `id-token: write` on the release job. All three — `.npmrc` alone is enough to turn it on, so a partial removal fails confusingly, with npm asking for an `id-token` permission the workflow has deliberately dropped. Nothing else has to change — the failed run proved every other part of the publish path works. Worth doing: the repository is Apache-2.0 and written throughout as an open-source project, so privacy is the thing out of place here, not the attestation.
 
 ## Checking a release
 

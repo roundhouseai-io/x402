@@ -7,6 +7,8 @@ npm run lint          # what CI runs: enforced rules fail, the rest report
 npm run lint:strict   # treat every finding as an error, for local cleanup work
 ```
 
+**Linting needs Node 22.** `oxlint.config.ts` is TypeScript, loaded through Node's type stripping, which Node 20 does not have — it fails with `Unknown file extension ".ts"`. The package itself still supports Node 20, and CI still tests against it; lint just runs once, on Node 22, in its own job. Findings do not vary by Node version, so there is nothing to gain from running it across the matrix.
+
 The plugin is **vendored** under `tools/oxlint/anti-slop/`, which is how it is meant to be used — copy it in, read it, change it. It is not an npm dependency, so upstream cannot change what this repo enforces without a visible commit here. `oxlint` and `@oxlint/plugins` are devDependencies; the published tarball is unaffected and the zero-runtime-dependency invariant still holds.
 
 Prettier does not format the vendored directory: it is upstream's code, kept as upstream ships it, so a future re-vendor is a clean diff.

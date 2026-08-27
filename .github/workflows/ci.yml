@@ -29,9 +29,10 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run format:check
-      # anti-slop over src and test. Fails on the enforced rules; the rest
-      # print as warnings. See docs/linting.md.
-      - run: npm run lint
+      # `npm run lint` is deliberately not here. oxlint loads its TypeScript
+      # config through Node's type stripping, which Node 20 does not have, and
+      # lint findings do not vary by Node version anyway. The `anti-slop` job
+      # runs it once on Node 22. See docs/linting.md.
       - run: npm run typecheck
       - run: npm test
       - run: npm run build

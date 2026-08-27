@@ -82,7 +82,7 @@ These are not preferences. Breaking one is a breaking change to the product, and
 ```bash
 npm install
 npm run typecheck     # tsc --noEmit over src + test
-npm run lint          # oxlint + vendored anti-slop rules over src + test
+npm run lint          # oxlint + vendored anti-slop rules over src + test (needs Node 22)
 npm test              # vitest run (146 tests, no network)
 npm run build         # tsc → dist/
 npm run format:check  # prettier
@@ -90,7 +90,7 @@ node dist/cli.js --help
 npm run dev -- probe https://example.com/v1/thing   # tsx, no build step
 ```
 
-Before pushing, run `npm run typecheck && npm run lint && npm test && npm run format:check`. CI runs exactly that on Node 20 and 22.
+Before pushing, run `npm run typecheck && npm run lint && npm test && npm run format:check`. CI runs the same checks, on Node 20 and 22 — except `lint`, which runs once on Node 22 because its config is TypeScript and Node 20 cannot load it.
 
 `lint` fails only on the rules the codebase already satisfies; the rest report as warnings. Do not demote a rule to make it pass — see [`docs/linting.md`](docs/linting.md).
 

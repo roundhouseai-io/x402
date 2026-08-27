@@ -60,14 +60,11 @@ jobs:
       - name: Apply the version bump
         id: version
         if: steps.pending.outputs.count != '0'
-        env:
-          # @changesets/changelog-github resolves each commit to its PR and
-          # author through the GitHub API, so `changeset version` needs a token
-          # even though it writes no remote state. Without it, it refuses and
-          # applies nothing.
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
+          # The changelog generator is the built-in one, which reads only the
+          # changesets and local git history. It contacts no API, so this step
+          # needs no token and no scope — see docs/releasing.md.
           npx changeset version
           VERSION=$(node -p "require('./package.json').version")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"

@@ -1,7 +1,7 @@
 {
   "name": "@roundhouseai/x402",
-  "version": "0.0.0",
-  "description": "One command for the whole x402 payment loop. Request, 402, sign via OWS, retry, receipt \u2014 with spend limits and a local ledger.",
+  "version": "0.1.0",
+  "description": "One command for the whole x402 payment loop. Request, 402, sign via OWS, retry, receipt — with spend limits and a local ledger.",
   "keywords": [
     "x402",
     "http-402",

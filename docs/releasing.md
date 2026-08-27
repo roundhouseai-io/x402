@@ -51,12 +51,18 @@ Before 1.0 the same rules apply, but breaking changes go in a minor. `0.x` means
 
 ## What CI needs
 
-| Secret         | Used for                                                                                 |
-| -------------- | ---------------------------------------------------------------------------------------- |
-| `NPM_TOKEN`    | An npm **automation** token for the `@roundhouseai` scope, stored as a repository secret |
-| `GITHUB_TOKEN` | Provided automatically; the workflow needs `contents: write` and `id-token: write`       |
+| Secret         | Used for                                                                                                                                                     |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `NPM_TOKEN`    | An npm **automation** token for the `@roundhouseai` scope, stored as a repository secret                                                                     |
+| `GITHUB_TOKEN` | Provided automatically; the workflow needs `contents: write` and `id-token: write`. Used for the tag, the push and the Release — not by `changeset version`. |
 
 Single-step publishing also needs **`main`'s branch protection to let this workflow push**. The job commits `chore: release vX.Y.Z` straight to `main`, which a ruleset that requires pull requests will reject with `protected branch hook declined`. Add a bypass for the `github-actions[bot]` actor (or for the repository ruleset's "Deploy keys and Apps" allowance) — that exemption is the price of removing the Version Packages PR, and it is the one path allowed to write to `main` without review.
+
+## The changelog generator
+
+`.changeset/config.json` uses the built-in `@changesets/cli/changelog`, which reads the changesets and local git history and contacts nothing. That is deliberate: `changeset version` is the step that decides what gets published, and it should not be able to fail because an API was unreachable or a token was scoped a little differently.
+
+The alternative, `@changesets/changelog-github`, credits each entry to its pull request and author — nicer to read, but it resolves every commit through the GitHub GraphQL API, so the version step then needs a token _and_ `pull-requests: read`, and it fails closed without them. It cost two failed release runs before being removed. Entries now read `- 6816490: summary` instead of linking the PR and author; the pull request is still one `git log` away from the commit.
 
 `id-token: write` is what makes [npm provenance](https://docs.npmjs.com/generating-provenance-statements) work: the published package carries a signed attestation linking it to this repository, this workflow and this commit. `provenance` is set in `publishConfig`, so a publish from anywhere without an OIDC token fails rather than quietly shipping an unattested tarball. That is deliberate — for a package that can spend money, "where did this build come from" should be answerable by anyone.
 

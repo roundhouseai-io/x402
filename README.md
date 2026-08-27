@@ -8,7 +8,7 @@
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 ```bash
-npx @roundhouseai/x402 https://api.example.com/v1/lei --data.query "Amplify Limited"
+npx @roundhouseai/x402 https://api.example.com/v1/lei --data.query "Roundhouse AI Ltd."
 ```
 
 With a wallet configured, that one line does: GET with a query param → receives 402 → checks the price against your limits → signs an EIP-3009 authorization via your OWS wallet → retries with `X-PAYMENT` → prints the JSON body → writes a ledger entry.
@@ -58,16 +58,16 @@ x402 probe https://api.example.com/v1/lei
 **Get the data.** `call` pays if a price is quoted and your gates allow it.
 
 ```bash
-x402 call https://api.example.com/v1/lei --data.query "Amplify Limited" --max 0.01
+x402 call https://api.example.com/v1/lei --data.query "Roundhouse AI Ltd." --max 0.01
 # {"ok":true,"status":200,"paid":true,"amount":"0.002","asset":"usdc",
 #  "receiptId":"01J8ZK…","body":{"lei":"213800…"}}
 ```
 
-**Who sells this cheapest?** `discover` asks the IOI index.
+**Who sells this cheapest?** `discover` asks the Roundhouse index (`https://www.roundhouse.studio/api/v0`).
 
 ```bash
-x402 discover lei
-x402 call x402:lei --data.query "Amplify Limited"   # resolve, then call the cheapest allowed provider
+x402 discover lei                                      # live providers first, cheapest first
+x402 call x402:lei --data.query "Roundhouse AI Ltd."   # resolve, then call the cheapest live allowed provider
 ```
 
 ## Commands
@@ -92,8 +92,8 @@ Three mechanisms, combinable. Later sources win on key collision: **dot flags > 
 
 ```bash
 x402 call https://api.example.com/v1/screen \
-  --data.company.name "Amplify Limited" \
-  --data.company.jurisdiction GB \
+  --data.company.name "Roundhouse AI Ltd." \
+  --data.company.jurisdiction SG \
   --data.checks[0] sanctions \
   --data.checks[1] pep \
   --data.limit 10 \
@@ -102,7 +102,7 @@ x402 call https://api.example.com/v1/screen \
 
 ```json
 {
-  "company": { "name": "Amplify Limited", "jurisdiction": "GB" },
+  "company": { "name": "Roundhouse AI Ltd.", "jurisdiction": "SG" },
   "checks": ["sanctions", "pep"],
   "limit": 10,
   "deep": true
@@ -112,12 +112,12 @@ x402 call https://api.example.com/v1/screen \
 Values that parse as JSON scalars are coerced (`10` → number, `true` → boolean, `null` → null). `--data-strings` disables coercion for the whole call; `str:` forces one value (`--data.postcode str:10001`). Leading-zero and precision-losing numbers stay strings, so ids survive intact.
 
 ```bash
-x402 call <url> --json '{"company":{"name":"Amplify Limited"}}'
+x402 call <url> --json '{"company":{"name":"Roundhouse AI Ltd."}}'
 x402 call <url> --json @payload.json
 cat payload.json | x402 call <url> --json -
 ```
 
-**Placement.** GET/HEAD/DELETE flatten data to query params with bracket notation (`company[name]=Amplify+Limited`); `--body-always` overrides. POST/PUT/PATCH send a JSON body; `--form` switches to `x-www-form-urlencoded`. No data → GET; any data → POST unless `--method` says otherwise.
+**Placement.** GET/HEAD/DELETE flatten data to query params with bracket notation (`company[name]=Roundhouse+AI+Ltd.`); `--body-always` overrides. POST/PUT/PATCH send a JSON body; `--form` switches to `x-www-form-urlencoded`. No data → GET; any data → POST unless `--method` says otherwise.
 
 ## Spend controls
 
@@ -200,7 +200,7 @@ x402 history --sum
 x402 history --by payTo --sum
 ```
 
-An optional remote sink batches records to the IOI indexer; sink failures never fail a call, and records queue in `~/.x402/outbox/` for the next invocation. See [`docs/telemetry.md`](docs/telemetry.md).
+An optional remote sink batches records to the Roundhouse indexer; sink failures never fail a call, and records queue in `~/.x402/outbox/` for the next invocation. See [`docs/telemetry.md`](docs/telemetry.md).
 
 ## The unified endpoint
 
@@ -215,8 +215,8 @@ x402 serve token create agent-1 --budget-daily 1.00 --max-per-call 0.01
 ```bash
 curl -s -X POST http://127.0.0.1:8403/v1/call \
   -H "Authorization: Bearer $X402_TOKEN" -H 'content-type: application/json' \
-  -H 'Idempotency-Key: lei-amplify-1' \
-  -d '{"url":"x402:lei","data":{"query":"Amplify Limited"},"max":"0.01"}'
+  -H 'Idempotency-Key: lei-roundhouse-1' \
+  -d '{"url":"x402:lei","data":{"query":"Roundhouse AI Ltd."},"max":"0.01"}'
 ```
 
 Routes: `POST /v1/call`, `POST /v1/probe`, `GET /v1/discover`, `GET /v1/history`, `GET /v1/health`. Errors carry the CLI exit code as `errorCode`, so one failure taxonomy covers all three surfaces. MCP mode exposes `x402_call`, `x402_probe`, `x402_discover` and `x402_history`.

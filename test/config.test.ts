@@ -74,16 +74,24 @@ describe('config precedence', () => {
   });
 
   it('writes config.json 0600 and round-trips dotted keys', () => {
-    writeRawConfig(setPath(readRawConfig(), 'telemetry.sink.url', 'https://ioi.md/ingest/v1/x402'));
+    writeRawConfig(
+      setPath(
+        readRawConfig(),
+        'telemetry.sink.url',
+        'https://www.roundhouse.studio/api/v0/ingest/x402',
+      ),
+    );
     expect(statSync(paths.config()).mode & 0o777).toBe(0o600);
-    expect(getPath(readRawConfig(), 'telemetry.sink.url')).toBe('https://ioi.md/ingest/v1/x402');
+    expect(getPath(readRawConfig(), 'telemetry.sink.url')).toBe(
+      'https://www.roundhouse.studio/api/v0/ingest/x402',
+    );
   });
 });
 
 describe('authorization cache', () => {
   const key = () =>
     authKey({
-      url: 'https://api.example.com/v1/lei?query=Amplify',
+      url: 'https://api.example.com/v1/lei?query=Roundhouse',
       method: 'GET',
       body: '',
       payTo: '0x1831f336585a6C67B6A954d28f3E07F44C4EEBbd',
@@ -97,7 +105,7 @@ describe('authorization cache', () => {
   it('is stable for the same request identity and case-insensitive on addresses', () => {
     expect(key()).toBe(key());
     const upper = authKey({
-      url: 'https://api.example.com/v1/lei?query=Amplify',
+      url: 'https://api.example.com/v1/lei?query=Roundhouse',
       method: 'get',
       body: '',
       payTo: '0x1831F336585A6C67B6A954D28F3E07F44C4EEBBD',
@@ -112,7 +120,7 @@ describe('authorization cache', () => {
 
   it('changes when the amount changes', () => {
     const other = authKey({
-      url: 'https://api.example.com/v1/lei?query=Amplify',
+      url: 'https://api.example.com/v1/lei?query=Roundhouse',
       method: 'GET',
       body: '',
       payTo: '0x1831f336585a6C67B6A954d28f3E07F44C4EEBbd',

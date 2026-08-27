@@ -28,14 +28,14 @@ Three layers, later wins:
     "redactKeys": [],
     "sink": {
       "enabled": false,
-      "url": "https://ioi.md/ingest/v1/x402",
-      "token": "env:IOI_INGEST_TOKEN",
+      "url": "https://www.roundhouse.studio/api/v0/ingest/x402",
+      "token": "env:ROUNDHOUSE_INGEST_TOKEN",
       "batchSize": 50,
       "batchIntervalMs": 10000
     }
   },
   "defaults": { "chain": "base", "timeout": 30 },
-  "discover": { "indexUrl": "https://ioi.md/api/v1" },
+  "discover": { "indexUrl": "https://www.roundhouse.studio/api/v0" },
   "facilitator": { "url": null, "token": null },
   "pins": { "lei": "https://provider.example/v1/lei" },
   "serve": { "host": "127.0.0.1", "port": 8403 }
@@ -60,10 +60,32 @@ Three layers, later wins:
 | `telemetry.sink`                   | Remote ingest. Off by default; failures never fail a call.                                                                         |
 | `defaults.chain`                   | Preferred chain, and the first tiebreak on multi-option 402s                                                                       |
 | `defaults.timeout`                 | Total per-request timeout in seconds                                                                                               |
-| `discover.indexUrl`                | IOI index base URL                                                                                                                 |
+| `discover.indexUrl`                | Roundhouse index base URL. Queried as `<indexUrl>/endpoints?q=<capability>`.                                                       |
 | `facilitator.url`                  | Settlement confirmation source for `x402 verify`                                                                                   |
 | `pins`                             | Capability → fixed provider URL, when determinism beats price                                                                      |
 | `serve.host` / `serve.port`        | Defaults for `x402 serve`                                                                                                          |
+
+## Discovery
+
+`x402 discover <capability>` and `x402:<capability>` resolution both call the Roundhouse index:
+
+```bash
+curl -sL 'https://www.roundhouse.studio/api/v0/endpoints?q=lei'
+```
+
+Each entry in the returned `endpoints` array is mapped onto a provider:
+
+| Index field         | Provider field | Used for                                                         |
+| ------------------- | -------------- | ---------------------------------------------------------------- |
+| `resource`          | `url`          | The endpoint that gets called                                    |
+| `service_name`      | `capability`   | Display and ledger record                                        |
+| `price_usdc`        | `price`        | Cheapest-first ordering and the `--max` gate (`asset` is `USDC`) |
+| `pay_to`            | `payTo`        | The `allowlist.payTo` gate                                       |
+| `is_live`           | `live`         | Down endpoints sort last and are never auto-routed to            |
+| `http_status`       | `httpStatus`   | Reported in JSON output                                          |
+| `l30_unique_payers` | `payers30d`    | Reported in JSON output                                          |
+
+Providers are sorted live-first, then cheapest. `x402 discover` lists every provider the allowlist permits, marking down ones `[down]`; resolving `x402:<capability>` for an actual call skips them. A `pins` entry bypasses the index entirely.
 
 ## Secrets
 

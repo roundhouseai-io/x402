@@ -92,7 +92,7 @@ export const DEFAULT_CONFIG: X402Config = {
     sink: { enabled: false, batchSize: 50, batchIntervalMs: 10_000 },
   },
   defaults: { chain: 'base', timeout: 30 },
-  discover: { indexUrl: 'https://ioi.md/api/v1' },
+  discover: { indexUrl: 'https://www.roundhouse.studio/api/v0' },
   facilitator: {},
   pins: {},
   serve: { host: '127.0.0.1', port: 8403 },

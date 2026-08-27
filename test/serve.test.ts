@@ -212,7 +212,7 @@ describe('serve HTTP API', () => {
         '/v1/call',
         {
           url: 'https://api.example.com/v1/lei',
-          data: { query: 'Amplify Limited' },
+          data: { query: 'Roundhouse AI Ltd.' },
           method: 'GET',
         },
         { authorization: `Bearer ${plaintext}` },

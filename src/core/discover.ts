@@ -15,6 +15,12 @@ export interface Provider {
   successRate?: number;
   latencyMsP50?: number;
   updatedAt?: string;
+  /** Index liveness: false means the last probe did not reach the endpoint. */
+  live?: boolean;
+  /** Status code the index saw on its last probe. */
+  httpStatus?: number;
+  /** Distinct payers over the trailing 30 days, when the index reports it. */
+  payers30d?: number;
   source: 'index' | 'pin';
 }
 
@@ -26,20 +32,38 @@ const priceOf = (p: Provider): number => {
   return Number.isFinite(n) ? n : Number.POSITIVE_INFINITY;
 };
 
+const numOrUndef = (v: unknown): number | undefined => {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : undefined;
+  if (typeof v === 'string' && v.trim() !== '') {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : undefined;
+  }
+  return undefined;
+};
+
+const strOrUndef = (v: unknown): string | undefined =>
+  v === undefined || v === null ? undefined : String(v);
+
+/** Dead endpoints sort last; within a liveness class, cheapest first. */
+const byLivenessThenPrice = (a: Provider, b: Provider): number => {
+  const rank = (p: Provider) => (p.live === false ? 1 : 0);
+  return rank(a) - rank(b) || priceOf(a) - priceOf(b);
+};
+
 /** `x402:lei` -> `lei`. Returns undefined for ordinary URLs. */
 export function capabilityOf(target: string): string | undefined {
   const m = /^x402:(?:\/\/)?([A-Za-z0-9._-]+)$/.exec(target.trim());
   return m ? m[1] : undefined;
 }
 
-/** Query the IOI index for providers of a capability, cheapest first. */
+/** Query the Roundhouse index for providers of a capability, cheapest first. */
 export async function discover(
   capability: string,
   config: X402Config,
   timeoutMs = 10_000,
 ): Promise<Provider[]> {
   const base = config.discover.indexUrl.replace(/\/+$/, '');
-  const url = `${base}/discover?capability=${encodeURIComponent(capability)}`;
+  const url = `${base}/endpoints?q=${encodeURIComponent(capability)}`;
   const res = await request({
     url,
     method: 'GET',
@@ -52,28 +76,36 @@ export async function discover(
   const body = parseJsonBody(res.body);
   const items = Array.isArray(body)
     ? body
-    : isObj(body) && Array.isArray(body.providers)
-      ? body.providers
-      : isObj(body) && Array.isArray(body.results)
-        ? body.results
-        : [];
+    : isObj(body) && Array.isArray(body.endpoints)
+      ? body.endpoints
+      : isObj(body) && Array.isArray(body.providers)
+        ? body.providers
+        : isObj(body) && Array.isArray(body.results)
+          ? body.results
+          : [];
 
   return items
     .filter(isObj)
-    .map((p): Provider => ({
-      url: String(p.url ?? p.endpoint ?? ''),
-      capability: String(p.capability ?? capability),
-      price: p.price === undefined ? undefined : String(p.price),
-      asset: p.asset === undefined ? undefined : String(p.asset),
-      chain: p.chain === undefined ? undefined : String(p.chain),
-      payTo: p.payTo === undefined ? undefined : String(p.payTo),
-      successRate: typeof p.successRate === 'number' ? p.successRate : undefined,
-      latencyMsP50: typeof p.latencyMsP50 === 'number' ? p.latencyMsP50 : undefined,
-      updatedAt: typeof p.updatedAt === 'string' ? p.updatedAt : undefined,
-      source: 'index',
-    }))
+    .map((p): Provider => {
+      const usdcPriced = p.price_usdc !== undefined && p.price_usdc !== null;
+      return {
+        url: String(p.url ?? p.endpoint ?? p.resource ?? ''),
+        capability: String(p.capability ?? p.service_name ?? capability),
+        price: strOrUndef(p.price ?? p.price_usdc),
+        asset: strOrUndef(p.asset) ?? (usdcPriced ? 'USDC' : undefined),
+        chain: strOrUndef(p.chain),
+        payTo: strOrUndef(p.payTo ?? p.pay_to),
+        successRate: numOrUndef(p.successRate ?? p.success_rate),
+        latencyMsP50: numOrUndef(p.latencyMsP50 ?? p.latency_ms_p50),
+        updatedAt: typeof p.updatedAt === 'string' ? p.updatedAt : strOrUndef(p.updated_at),
+        live: typeof p.is_live === 'boolean' ? p.is_live : undefined,
+        httpStatus: numOrUndef(p.http_status ?? p.httpStatus),
+        payers30d: numOrUndef(p.l30_unique_payers ?? p.payers30d),
+        source: 'index',
+      };
+    })
     .filter((p) => p.url !== '')
-    .sort((a, b) => priceOf(a) - priceOf(b));
+    .sort(byLivenessThenPrice);
 }
 
 export function filterByAllowlist(providers: Provider[], config: X402Config): Provider[] {
@@ -118,11 +150,13 @@ export async function resolveTarget(target: string, config: X402Config): Promise
   }
 
   const candidates = filterByAllowlist(await discover(capability, config), config);
-  const chosen = candidates[0];
+  // Never auto-route a payment to an endpoint the index last saw down.
+  const chosen = candidates.find((p) => p.live !== false);
   if (!chosen) {
+    const down = candidates.length > 0 ? `; ${candidates.length} allowed provider(s) are down` : '';
     throw new X402Error(
       ExitCode.GENERIC,
-      `no allowed provider for capability "${capability}" in the index (${config.discover.indexUrl})`,
+      `no allowed provider for capability "${capability}" in the index (${config.discover.indexUrl})${down}`,
     );
   }
   return { url: chosen.url, capability, provider: chosen, candidates };

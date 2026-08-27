@@ -47,11 +47,11 @@ The whole payment loop in one request.
 ```bash
 curl -s -X POST http://127.0.0.1:8403/v1/call \
   -H "Authorization: Bearer $X402_TOKEN" -H 'content-type: application/json' \
-  -H 'Idempotency-Key: lei-amplify-1' \
+  -H 'Idempotency-Key: lei-roundhouse-1' \
   -d '{
         "url": "x402:lei",
         "method": "GET",
-        "data": { "query": "Amplify Limited" },
+        "data": { "query": "Roundhouse AI Ltd." },
         "max": "0.01"
       }'
 ```

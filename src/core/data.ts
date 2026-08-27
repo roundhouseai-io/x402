@@ -153,7 +153,7 @@ export function buildData(opts: BuildDataOptions): BuiltData {
 
 /**
  * Flatten data to query params using bracket notation:
- * `{company:{name:'Amplify'}}` -> `company[name]=Amplify`,
+ * `{company:{name:'Roundhouse'}}` -> `company[name]=Roundhouse`,
  * `{checks:['a','b']}` -> `checks[0]=a&checks[1]=b`.
  */
 export function toQueryParams(data: unknown, prefix = ''): Array<[string, string]> {

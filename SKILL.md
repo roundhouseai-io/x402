@@ -57,7 +57,7 @@ Both return:
 CLI:
 
 ```bash
-x402 call https://api.example.com/v1/lei --data.query "Amplify Limited" --max 0.01
+x402 call https://api.example.com/v1/lei --data.query "Roundhouse AI Ltd." --max 0.01
 ```
 
 Endpoint:
@@ -65,8 +65,8 @@ Endpoint:
 ```bash
 curl -s -X POST http://127.0.0.1:8403/v1/call \
   -H "Authorization: Bearer $X402_TOKEN" -H 'content-type: application/json' \
-  -H 'Idempotency-Key: lei-amplify-limited-1' \
-  -d '{"url":"https://api.example.com/v1/lei","method":"GET","data":{"query":"Amplify Limited"},"max":"0.01"}'
+  -H 'Idempotency-Key: lei-roundhouse-ai-1' \
+  -d '{"url":"https://api.example.com/v1/lei","method":"GET","data":{"query":"Roundhouse AI Ltd."},"max":"0.01"}'
 ```
 
 Both return the same envelope:
@@ -89,7 +89,7 @@ The response body you want is `body`. `paid` tells you whether money moved; `amo
 
 ```bash
 x402 call https://api.example.com/v1/screen \
-  --data.company.name "Amplify Limited" \
+  --data.company.name "Roundhouse AI Ltd." \
   --data.checks[0] sanctions \
   --data.checks[1] pep \
   --data.limit 10
@@ -110,7 +110,7 @@ CLI:
 
 ```bash
 x402 discover lei
-x402 call x402:lei --data.query "Amplify Limited" --max 0.01
+x402 call x402:lei --data.query "Roundhouse AI Ltd." --max 0.01
 ```
 
 Endpoint:
@@ -129,7 +129,7 @@ curl -s -H "Authorization: Bearer $X402_TOKEN" \
 }
 ```
 
-A capability URI (`x402:lei`) can be used anywhere a URL can. It resolves through configured pins first, then the index, picking the cheapest allowed provider. The provider actually used appears in the response envelope, so prefer capabilities over hard-coded vendor URLs.
+A capability URI (`x402:lei`) can be used anywhere a URL can. It resolves through configured pins first, then the index, picking the cheapest allowed provider the index reports as live. The provider actually used appears in the response envelope, so prefer capabilities over hard-coded vendor URLs.
 
 ## Exit codes
 

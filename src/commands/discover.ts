@@ -4,7 +4,7 @@ import { writeJson, isTty } from '../core/output.js';
 import { num, str, type ParsedArgs } from '../core/args.js';
 import { buildContext } from './context.js';
 
-/** Query the IOI index for providers of a capability, price-sorted. */
+/** Query the Roundhouse index for providers of a capability, price-sorted. */
 export async function discoverCommand(parsed: ParsedArgs): Promise<number> {
   const ctx = buildContext(parsed);
   const raw = parsed.positionals[0] ?? str(parsed.flags, 'capability');
@@ -23,7 +23,8 @@ export async function discoverCommand(parsed: ParsedArgs): Promise<number> {
     for (const p of providers) {
       const price = p.price ?? '?';
       const rate = p.successRate === undefined ? '' : ` ${(p.successRate * 100).toFixed(0)}% ok`;
-      process.stdout.write(`${price.padStart(10)} ${p.asset ?? ''}  ${p.url}${rate}\n`);
+      const down = p.live === false ? ' [down]' : '';
+      process.stdout.write(`${price.padStart(10)} ${p.asset ?? ''}  ${p.url}${rate}${down}\n`);
     }
     if (allowed.length !== all.length) {
       process.stdout.write(`${all.length - allowed.length} provider(s) hidden by allowlist\n`);

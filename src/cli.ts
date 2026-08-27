@@ -31,7 +31,7 @@ usage
   x402 config <get|set|list>          manage ~/.x402/config.json
 
 data
-  --data.<path> <value>               nested data, e.g. --data.company.name "Amplify Limited"
+  --data.<path> <value>               nested data, e.g. --data.company.name "Roundhouse AI Ltd."
                                       --data.checks[0] sanctions  (dots for objects, [n] for arrays)
   --json '<json>' | @file | -         JSON blob from argv, a file, or stdin
   --data-strings                      disable type coercion for the whole call

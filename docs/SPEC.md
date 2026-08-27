@@ -15,10 +15,10 @@ A single CLI that lets any agent make x402-paid HTTP requests with one command. 
 
 Design goals, in priority order:
 
-1. **One command for the whole flow.** `npx x402 <url>` should work with zero config beyond a wallet.
+1. **One command for the whole flow.** `npx @roundhouseai/x402 <url>` should work with zero config beyond a wallet.
 2. **Wallet-agnostic, no raw private keys.** Signing goes through a pluggable signer backend. OWS is the reference backend, not a dependency: any wallet that can produce an EIP-712 signature can plug in. Keys never appear in argv, env vars, or logs. This is a deliberate contrast with Coinbase's `awal`, which is x402-capable but ties the agent to Coinbase custody.
 3. **Agents are the primary user.** Machine-readable output, stable exit codes, idempotent retries, and predictable failure modes matter more than pretty output.
-4. **Every transaction is observable.** Local ledger always. Remote telemetry sink (IOI indexer) optional.
+4. **Every transaction is observable.** Local ledger always. Remote telemetry sink (Roundhouse indexer) optional.
 
 Non-goals for v1: non-Base chains, non-USDC assets, streaming responses, browser use.
 
@@ -27,14 +27,14 @@ Non-goals for v1: non-Base chains, non-USDC assets, streaming responses, browser
 ## 2. Installation and invocation
 
 ```bash
-npx x402 <url> [flags]          # zero-install via npx
-npm i -g @roundhouseai/x402     # or global install
+npx @roundhouseai/x402 <url> [flags]   # zero-install via npx
+npm i -g @roundhouseai/x402            # or global install, then: x402 <url>
 ```
 
-The bare form `npx x402 <url>` is sugar for `npx x402 call <url>`. If the first argument looks like a URL, `call` is assumed. This is the "very easy" path:
+The bare form `npx @roundhouseai/x402 <url>` is sugar for `npx @roundhouseai/x402 call <url>`. If the first argument looks like a URL, `call` is assumed. This is the "very easy" path:
 
 ```bash
-npx x402 https://mcpfax-utility.bowling-anthony.workers.dev/v1/lei --data.query "Amplify Limited"
+npx @roundhouseai/x402 https://mcpfax-utility.bowling-anthony.workers.dev/v1/lei --data.query "Roundhouse AI Ltd."
 ```
 
 With a default wallet configured (section 7), that one line does: GET with query param, receive 402, check price against limits, sign EIP-3009 authorization via OWS, retry with `X-PAYMENT`, print JSON body, write ledger entry.
@@ -51,7 +51,7 @@ With a default wallet configured (section 7), that one line does: GET with query
 | `x402 verify <receipt>`                | Confirm settlement of a prior payment                                                             |
 | `x402 wallet <list\|balance\|address>` | Passthrough to OWS                                                                                |
 | `x402 history [query]`                 | Query the local ledger                                                                            |
-| `x402 discover <capability>`           | Query the IOI index for providers by capability, price-sorted                                     |
+| `x402 discover <capability>`           | Query the Roundhouse index for providers by capability, price-sorted                              |
 | `x402 serve`                           | Run the unified endpoint: a local HTTP gateway and MCP server wrapping the full flow (section 10) |
 | `x402 config <get\|set\|list>`         | Manage `~/.x402/config.json`                                                                      |
 
@@ -67,8 +67,8 @@ Three mechanisms. They can be combined; later sources override earlier on key co
 
 ```bash
 x402 call https://api.example.com/v1/screen \
-  --data.company.name "Amplify Limited" \
-  --data.company.jurisdiction GB \
+  --data.company.name "Roundhouse AI Ltd." \
+  --data.company.jurisdiction SG \
   --data.checks[0] sanctions \
   --data.checks[1] pep \
   --data.limit 10 \
@@ -79,7 +79,7 @@ Produces:
 
 ```json
 {
-  "company": { "name": "Amplify Limited", "jurisdiction": "GB" },
+  "company": { "name": "Roundhouse AI Ltd.", "jurisdiction": "SG" },
   "checks": ["sanctions", "pep"],
   "limit": 10,
   "deep": true
@@ -91,14 +91,14 @@ Produces:
 ### 4.2 JSON blob
 
 ```bash
-x402 call <url> --json '{"company":{"name":"Amplify Limited"}}'
+x402 call <url> --json '{"company":{"name":"Roundhouse AI Ltd."}}'
 x402 call <url> --json @payload.json     # from file
 cat payload.json | x402 call <url> --json -   # from stdin
 ```
 
 ### 4.3 Placement rules
 
-- **GET / HEAD / DELETE:** data is flattened to query params. Nested keys use bracket notation (`company[name]=Amplify+Limited`). Override with `--body-always` to force a body.
+- **GET / HEAD / DELETE:** data is flattened to query params. Nested keys use bracket notation (`company[name]=Roundhouse+AI+Ltd.`). Override with `--body-always` to force a body.
 - **POST / PUT / PATCH:** data is sent as a JSON body, `Content-Type: application/json`. Override with `--form` for `application/x-www-form-urlencoded`.
 - **Method inference:** no data → GET. Any data via `--json` or dot flags → POST, unless `--method` is set or the data was routed to query params by an explicit `--method GET`.
 
@@ -232,14 +232,14 @@ Auth-like request headers (`Authorization`, `X-Api-Key`, `Cookie`, `X-PAYMENT`) 
 
 ### 6.3 Remote sink
 
-Off by default. When configured, ledger records are batched (max 50 records or 10s) and POSTed to the sink, itself authenticated via a static bearer token from config. Intended target: the IOI indexer ingest endpoint, which turns fleet-wide payment telemetry into pricing and liveness data for `x402 discover`.
+Off by default. When configured, ledger records are batched (max 50 records or 10s) and POSTed to the sink, itself authenticated via a static bearer token from config. Intended target: the Roundhouse indexer ingest endpoint, which turns fleet-wide payment telemetry into pricing and liveness data for `x402 discover`.
 
 ```json
 "telemetry": {
   "payload": "hash",
   "sink": {
-    "url": "https://ioi.md/ingest/v1/x402",
-    "token": "env:IOI_INGEST_TOKEN",
+    "url": "https://www.roundhouse.studio/api/v0/ingest/x402",
+    "token": "env:ROUNDHOUSE_INGEST_TOKEN",
     "enabled": true
   }
 }
@@ -347,7 +347,7 @@ All routes require `Authorization: Bearer <caller-token>` (section 10.4).
 {
   "url": "https://mcpfax-utility.bowling-anthony.workers.dev/v1/lei",
   "method": "GET",
-  "data": { "query": "Amplify Limited" },
+  "data": { "query": "Roundhouse AI Ltd." },
   "max": "0.01",
   "wallet": "my-agent"
 }
@@ -368,10 +368,10 @@ Response is the same JSON envelope as the CLI (section 8): `ok`, `status`, `paid
 `/v1/call` and the CLI both accept a capability URI in place of a URL:
 
 ```json
-{ "url": "x402:lei", "data": { "query": "Amplify Limited" } }
+{ "url": "x402:lei", "data": { "query": "Roundhouse AI Ltd." } }
 ```
 
-Resolution: query the IOI index for live providers of that capability, filter by allowlist, pick the cheapest, call it. The resolved provider and its price appear in the response envelope and the ledger record. `pin` in config maps a capability to a fixed provider when determinism matters more than price:
+Resolution: query the Roundhouse index for live providers of that capability, filter by allowlist, pick the cheapest, call it. The resolved provider and its price appear in the response envelope and the ledger record. `pin` in config maps a capability to a fixed provider when determinism matters more than price:
 
 ```json
 "pins": { "lei": "https://mcpfax-utility.bowling-anthony.workers.dev/v1/lei" }
@@ -407,7 +407,7 @@ Ship a `SKILL.md` with the package documenting exactly three flows: `probe` (wha
 ## 12. Open questions (blocking v1)
 
 1. **Does OWS expose EIP-712 typed-data signing?** The published core types show `signMessage` with `utf8`/`hex` encodings only. EIP-3009 requires typed-data signing. The signer abstraction (5.3) means this no longer blocks the CLI itself (the `local` backend can ship first), but OWS as the flagship backend needs it; raise upstream early.
-2. **402 payload variance.** How strictly do live providers follow the x402 spec? `probe` should be run against the current IOI index to size the compatibility shim needed in the 402 parser.
+2. **402 payload variance.** How strictly do live providers follow the x402 spec? `probe` should be run against the current Roundhouse index to size the compatibility shim needed in the 402 parser.
 3. **Receipt verification.** Facilitator settlement confirmation vs direct on-chain lookup for `verify`. Facilitator is simpler; on-chain is trustless. Proposal: facilitator in v1, on-chain in v1.1.
 4. **Multi-option 402s.** When a provider offers several payment options (chains/assets), selection order is: config `defaults.chain`, then cheapest. Confirm this is the right tiebreak.
 5. **Serve scope for v1.** Shipping CLI + serve + MCP together is three surfaces to stabilise at once. Proposal: v1 ships CLI and `serve` HTTP with token budgets; MCP mode and capability pinning land in v1.1 unless an agent fleet needs MCP on day one.

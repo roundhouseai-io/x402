@@ -49,8 +49,8 @@ const record = (over: Partial<LedgerRecord> = {}): LedgerRecord => ({
 });
 
 describe('payload levels', () => {
-  const raw = '{"query":"Amplify Limited"}';
-  const parsed = { query: 'Amplify Limited' };
+  const raw = '{"query":"Roundhouse AI Ltd."}';
+  const parsed = { query: 'Roundhouse AI Ltd.' };
 
   it('records byte counts only at none', () => {
     const summary = summarizePayload(raw, parsed, 'none');

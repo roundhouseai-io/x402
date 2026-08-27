@@ -103,12 +103,12 @@ describe('prepareRequest', () => {
   it('flattens data to query params for GET', () => {
     const prepared = prepareRequest(
       'https://api.example.com/v1/lei',
-      { query: 'Amplify Limited' },
+      { query: 'Roundhouse AI Ltd.' },
       {
         method: 'GET',
       },
     );
-    expect(prepared.url).toBe('https://api.example.com/v1/lei?query=Amplify+Limited');
+    expect(prepared.url).toBe('https://api.example.com/v1/lei?query=Roundhouse+AI+Ltd.');
     expect(prepared.body).toBeUndefined();
   });
 
@@ -175,7 +175,7 @@ describe('Engine.call', () => {
     const signer = new FakeSigner();
     const result = await makeEngine({}, signer).call({
       target: 'https://api.example.com/v1/lei',
-      data: { query: 'Amplify Limited' },
+      data: { query: 'Roundhouse AI Ltd.' },
       method: 'GET',
     });
 
@@ -340,13 +340,13 @@ describe('Engine.call', () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(200, { secret: 'value' }));
     await makeEngine().call({
       target: 'https://api.example.com/v1/lei',
-      data: { query: 'Amplify Limited' },
+      data: { query: 'Roundhouse AI Ltd.' },
       method: 'POST',
     });
     const ledgerFile = join(home, 'ledger.jsonl');
     expect(existsSync(ledgerFile)).toBe(true);
     const line = readFileSync(ledgerFile, 'utf8');
-    expect(line).not.toContain('Amplify Limited');
+    expect(line).not.toContain('Roundhouse AI Ltd.');
     expect(line).toContain('sha256:');
     const record = readRecords()[0]!;
     expect(record.request.dataKeys).toEqual(['query']);
@@ -359,12 +359,12 @@ describe('Engine.call', () => {
       telemetry: { payload: 'full', redactKeys: ['company.name'] } as never,
     }).call({
       target: 'https://api.example.com/v1/lei',
-      data: { query: 'Amplify Limited', company: { name: 'Amplify Limited' } },
+      data: { query: 'Roundhouse AI Ltd.', company: { name: 'Roundhouse AI Ltd.' } },
       method: 'POST',
     });
     const record = readRecords()[0]!;
     expect(record.request.data).toMatchObject({
-      query: 'Amplify Limited',
+      query: 'Roundhouse AI Ltd.',
       company: { name: '[redacted]' },
     });
   });

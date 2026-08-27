@@ -42,7 +42,7 @@
   description: Wallet integration and signing
 - name: 'area: discovery'
   color: 1d76db
-  description: IOI index, capabilities, pins
+  description: Roundhouse index, capabilities, pins
 
 # --- state: what needs to happen next ---
 - name: 'needs: triage'

@@ -2,15 +2,15 @@
 
 Every knowing departure from [`SPEC.md`](SPEC.md), with the reason. If you change behaviour away from the spec, add a row here in the same PR — or change the spec instead.
 
-## 1. `npx x402` is `npx @roundhouseai/x402`
+## 1. `npx x402` is `npx @roundhouseai/x402` — resolved in the spec
 
-**Spec:** §2 promises `npx x402 <url>`.
+**Spec (as authored):** §2 promised `npx x402 <url>`.
 
 **Implementation:** the unscoped `x402` name on npm is already taken by another project, so `npx x402` resolves to that package, not this one. The zero-install form is `npx @roundhouseai/x402 <url>`; the binary is still called `x402`, so a global install gives the short command the spec describes.
 
-The scope is `@roundhouseai`, matching the `roundhouseai-io` GitHub org. The spec's §2 global-install line has been corrected to it, since a package name is a fact rather than a design decision; the `npx x402` line is left as authored because that is the open question.
+The scope is `@roundhouseai`, matching the `roundhouseai-io` GitHub org.
 
-**Status:** tracked as an issue. Options are to acquire the unscoped name, ship a thin unscoped alias package, or amend the spec. Until then, no document should promise `npx x402`.
+**Status:** closed. §2 has been amended to `npx @roundhouseai/x402` throughout, so the spec and the implementation agree and this is no longer a deviation. Per-command examples elsewhere in the docs still use the short `x402 <subcommand>` form, which is what a global install gives you. No document should promise a bare `npx x402`.
 
 ## 2. The authorization cache key omits `validBefore`
 

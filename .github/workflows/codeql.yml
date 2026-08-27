@@ -1,0 +1,52 @@
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '17 4 * * 1'
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: analyze
+    runs-on: ubuntu-latest
+    permissions:
+      # A job-level block replaces the workflow-level one rather than merging
+      # with it, so contents: read has to be repeated here or checkout cannot
+      # fetch the repository.
+      contents: read
+      security-events: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+
+      # Code scanning needs Code Security enabled, which is free on public
+      # repositories and part of GitHub Advanced Security on private ones.
+      # Without it the analysis runs to completion and then fails on upload,
+      # so probe first and skip with a notice instead: this job starts working
+      # by itself the day the repository goes public or GHAS is switched on.
+      - name: Is code scanning available?
+        id: probe
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh api "repos/${{ github.repository }}/code-scanning/alerts?per_page=1" >/dev/null 2>&1; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=CodeQL skipped::Code scanning is not enabled for this repository, so results cannot be uploaded. Enable Code Security (free once the repository is public) to turn this job on."
+          fi
+
+      - if: steps.probe.outputs.enabled == 'true'
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          queries: security-extended
+
+      - if: steps.probe.outputs.enabled == 'true'
+        uses: github/codeql-action/analyze@v3

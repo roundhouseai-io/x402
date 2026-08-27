@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/roundhouseai-io/x402/security/advisories/new
+    about: Anything that could cost someone money, or expose a key or token. Never a public issue.
+  - name: Question or idea
+    url: https://github.com/roundhouseai-io/x402/discussions
+    about: Usage questions, design discussions, and anything not yet a concrete bug or request.

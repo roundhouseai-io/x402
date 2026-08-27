@@ -1,0 +1,52 @@
+name: Provider incompatibility
+description: A live endpoint's 402 payload does not parse, or the paid retry is rejected
+labels: ['type: provider-compat', 'needs: triage']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        These reports are what make the 402 parser evidence-driven rather than guesswork. The raw payload is the important part.
+  - type: input
+    id: endpoint
+    attributes:
+      label: Endpoint
+      description: The URL, if it is public. A capability name is fine if it is not.
+      placeholder: https://provider.example/v1/lei
+    validations:
+      required: true
+  - type: textarea
+    id: payload
+    attributes:
+      label: Raw 402 body
+      description: The exact response body. Redact nothing except tokens.
+      render: json
+    validations:
+      required: true
+  - type: textarea
+    id: probe
+    attributes:
+      label: What probe said
+      description: Output of `x402 probe <url>`.
+      render: json
+  - type: dropdown
+    id: stage
+    attributes:
+      label: Where it failed
+      options:
+        - Parsing the 402 payload (exit 40 before signing)
+        - Selecting a payment option
+        - Provider rejected the X-PAYMENT authorization (second 402)
+        - Settlement never confirmed
+        - Something else
+    validations:
+      required: true
+  - type: input
+    id: chain
+    attributes:
+      label: Chain and asset offered
+      placeholder: 'base / USDC, or: two options, base and base-sepolia'
+  - type: textarea
+    id: settlement
+    attributes:
+      label: X-PAYMENT-RESPONSE header, if any
+      description: Decoded if you have it; base64 is fine.

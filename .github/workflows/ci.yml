@@ -1,0 +1,137 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['20', '22']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - run: npm run format:check
+      # `npm run lint` is deliberately not here. oxlint loads its TypeScript
+      # config through Node's type stripping, which Node 20 does not have, and
+      # lint findings do not vary by Node version anyway. The `anti-slop` job
+      # runs it once on Node 22. See docs/linting.md.
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
+      # The published entry point must actually run on a clean install.
+      - run: node dist/cli.js --version
+      - run: node dist/cli.js --help
+
+  package:
+    name: package contents
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Pack and inspect
+        run: |
+          npm pack --dry-run --json > pack.json
+          node -e "
+            const { readFileSync } = require('node:fs');
+            const [pkg] = JSON.parse(readFileSync('pack.json', 'utf8'));
+            const files = pkg.files.map((f) => f.path);
+            const stray = files.filter((f) => !/^(dist\/|README\.md$|SKILL\.md$|LICENSE$|package\.json$)/.test(f));
+            if (stray.length) {
+              console.error('unexpected files in the tarball:', stray);
+              process.exit(1);
+            }
+            if (!files.includes('dist/cli.js')) {
+              console.error('dist/cli.js missing from the tarball');
+              process.exit(1);
+            }
+            console.log(files.length + ' files, ' + pkg.size + ' bytes');
+          "
+      - name: Fail if a runtime dependency appeared
+        run: |
+          node -e "
+            const pkg = require('./package.json');
+            const deps = Object.keys(pkg.dependencies ?? {});
+            if (deps.length) {
+              console.error('this package ships with zero runtime dependencies; found:', deps);
+              console.error('see CLAUDE.md — adding one needs an issue and a maintainer decision');
+              process.exit(1);
+            }
+          "
+
+  lint:
+    name: anti-slop
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      # Enforced rules fail the job. Everything else is reported, and the
+      # counts go to the step summary so a PR can be judged on whether it
+      # moved them rather than on whether it happened to touch a linted file.
+      - name: Lint src and test
+        run: |
+          set -uo pipefail
+          STATUS=0
+          npm run lint 2>&1 | tee lint.log || STATUS=$?
+          # grep exits 1 on no matches, which is the clean case, not a failure —
+          # so every count below tolerates it and only STATUS decides the job.
+          ERRORS=$(grep -c 'error anti-slop' lint.log || true)
+          WARNINGS=$(grep -c 'warning anti-slop' lint.log || true)
+          {
+            echo "### anti-slop"
+            echo
+            echo "${ERRORS:-0} enforced, ${WARNINGS:-0} outstanding."
+            echo
+            echo '| count | rule | level |'
+            echo '| ----: | ---- | ----- |'
+            grep -oE '(error|warning) anti-slop\([^)]+\)' lint.log \
+              | sed -E 's/^(error|warning) anti-slop\((.+)\)$/\2 \1/' \
+              | sort | uniq -c | sort -rn \
+              | awk '{ printf "| %s | `%s` | %s |\n", $1, $2, $3 }' || true
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$STATUS"
+
+  install:
+    name: install from tarball
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Install the packed tarball globally and run it
+        run: |
+          TARBALL=$(npm pack --silent)
+          npm i -g "./$TARBALL"
+          x402 --version
+          x402 probe --help >/dev/null 2>&1 || true
+          test "$(x402 --version)" = "$(node -p 'require("./package.json").version')"

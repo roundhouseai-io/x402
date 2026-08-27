@@ -1,0 +1,72 @@
+name: Bug report
+description: Something behaves differently from the spec or the docs
+labels: ['type: bug', 'needs: triage']
+body:
+  - type: markdown
+    attributes:
+      value: |
+        If the bug could cost someone money — a double payment, a bypassed spend gate, a leaked key or token — stop and use [private vulnerability reporting](https://github.com/roundhouseai-io/x402/security/advisories/new) instead.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you ran, and what you got.
+      placeholder: |
+        $ x402 call https://provider.example/v1/lei --data.query "Roundhouse AI Ltd." --max 0.01
+        {"ok":false,"errorCode":40,...}
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: input
+    id: exit
+    attributes:
+      label: Exit code
+      description: The process exit status, or errorCode from the envelope.
+      placeholder: '40'
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Surface
+      options:
+        - CLI
+        - serve (HTTP)
+        - serve --mcp
+        - library import
+    validations:
+      required: true
+  - type: checkboxes
+    id: money
+    attributes:
+      label: Did money move?
+      options:
+        - label: A payment was signed or settled as part of this bug
+        - label: I have checked `x402 history --since 24h` and the ledger matches what I expected
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `x402 --version`.
+    validations:
+      required: true
+  - type: input
+    id: node
+    attributes:
+      label: Node version and platform
+      placeholder: 'v22.9.0, macOS 15 arm64'
+    validations:
+      required: true
+  - type: textarea
+    id: config
+    attributes:
+      label: Relevant configuration
+      description: Output of `x402 config list` with anything sensitive removed. Never paste a token or a key.
+      render: json
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else

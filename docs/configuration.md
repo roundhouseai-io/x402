@@ -75,15 +75,19 @@ curl -sL 'https://www.roundhouse.studio/api/v0/endpoints?q=lei'
 
 Each entry in the returned `endpoints` array is mapped onto a provider:
 
-| Index field         | Provider field | Used for                                                         |
-| ------------------- | -------------- | ---------------------------------------------------------------- |
-| `resource`          | `url`          | The endpoint that gets called                                    |
-| `service_name`      | `capability`   | Display and ledger record                                        |
-| `price_usdc`        | `price`        | Cheapest-first ordering and the `--max` gate (`asset` is `USDC`) |
-| `pay_to`            | `payTo`        | The `allowlist.payTo` gate                                       |
-| `is_live`           | `live`         | Down endpoints sort last and are never auto-routed to            |
-| `http_status`       | `httpStatus`   | Reported in JSON output                                          |
-| `l30_unique_payers` | `payers30d`    | Reported in JSON output                                          |
+| Index field         | Provider field | Used for                                                             |
+| ------------------- | -------------- | -------------------------------------------------------------------- |
+| `resource`          | `url`          | The endpoint that gets called                                        |
+| `service_name`      | `capability`   | Display and ledger record; may be `null`, then the query is used     |
+| `price_usdc`        | `price`        | Cheapest-first ordering and the `--max` gate                         |
+| `asset`             | `asset`        | Contract address, resolved to a symbol (`usdc`) via `core/assets.ts` |
+| `network`           | `chain`        | CAIP-2 (`eip155:8453`), resolved to a name (`base`) the same way     |
+| `pay_to`            | `payTo`        | The `allowlist.payTo` gate                                           |
+| `is_live`           | `live`         | Down endpoints sort last and are never auto-routed to                |
+| `l30_total_calls`   | `calls30d`     | Reported in JSON output                                              |
+| `l30_unique_payers` | `payers30d`    | Reported in JSON output                                              |
+
+An unrecognised network or asset is passed through verbatim rather than dropped. `scheme`, `description`, `tags`, `icon_url` and `onchain_volume_usdc` are returned by the index but not currently mapped.
 
 Providers are sorted live-first, then cheapest. `x402 discover` lists every provider the allowlist permits, marking down ones `[down]`; resolving `x402:<capability>` for an actual call skips them. A `pins` entry bypasses the index entirely.
 

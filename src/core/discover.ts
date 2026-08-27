@@ -1,6 +1,7 @@
 import { X402Error, ExitCode } from './errors.js';
 import { request, parseJsonBody } from './http.js';
 import { domainAllowed } from './gates.js';
+import { findChain, findAsset } from './assets.js';
 import type { X402Config } from './config.js';
 
 export interface Provider {
@@ -17,8 +18,8 @@ export interface Provider {
   updatedAt?: string;
   /** Index liveness: false means the last probe did not reach the endpoint. */
   live?: boolean;
-  /** Status code the index saw on its last probe. */
-  httpStatus?: number;
+  /** Settled calls over the trailing 30 days, when the index reports it. */
+  calls30d?: number;
   /** Distinct payers over the trailing 30 days, when the index reports it. */
   payers30d?: number;
   source: 'index' | 'pin';
@@ -87,19 +88,27 @@ export async function discover(
   return items
     .filter(isObj)
     .map((p): Provider => {
+      // The index states the chain as CAIP-2 (`eip155:8453`) and the asset as a
+      // contract address; normalise both through the tables so `defaults.chain`
+      // and the allowlists compare against the same names the 402 parser yields.
+      const chain = findChain(strOrUndef(p.chain ?? p.network));
+      const assetRaw = strOrUndef(p.asset);
       const usdcPriced = p.price_usdc !== undefined && p.price_usdc !== null;
       return {
         url: String(p.url ?? p.endpoint ?? p.resource ?? ''),
         capability: String(p.capability ?? p.service_name ?? capability),
         price: strOrUndef(p.price ?? p.price_usdc),
-        asset: strOrUndef(p.asset) ?? (usdcPriced ? 'USDC' : undefined),
-        chain: strOrUndef(p.chain),
+        asset:
+          findAsset(assetRaw, chain?.chainId)?.symbol ??
+          assetRaw ??
+          (usdcPriced ? 'usdc' : undefined),
+        chain: chain?.network ?? strOrUndef(p.chain ?? p.network),
         payTo: strOrUndef(p.payTo ?? p.pay_to),
         successRate: numOrUndef(p.successRate ?? p.success_rate),
         latencyMsP50: numOrUndef(p.latencyMsP50 ?? p.latency_ms_p50),
         updatedAt: typeof p.updatedAt === 'string' ? p.updatedAt : strOrUndef(p.updated_at),
         live: typeof p.is_live === 'boolean' ? p.is_live : undefined,
-        httpStatus: numOrUndef(p.http_status ?? p.httpStatus),
+        calls30d: numOrUndef(p.l30_total_calls ?? p.calls30d),
         payers30d: numOrUndef(p.l30_unique_payers ?? p.payers30d),
         source: 'index',
       };

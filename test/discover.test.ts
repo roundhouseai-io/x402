@@ -4,6 +4,7 @@ import { discover, filterByAllowlist, capabilityOf, resolveTarget } from '../src
 import { ExitCode, X402Error } from '../src/core/errors.js';
 
 const PAY_TO = '0x1831f336585a6C67B6A954d28f3E07F44C4EEBbd';
+const USDC_BASE = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 
 function config(override: unknown = {}): X402Config {
   return mergeDeep(DEFAULT_CONFIG, override);
@@ -16,15 +17,22 @@ function jsonResponse(status: number, body: unknown): Response {
   });
 }
 
-/** One entry as the Roundhouse index returns it. */
+/** One entry shaped exactly as the live Roundhouse index returns it. */
 const endpoint = (over: Record<string, unknown> = {}) => ({
-  service_name: 'lei',
   resource: 'https://provider.example/v1/lei',
-  price_usdc: '0.01',
+  service_name: 'lei',
+  description: 'Legal entity identifier lookup.',
+  icon_url: null,
+  tags: [],
+  network: 'eip155:8453',
   pay_to: PAY_TO,
-  is_live: true,
-  http_status: 200,
+  asset: USDC_BASE,
+  scheme: 'exact',
+  price_usdc: '0.01',
+  l30_total_calls: 34,
   l30_unique_payers: 12,
+  is_live: true,
+  onchain_volume_usdc: null,
   ...over,
 });
 
@@ -62,14 +70,15 @@ describe('discover', () => {
         url: 'https://provider.example/v1/lei',
         capability: 'lei',
         price: '0.01',
-        asset: 'USDC',
-        chain: undefined,
+        // CAIP-2 and the contract address normalise to the names the 402 parser uses.
+        asset: 'usdc',
+        chain: 'base',
         payTo: PAY_TO,
         successRate: undefined,
         latencyMsP50: undefined,
         updatedAt: undefined,
         live: true,
-        httpStatus: 200,
+        calls30d: 34,
         payers30d: 12,
         source: 'index',
       },
@@ -129,7 +138,7 @@ describe('discover', () => {
     ]);
     // Zero is a price, not a missing one: it must not fall through to `undefined`.
     expect(providers[0]?.price).toBe('0');
-    expect(providers[0]?.asset).toBe('USDC');
+    expect(providers[0]?.asset).toBe('usdc');
   });
 
   it('sorts an unpriced provider after every priced one', async () => {
@@ -162,14 +171,28 @@ describe('discover', () => {
     expect((await resolveTarget('x402:lei', config())).url).toBe('https://a.example/lei');
   });
 
-  it('fabricates nothing from null fields', async () => {
+  it('passes an unrecognised network through unchanged', async () => {
+    stubIndex({ endpoints: [endpoint({ network: 'eip155:999999', asset: undefined })] });
+
+    const [p] = await discover('lei', config());
+
+    expect(p?.chain).toBe('eip155:999999');
+    // An asset that is not in the tables is not renamed either.
+    expect(p?.asset).toBe('usdc');
+  });
+
+  it('fabricates nothing from null fields, and falls back for a null service_name', async () => {
     stubIndex({
       endpoints: [
         {
           resource: 'https://x.example/lei',
+          service_name: null,
           price_usdc: null,
           pay_to: null,
+          asset: null,
+          network: null,
           is_live: null,
+          l30_total_calls: null,
           l30_unique_payers: null,
         },
       ],
@@ -177,10 +200,14 @@ describe('discover', () => {
 
     const [p] = await discover('lei', config());
 
+    // The live index really does return `service_name: null` for some entries.
+    expect(p?.capability).toBe('lei');
     expect(p?.price).toBeUndefined();
     expect(p?.asset).toBeUndefined();
+    expect(p?.chain).toBeUndefined();
     expect(p?.payTo).toBeUndefined();
     expect(p?.live).toBeUndefined();
+    expect(p?.calls30d).toBeUndefined();
     expect(p?.payers30d).toBeUndefined();
   });
 

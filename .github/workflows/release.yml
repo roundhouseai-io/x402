@@ -25,7 +25,8 @@ jobs:
     if: "!startsWith(github.event.head_commit.message, 'chore: release v')"
     permissions:
       contents: write # push the version commit and tag, create the Release
-      id-token: write # npm provenance
+      # No id-token: npm provenance is off, because it requires a public source
+      # repository and this one is private. See docs/releasing.md.
     steps:
       - uses: actions/checkout@v4
         with:
@@ -49,16 +50,14 @@ jobs:
           echo "count=$COUNT" >> "$GITHUB_OUTPUT"
           echo "$COUNT changeset(s) pending" >> "$GITHUB_STEP_SUMMARY"
 
-      # Never publish something that does not build or pass its tests.
-      - if: steps.pending.outputs.count != '0'
-        run: npm run typecheck
-      - if: steps.pending.outputs.count != '0'
-        run: npm test
-      - if: steps.pending.outputs.count != '0'
-        run: npm run build
+      # Never publish something that does not build or pass its tests. These
+      # are ungated: the publish step below is too, so any run of this job can
+      # reach npm and every one of them has to have earned it.
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
 
       - name: Apply the version bump
-        id: version
         if: steps.pending.outputs.count != '0'
         run: |
           set -euo pipefail
@@ -66,6 +65,13 @@ jobs:
           # changesets and local git history. It contacts no API, so this step
           # needs no token and no scope — see docs/releasing.md.
           npx changeset version
+
+      # Read after the bump, and unconditionally: a recovery run has no
+      # changesets left to consume but still needs to know what to publish.
+      - name: Read the version
+        id: version
+        run: |
+          set -euo pipefail
           VERSION=$(node -p "require('./package.json').version")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
           echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
@@ -83,22 +89,21 @@ jobs:
           git commit -m 'chore: release v${{ steps.version.outputs.version }}'
           git push origin HEAD:main
 
+      # Deliberately ungated. `changeset publish` asks npm what exists and
+      # publishes only what is missing, so this is safe to re-run and is the
+      # recovery path when the version landed on main but the publish failed.
       - name: Publish to npm
-        if: steps.pending.outputs.count != '0'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NPM_CONFIG_PROVENANCE: 'true'
         run: npx changeset publish
 
       # `changeset publish` tags locally; push what it made.
       - name: Push the tag
-        if: steps.pending.outputs.count != '0'
         run: git push origin --tags
 
       # Pre-1.0 and pre-release versions are flagged as pre-releases, so the
       # "Latest" badge never points at something that has not promised stability.
       - name: Create the GitHub Release
-        if: steps.pending.outputs.count != '0'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.version.outputs.tag }}
@@ -130,7 +135,11 @@ jobs:
             echo "no CHANGELOG section for $VERSION; using generated notes"
             FLAGS+=(--generate-notes)
           fi
-          gh release create "$TAG" --title "$TAG" "${FLAGS[@]}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG already exists"
+          else
+            gh release create "$TAG" --title "$TAG" "${FLAGS[@]}"
+          fi
           rm -f RELEASE_NOTES.md
 
       - name: Summarise
@@ -140,20 +149,20 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
           STATUS: ${{ job.status }}
         run: |
+          # `changeset publish` exits 0 both when it publishes and when the
+          # version is already on npm, so a successful job means the version is
+          # published either way. That, not the changeset count, is the truth to
+          # report: a recovery run consumes no changesets and still publishes.
           {
             echo "### Release"
             echo
-            if [ "${COUNT:-0}" = "0" ]; then
-              echo "No changesets pending — nothing to publish."
-            elif [ "$STATUS" = "success" ] && [ -n "${VERSION:-}" ]; then
-              echo "Published \`@roundhouseai/x402@${VERSION}\`."
+            if [ "$STATUS" = "success" ]; then
+              echo "\`@roundhouseai/x402@${VERSION}\` is on npm."
               echo
-              echo "Verify with \`npm audit signatures\` — the tarball carries npm provenance."
+              echo "Published without provenance — see docs/releasing.md."
             else
-              # Never claim a publish that did not happen: this step runs on
-              # failure too, and an empty VERSION means it never got that far.
-              echo "**Nothing was published.** ${COUNT} changeset(s) still pending."
+              echo "**Not released.** Local version is \`${VERSION:-unknown}\`, ${COUNT:-0} changeset(s) were pending at the start."
               echo
-              echo "If \`main\` now carries a \`chore: release\` commit, the bump landed and only the publish failed — re-running this workflow publishes it. If it does not, nothing changed and a re-run starts clean."
+              echo "If a \`chore: release\` commit is on \`main\`, the bump landed and the publish did not: re-run this workflow once the cause is fixed and it will publish that version without needing a changeset."
             fi
           } >> "$GITHUB_STEP_SUMMARY"

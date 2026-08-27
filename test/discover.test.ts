@@ -113,6 +113,77 @@ describe('discover', () => {
     expect(providers[0]?.asset).toBeUndefined();
   });
 
+  it('keeps a free endpoint priced at zero, and sorts it first', async () => {
+    stubIndex({
+      endpoints: [
+        endpoint({ resource: 'https://paid.example/lei', price_usdc: '0.01' }),
+        endpoint({ resource: 'https://free.example/lei', price_usdc: 0 }),
+      ],
+    });
+
+    const providers = await discover('lei', config());
+
+    expect(providers.map((p) => p.url)).toEqual([
+      'https://free.example/lei',
+      'https://paid.example/lei',
+    ]);
+    // Zero is a price, not a missing one: it must not fall through to `undefined`.
+    expect(providers[0]?.price).toBe('0');
+    expect(providers[0]?.asset).toBe('USDC');
+  });
+
+  it('sorts an unpriced provider after every priced one', async () => {
+    stubIndex({
+      endpoints: [
+        endpoint({ resource: 'https://unpriced.example/lei', price_usdc: undefined }),
+        endpoint({ resource: 'https://dear.example/lei', price_usdc: '9.99' }),
+      ],
+    });
+
+    expect((await discover('lei', config())).map((p) => p.url)).toEqual([
+      'https://dear.example/lei',
+      'https://unpriced.example/lei',
+    ]);
+  });
+
+  it('treats an index that reports no liveness as routable', async () => {
+    stubIndex({
+      endpoints: [
+        endpoint({ resource: 'https://b.example/lei', price_usdc: '0.05', is_live: undefined }),
+        endpoint({ resource: 'https://a.example/lei', price_usdc: '0.01', is_live: undefined }),
+      ],
+    });
+
+    const providers = await discover('lei', config());
+
+    expect(providers.every((p) => p.live === undefined)).toBe(true);
+    expect(providers.map((p) => p.url)).toEqual(['https://a.example/lei', 'https://b.example/lei']);
+    // Unknown liveness must not block resolution the way `is_live: false` does.
+    expect((await resolveTarget('x402:lei', config())).url).toBe('https://a.example/lei');
+  });
+
+  it('fabricates nothing from null fields', async () => {
+    stubIndex({
+      endpoints: [
+        {
+          resource: 'https://x.example/lei',
+          price_usdc: null,
+          pay_to: null,
+          is_live: null,
+          l30_unique_payers: null,
+        },
+      ],
+    });
+
+    const [p] = await discover('lei', config());
+
+    expect(p?.price).toBeUndefined();
+    expect(p?.asset).toBeUndefined();
+    expect(p?.payTo).toBeUndefined();
+    expect(p?.live).toBeUndefined();
+    expect(p?.payers30d).toBeUndefined();
+  });
+
   it('drops entries with no endpoint URL', async () => {
     stubIndex({ endpoints: [endpoint({ resource: undefined }), endpoint()] });
     expect(await discover('lei', config())).toHaveLength(1);

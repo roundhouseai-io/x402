@@ -33,7 +33,9 @@ That is the whole process. The version number is a consequence of the changesets
 
 **The order is deliberate.** The version commit is pushed _before_ publishing. If the publish then fails, `main` carries a version commit with no npm release, which a re-run repairs. The reverse — published to npm, unrecorded in git — cannot be repaired, because a version can never be republished.
 
-**The release commit does not loop.** Pushing `chore: release vX.Y.Z` to `main` retriggers the workflow, but that run finds no changesets and exits at the guard. A `startsWith` check on the commit message stops it even earlier.
+**Recovery is a plain re-run.** Only the two steps that mutate the repository — the version bump and its commit — are gated on there being pending changesets. Verification, publish, tag and Release always run, because after a failed publish the changesets have already been consumed, and gating those on the count would leave the recovery path doing nothing. `changeset publish` asks npm what exists and publishes only what is missing, so a re-run is safe whether or not anything is outstanding, and a job that succeeds means the version is on npm either way.
+
+**The release commit does not loop.** Pushing `chore: release vX.Y.Z` to `main` retriggers the workflow, but a `startsWith` check on the commit message skips the whole job. Even without it the run would be harmless — no changesets to consume, and a publish that finds the version already on npm — but skipping is cheaper and clearer in the run list.
 
 ### What this trades away
 

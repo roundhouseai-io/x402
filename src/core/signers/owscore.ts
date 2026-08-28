@@ -37,6 +37,15 @@ export interface OwsCoreModule {
    * must never create a wallet as a side effect of a call.
    */
   createWallet(name: string, passphrase?: string, words?: number, vaultPath?: string): OwsWallet;
+  createPolicy(policyJson: string, vaultPath?: string): void;
+  createApiKey(
+    name: string,
+    walletIds: string[],
+    policyIds: string[],
+    passphrase: string,
+    expiresAt?: string,
+    vaultPath?: string,
+  ): { token: string; id: string; name: string };
   signTypedData(
     wallet: string,
     chain: string,
@@ -100,6 +109,12 @@ export function exitCodeForOwsCoreError(message: string): ExitCodeValue {
  * trouble is a failed payment with a message naming an AEAD library.
  */
 export function explainOwsCoreError(message: string): string {
+  if (/api key not found|invalid api key/i.test(message)) {
+    return (
+      `the OWS API key was not accepted (${message}). It may have been revoked, or the ` +
+      'token may be from a different vault. Mint a new one with `rh-x402 wallet policy`.'
+    );
+  }
   if (/aead|decryption failed/i.test(message)) {
     return (
       `the vault passphrase is wrong or missing (${message}). Set OWS_VAULT_PASS, ` +
@@ -151,21 +166,50 @@ export class OwsCoreSigner implements SignerBackend {
     private readonly load: () => Promise<OwsCoreModule> = loadOwsCore,
   ) {}
 
+  /**
+   * The credential handed to OWS, and the single most consequential choice in
+   * this backend.
+   *
+   * An API key token puts the OWS policy engine in front of the signature; the
+   * vault passphrase is owner access and is gated by nothing. Verified by
+   * signing the same payload both ways against a policy allowing only Base
+   * USDC: the token was refused for another contract, the passphrase signed it.
+   */
+  private credential(): string | undefined {
+    if (this.config.apiKey) return this.config.apiKey;
+    if (this.config.requireApiKey) {
+      // Never fall through to the passphrase here. This wallet was set up
+      // behind a policy, and signing with owner access instead would keep
+      // payments working while quietly removing the control — the operator
+      // would have no way to notice.
+      throw new X402Error(
+        ExitCode.OWS_UNREACHABLE,
+        'this wallet is configured to sign only with an OWS API key, and none is set. ' +
+          'Export OWS_X402_KEY (the token from `rh-x402 wallet policy`). Refusing to fall ' +
+          'back to the vault passphrase, which would sign without the policy.',
+      );
+    }
+    return this.config.passphrase;
+  }
+
   async capabilities(): Promise<SignerCapabilities> {
-    // Declared, not assumed: these come from the package's own API surface.
-    //
-    // `policies: false` is the conservative reading, and deliberately so. OWS
-    // describes its policy engine as gating *agent (API key)* operations, and
-    // `createApiKey(name, walletIds, policyIds, ...)` is what binds a policy to
-    // a caller; `signTypedData` takes no key or policy argument, so an
-    // in-process call authenticated by the vault passphrase has nothing to bind
-    // one to. Claiming `true` here would tell an operator they have a spend
-    // control they may not have, which is the expensive direction to be wrong
-    // in. A binding policy layer means an API key and the HTTP `ows` backend.
+    // Declared, not assumed: these come from the package's own API surface,
+    // and `policies` reflects which credential is actually configured rather
+    // than what the backend is capable of in principle. Saying `true` while
+    // signing with a passphrase would promise a spend control that is not
+    // there, which is the expensive direction to be wrong in.
     //
     // `balances: false` is not conservatism: the package exports no balance
-    // function at all, so the pre-flight funding check is skipped, not guessed.
-    return { typedData: true, policies: false, balances: false, accounts: true, declared: true };
+    // function, so the pre-flight funding check is skipped, not guessed.
+    return {
+      typedData: true,
+      // True when no signature from this backend can bypass a policy: either a
+      // key is set, or one is required and its absence is an error.
+      policies: this.config.apiKey !== undefined || this.config.requireApiKey === true,
+      balances: false,
+      accounts: true,
+      declared: true,
+    };
   }
 
   async getAccounts(): Promise<SignerAccount[]> {
@@ -199,13 +243,16 @@ export class OwsCoreSigner implements SignerBackend {
   async signTypedData(typedData: TypedData): Promise<string> {
     const ows = await this.load();
     const chain = owsChainName(String(typedData.domain.chainId ?? ''));
+    // Resolved outside the try: this can refuse on its own terms, and its exit
+    // code must survive rather than being re-derived from the message below.
+    const credential = this.credential();
     let result: OwsSignResult;
     try {
       result = ows.signTypedData(
         this.wallet,
         chain,
         JSON.stringify(typedData),
-        this.config.passphrase,
+        credential,
         null,
         this.config.vaultPath,
       );

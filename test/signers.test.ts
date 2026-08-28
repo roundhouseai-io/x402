@@ -376,6 +376,8 @@ describe('ows-core backend', () => {
     listWallets: () => [evmWallet],
     getWallet: () => evmWallet,
     createWallet: () => evmWallet,
+    createPolicy: () => undefined,
+    createApiKey: () => ({ token: 'ows_key_test', id: 'k1', name: 'x402-agent' }),
     signTypedData: () => ({ signature: SIG_BODY, recoveryId: 27 }),
     ...over,
   });

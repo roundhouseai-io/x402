@@ -26,6 +26,7 @@ usage
   rh-x402 pay <402-json|@file|->         build a signed X-PAYMENT header; no HTTP
   rh-x402 verify <receiptId|@file>       confirm settlement of a prior payment
   rh-x402 wallet create                  guided setup: pick a wallet, configure it
+  rh-x402 wallet policy                  put an OWS policy in front of this wallet
   rh-x402 wallet <list|balance|address>  wallet queries against the signer backend
   rh-x402 history [urlSubstring]         query the local ledger
   rh-x402 discover <capability>          providers for a capability, cheapest first
@@ -41,6 +42,9 @@ wallet setup
   --install [--install-global]        permit installing the OWS bindings
   --vault <path>                      OWS vault location (default: ~/.ows)
   --key-file <path>                   for --path import; a 0600 file, never argv
+  --policy / --no-policy              register an OWS policy and mint its key
+  --chain <name>                      chains the policy allows (repeatable)
+  --expires <30d|12h|ISO>             policy and key expiry
 
 data
   --data.<path> <value>               nested data, e.g. --data.company.name "Roundhouse AI Ltd."

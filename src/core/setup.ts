@@ -7,6 +7,7 @@ import { addEntry, generatePrivateKey, readKeyFile, keystorePath } from './keyst
 import { loadEthers } from './signers/local.js';
 import { loadOwsCore, type OwsCoreModule, type OwsWallet } from './signers/owscore.js';
 import { ask, confirm, interactive, secretTwice, select } from './prompt.js';
+import { grantPolicyKey } from './owspolicy.js';
 
 /**
  * The guided wallet setup behind `rh-x402 wallet create`.
@@ -33,6 +34,10 @@ export interface SetupOptions {
   /** Install globally too, so the `ows` CLI lands on PATH. */
   installGlobal?: boolean;
   replace?: boolean;
+  /** Also register an OWS policy and mint the API key that carries it. */
+  policy?: boolean;
+  chains?: string[];
+  expires?: string;
 }
 
 export interface SetupResult {
@@ -41,10 +46,12 @@ export interface SetupResult {
   wallet: string;
   address: string;
   /** Dotted config keys this wrote, so the caller can show its work. */
-  configured: Record<string, string>;
+  configured: Record<string, string | boolean>;
   /** Things the operator still has to do; never empty for a funded wallet. */
   nextSteps: string[];
   installed?: string;
+  /** Present when a policy was registered; the token is shown once, never stored. */
+  policy?: { id: string; keyId: string; token: string };
 }
 
 function isKeyPath(value: string): value is KeyPath {
@@ -54,7 +61,7 @@ function isKeyPath(value: string): value is KeyPath {
 }
 
 /** Config is written key by key, the same way `config set` writes it. */
-function writeConfig(entries: Record<string, string>): void {
+export function writeConfig(entries: Record<string, string | boolean>): void {
   let raw = readRawConfig();
   for (const [key, value] of Object.entries(entries)) {
     raw = setPath(raw, key, value);
@@ -216,7 +223,7 @@ async function setupOws(opts: SetupOptions): Promise<SetupResult> {
   const existing = ows.listWallets(opts.vaultPath).find((w) => w.name === name);
   if (existing) {
     process.stderr.write(`\nOWS already has a wallet named "${name}"; using it.\n`);
-    return finishOws(existing, name, opts, installed, false, true);
+    return finishOws(existing, name, opts, installed, false, true, undefined);
   }
 
   // The passphrase never comes from a flag: it would land in argv and in shell
@@ -237,7 +244,38 @@ async function setupOws(opts: SetupOptions): Promise<SetupResult> {
   }
 
   const created = ows.createWallet(name, passphrase || undefined, undefined, opts.vaultPath);
-  return finishOws(created, name, opts, installed, true, passphrase !== '');
+  const grant = await maybeGrantPolicy(name, passphrase, opts);
+  return finishOws(created, name, opts, installed, true, passphrase !== '', grant);
+}
+
+/**
+ * Offer the policy, because a wallet without one is owner access: this CLI can
+ * sign anything the key can sign, and the only caps are the ones it applies to
+ * itself. Declined is a valid answer, and it is recorded in what gets printed.
+ */
+async function maybeGrantPolicy(
+  wallet: string,
+  passphrase: string,
+  opts: SetupOptions,
+): Promise<SetupResult['policy']> {
+  const wanted =
+    opts.policy ??
+    (interactive() &&
+      (await confirm(
+        'Put an OWS policy in front of this wallet? It refuses any chain or token ' +
+          'contract outside x402, inside OWS, whatever this CLI does.',
+        true,
+      )));
+  if (!wanted) return undefined;
+
+  const grant = await grantPolicyKey({
+    wallet,
+    chains: opts.chains && opts.chains.length > 0 ? opts.chains : ['base'],
+    ...(opts.expires ? { expires: opts.expires } : {}),
+    ...(opts.vaultPath ? { vaultPath: opts.vaultPath } : {}),
+    ...(passphrase ? { passphrase } : {}),
+  });
+  return { id: grant.policy.id, keyId: grant.keyId, token: grant.token };
 }
 
 function finishOws(
@@ -247,8 +285,9 @@ function finishOws(
   installed: string | undefined,
   created: boolean,
   hasPassphrase: boolean,
+  policy: SetupResult['policy'],
 ): SetupResult {
-  const configured: Record<string, string> = {
+  const configured: Record<string, string | boolean> = {
     'wallet.backend': 'ows-core',
     'wallet.default': name,
   };
@@ -261,6 +300,12 @@ function finishOws(
   if (hasPassphrase) {
     configured['wallet.backends.ows-core.passphrase'] = 'env:OWS_VAULT_PASS';
   }
+  // With a key configured the backend signs through the policy engine instead
+  // of the passphrase, which is the whole point of having registered one.
+  if (policy) {
+    configured['wallet.backends.ows-core.apiKey'] = 'env:OWS_X402_KEY';
+    configured['wallet.backends.ows-core.requireApiKey'] = true;
+  }
   writeConfig(configured);
 
   const address = evmAddress(wallet);
@@ -271,7 +316,20 @@ function finishOws(
     address,
     configured,
     ...(installed ? { installed } : {}),
+    ...(policy ? { policy } : {}),
     nextSteps: [
+      ...(policy
+        ? [
+            `export OWS_X402_KEY=${policy.token}  — OWS shows this token once and cannot ` +
+              'show it again. Without it the backend falls back to the vault passphrase, ' +
+              'which is owner access and gated by nothing.',
+            'The policy bounds WHAT may be signed (chain, token contract, expiry). OWS has ' +
+              'no amount rule, so limits.maxPerCall is still the only cap on HOW MUCH.',
+          ]
+        : [
+            'No policy: this wallet is owner access, so the CLI-side caps are the only ' +
+              'spend control. Add one later with `rh-x402 wallet policy`.',
+          ]),
       ...(hasPassphrase && !process.env.OWS_VAULT_PASS
         ? [
             'Export OWS_VAULT_PASS with the passphrase you just set, in every shell ' +
@@ -281,11 +339,6 @@ function finishOws(
         : []),
       `Fund ${address} with USDC on Base. Nothing can be paid until it holds some.`,
       'Set a spend cap: rh-x402 config set limits.maxPerCall 0.05',
-      // Stated because `signer check` reports policies:false and an operator
-      // should know what that costs them, not just that it says false.
-      'For a binding policy layer, create an OWS API key bound to a policy ' +
-        '(`ows policy create`, `ows key create`) and use the `ows` backend. ' +
-        'In-process signing is owner access: the CLI-side caps are all that apply.',
       created ? 'Check it: rh-x402 signer check' : 'Existing wallet adopted; nothing was changed.',
     ],
   };

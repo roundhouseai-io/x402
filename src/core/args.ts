@@ -65,6 +65,9 @@ export const FLAGS: Record<string, { kind: FlagKind; alias?: string }> = {
   path: { kind: 'string' },
   name: { kind: 'string' },
   vault: { kind: 'string' },
+  expires: { kind: 'string' },
+  policy: { kind: 'boolean' },
+  'no-policy': { kind: 'boolean' },
   install: { kind: 'boolean' },
   'install-global': { kind: 'boolean' },
 };

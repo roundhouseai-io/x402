@@ -70,12 +70,20 @@ The three are not equivalent, and the difference is what an attacker gets:
 | **Import**              | An encrypted keystore | `ethers`                     | Yes — decrypted in this process to sign                 |
 | **Generate**            | An encrypted keystore | `ethers`                     | Yes — same, and the key is made here                    |
 
-**A binding spend policy is a fourth thing, and none of these give it to you.** OWS policies gate _API-key_ callers; in-process signing is owner access. If you want a limit that holds even when this CLI misbehaves, create an OWS policy and an API key bound to it (`ows policy create`, `ows key create`) and use the `ows` backend. Otherwise `limits.maxPerCall` and `limits.dailyCap` are the only caps, and they are computed from a local ledger — they stop mistakes, not an attacker. Full comparison in [`docs/signers.md`](docs/signers.md).
+**Ask for the policy when it offers.** An OWS wallet is owner access by default: this CLI can sign anything the key can sign. `wallet create` offers to register a policy and mint an OWS API key bound to it, and from then on OWS refuses a chain or token contract outside x402 _before the key is decrypted_, whatever this CLI does:
+
+```
+$ rh-x402 pay @402-from-a-rogue-contract.json
+{"ok": false, "errorCode": 42, "errorName": "policy_denied",
+ "error": "ows-core refused to sign: policy denied: verifyingContract 0xdeAdbeef… not in allowed list"}
+```
+
+Add one later with `rh-x402 wallet policy`. **But note what it cannot do: cap an amount.** OWS's rules are chains, token contracts and expiry — a policy bounds _what_ may be signed, never _how much_. `limits.maxPerCall` and `limits.dailyCap` are still the only amount caps, still computed from a local ledger by the process that signs, and still advisory. Full detail in [`docs/signers.md`](docs/signers.md).
 
 Non-interactively, for a script or an agent:
 
 ```bash
-rh-x402 wallet create --path ows --name my-agent --install
+rh-x402 wallet create --path ows --name my-agent --install --policy
 rh-x402 wallet create --path import --name dev --key-file ./testnet.key
 ```
 
@@ -290,13 +298,13 @@ Routes: `POST /v1/call`, `POST /v1/probe`, `GET /v1/discover`, `GET /v1/history`
 
 Signing goes through a **signer backend**, which sees one EIP-712 payload and nothing else — no URL, no request body, no response body. Five ship with the CLI:
 
-| Backend              | What it is                                                                                                                                                                           |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `ows`                | Open Wallet Standard agent access layer over HTTP: API-key auth, policy-gated signing. The default.                                                                                  |
-| `ows-core`           | The same vault in process, via the `@open-wallet-standard/core` bindings. No daemon to run, and the key still never leaves OWS.                                                      |
-| `local`              | Encrypted keystore (scrypt + AES-256-GCM), `0600`, warns on every signature. **Development and CI only** — it has no policy layer.                                                   |
-| `exec`               | Any executable speaking [JSON over stdio](docs/exec-signer.md), in the style of git credential helpers. A hardware bridge, an MPC service or a KMS wrapper is one small script away. |
-| `x402-signer-<name>` | Third-party backends, auto-discovered from npm.                                                                                                                                      |
+| Backend              | What it is                                                                                                                                                                                |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ows`                | Open Wallet Standard agent access layer over HTTP: API-key auth, policy-gated signing. The default.                                                                                       |
+| `ows-core`           | The same vault in process, via the `@open-wallet-standard/core` bindings. No daemon to run, the key never leaves OWS, and `wallet policy` puts an OWS policy in front of every signature. |
+| `local`              | Encrypted keystore (scrypt + AES-256-GCM), `0600`, warns on every signature. **Development and CI only** — it has no policy layer.                                                        |
+| `exec`               | Any executable speaking [JSON over stdio](docs/exec-signer.md), in the style of git credential helpers. A hardware bridge, an MPC service or a KMS wrapper is one small script away.      |
+| `x402-signer-<name>` | Third-party backends, auto-discovered from npm.                                                                                                                                           |
 
 ```bash
 rh-x402 signer list                        # what is available, what is active

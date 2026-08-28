@@ -39,17 +39,39 @@ It never installs anything without being asked (a prompt, or `--install`), never
 | **Import**              | An encrypted keystore | `ethers`                     | Yes — decrypted in this process to sign    |
 | **Generate**            | An encrypted keystore | `ethers`                     | Yes — same, and the key is made here       |
 
-**Prefer OWS, and be clear about why.** The reason is custody, not policy: the key stays in the OWS vault and this CLI never receives it, so a bug or a compromise here cannot leak the key itself. Both keystore paths decrypt the key into this process on every signature.
+**Prefer OWS, for two separate reasons.** The first is custody: the key stays in the OWS vault and this CLI never receives it, so a bug or a compromise here cannot leak it. Both keystore paths decrypt the key into this process on every signature. The second is that OWS is the only one of the three that can put a policy in front of the signature.
 
-**A binding spend policy is a fourth thing, and none of the three give it to you.** OWS describes its policy engine as gating _agent (API key)_ operations, and `createApiKey(name, walletIds, policyIds, …)` is what binds a policy to a caller — `signTypedData` takes no key or policy argument, so an in-process call authenticated by the vault passphrase has nothing to bind one to. That is why `ows-core` declares `policies: false`. If you want a limit that holds even when this CLI misbehaves:
+### The policy gate
+
+By default an OWS wallet is _owner access_: signing with the vault passphrase is gated by nothing, and this CLI can sign anything the key can sign. A policy changes that, and `rh-x402 wallet policy` is the one command that sets it up:
 
 ```bash
-ows policy create --file ./policy.json
-ows key create --name x402-agent --wallet my-agent --policy <id>
-rh-x402 config set wallet.backend ows   # the HTTP backend authenticates with that key
+rh-x402 wallet policy                          # policy + API key for the active wallet
+rh-x402 wallet policy --chain base --expires 90d
 ```
 
-Otherwise `limits.maxPerCall` and `limits.dailyCap` are the only caps you have, and they are computed from a local ledger — they stop mistakes, not an attacker.
+It registers a policy built from this CLI's own chain and asset tables — _may sign EIP-3009 transfers of the USDC contracts I know about, on the chains you name, and nothing else_ — mints an OWS API key bound to it, and points the backend at that key. From then on OWS evaluates the policy **before the key is decrypted**, and refuses whatever this CLI does next:
+
+```
+$ rh-x402 pay @402-from-a-rogue-contract.json
+{"ok": false, "errorCode": 42, "errorName": "policy_denied",
+ "error": "ows-core refused to sign: policy denied: verifyingContract 0xdeAdbeef… not in allowed list"}
+```
+
+That is the whole difference between a spend control this CLI _promises_ and one OWS _enforces_. `signer check` reports `policies: true` only once a key is configured, because with a passphrase there is nothing to report.
+
+**The token is shown once.** OWS cannot show it again. It is printed, never written to `config.json` — the config stores `env:OWS_X402_KEY`, the same `env:` indirection every other secret here uses.
+
+**Setup also sets `requireApiKey`,** and that flag matters more than it looks. An `env:` indirection resolves to `undefined` when the variable is unset, so a shell that never exported the token would otherwise fall back to the passphrase — payments would keep working with the policy silently gone, and nothing would say so. With the flag, that is an error instead:
+
+```
+{"errorCode": 47, "error": "this wallet is configured to sign only with an OWS API key, and none
+ is set. … Refusing to fall back to the vault passphrase, which would sign without the policy."}
+```
+
+**What a policy cannot do: cap an amount.** OWS's rule set is `allowed_chains`, `allowed_typed_data_contracts` and `expires_at` — there is no per-signature or per-day value limit. A policy bounds _what_ may be signed, never _how much_. `limits.maxPerCall` and `limits.dailyCap` remain the only amount controls, they are computed from a local ledger by the process doing the signing, and they remain advisory. Saying otherwise would be the same overclaim as declaring `policies: true` on a passphrase.
+
+So the honest summary is: a policy stops this CLI paying the wrong contract or the wrong chain. It does not stop it paying too much.
 
 ### Generating a key here
 
@@ -137,13 +159,13 @@ rh-x402 config set wallet.default my-agent
 
 Both keys are optional: omit `vaultPath` and OWS uses its own default location; omit `passphrase` and it prompts or uses an unlocked vault, per your OWS setup.
 
-| Capability  | Value   | Why                                                                                     |
-| ----------- | ------- | --------------------------------------------------------------------------------------- |
-| `typedData` | `true`  | Verified against the package, not assumed — see above                                   |
-| `policies`  | `false` | Policies gate API-key callers; in-process signing has no key to bind one to — see above |
-| `balances`  | `false` | The package exports no balance function, so the pre-flight funding check is skipped     |
-| `accounts`  | `true`  | `listWallets` / `getWallet`                                                             |
-| `declared`  | `true`  | These come from the package's own API surface                                           |
+| Capability  | Value   | Why                                                                                             |
+| ----------- | ------- | ----------------------------------------------------------------------------------------------- |
+| `typedData` | `true`  | Verified against the package, not assumed — see above                                           |
+| `policies`  | varies  | `true` once an `apiKey` is configured, `false` on a bare passphrase — see the policy gate above |
+| `balances`  | `false` | The package exports no balance function, so the pre-flight funding check is skipped             |
+| `accounts`  | `true`  | `listWallets` / `getWallet`                                                                     |
+| `declared`  | `true`  | These come from the package's own API surface                                                   |
 
 `balances: false` is worth reading twice: **`rh-x402 wallet balance` is not universal.** Only the HTTP `ows` backend can answer it; `ows-core` and `local` cannot, and `local` says so in as many words. A funding check has to read the token contract directly rather than asking the signer.
 

@@ -132,6 +132,11 @@ jobs:
         run: |
           TARBALL=$(npm pack --silent)
           npm i -g "./$TARBALL"
-          x402 --version
-          x402 probe --help >/dev/null 2>&1 || true
-          test "$(x402 --version)" = "$(node -p 'require("./package.json").version')"
+          rh-x402 --version
+          rh-x402 probe --help >/dev/null 2>&1 || true
+          test "$(rh-x402 --version)" = "$(node -p 'require("./package.json").version')"
+          # The x402 bin was dropped deliberately: the unscoped x402 package on
+          # npm ships its own. Fail if it ever comes back.
+          if command -v x402 >/dev/null 2>&1; then
+            echo "this package must not install an 'x402' binary"; exit 1
+          fi

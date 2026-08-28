@@ -3,7 +3,7 @@
 One engine, three surfaces. The CLI, the HTTP endpoint and the MCP server are thin adapters over `core/engine.ts`; every spend decision, every ledger write and every error code happens in one place.
 
 ```
-   x402 call …            POST /v1/call            tools/call x402_call
+   rh-x402 call …            POST /v1/call            tools/call x402_call
         │                       │                          │
   commands/*.ts           serve/http.ts               serve/mcp.ts
         └───────────────────────┴──────────────────────────┘

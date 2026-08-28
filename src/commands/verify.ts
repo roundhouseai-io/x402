@@ -97,7 +97,7 @@ async function loadReceipt(arg: string | undefined): Promise<ReceiptLike> {
   const stdin = arg === undefined || arg === '-' ? await readStdin({ force: true }) : undefined;
   const raw = arg && arg !== '-' ? arg : stdin;
   if (!raw || raw.trim() === '') {
-    throw new X402Error(ExitCode.GENERIC, 'usage: x402 verify <receiptId|@file|-|json>');
+    throw new X402Error(ExitCode.GENERIC, 'usage: rh-x402 verify <receiptId|@file|-|json>');
   }
 
   const text = raw.trim();

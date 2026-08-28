@@ -42,7 +42,7 @@ The scope is `@roundhouseai`, matching the `roundhouseai-io` GitHub org.
 
 **Spec:** §5.1 describes the cache in terms of the `call` flow.
 
-**Implementation:** `x402 pay` signs fresh every time.
+**Implementation:** `rh-x402 pay` signs fresh every time.
 
 **Why:** a bare 402 payload carries no request identity (no url, method or body), so there is nothing stable to key a cache entry on. Caching on the payload alone would risk returning an authorization for a _different_ request that happened to quote the same price. `pay` is a header-building primitive; callers that need idempotency should use `call`.
 
@@ -60,13 +60,13 @@ The scope is `@roundhouseai`, matching the `roundhouseai-io` GitHub org.
 
 **Implementation:** stdin is read when it is a pipe, socket or redirected file, or when a `-` argument explicitly asks for it. A terminal or character device (`/dev/null`, a detached tty in a hosted agent runtime) is never read.
 
-**Why:** reading a character-device stdin can block forever, which to an agent is indistinguishable from a hung payment. `cat payload.json | x402 call <url> --json -` and `x402 call <url> < payload.json` both work.
+**Why:** reading a character-device stdin can block forever, which to an agent is indistinguishable from a hung payment. `cat payload.json | rh-x402 call <url> --json -` and `rh-x402 call <url> < payload.json` both work.
 
 ## 8. `signer` is an extra command, and the keystore has one too
 
 **Spec:** §3's command table does not list a signer command; §5.3 defines the backends but no way to inspect or populate them.
 
-**Implementation:** `x402 signer list`, `x402 signer check [backend]`, `x402 signer keystore list` and `x402 signer keystore add <name> --key-file <path>`.
+**Implementation:** `rh-x402 signer list`, `rh-x402 signer check [backend]`, `rh-x402 signer keystore list` and `rh-x402 signer keystore add <name> --key-file <path>`.
 
 **Why:** §5.3 rule 2 requires the CLI to fail at _config_ time when a backend cannot sign typed data, which needs a command that resolves a backend and reports its capabilities — `signer check` is that command. And a `local` backend with no way to create a keystore entry is unusable. Keys are read from a file, never from argv, and the passphrase comes from the environment.
 

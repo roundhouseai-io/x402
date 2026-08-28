@@ -1,4 +1,4 @@
-import { randomBytes, scryptSync, createCipheriv, createDecipheriv } from 'node:crypto';
+import { randomBytes, scryptSync, createCipheriv, createDecipheriv, createECDH } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, resolve } from 'node:path';
@@ -170,4 +170,19 @@ export function readKeyFile(path: string): string {
     throw new X402Error(ExitCode.GENERIC, `${path} does not contain a 32-byte hex private key`);
   }
   return raw.startsWith('0x') ? raw : `0x${raw}`;
+}
+
+/**
+ * Generate a secp256k1 private key with Node's own crypto — no dependency.
+ *
+ * `createECDH` rejects a scalar outside [1, n-1] itself, so the key it hands
+ * back is always a valid one. Deriving the *address* from it is a separate
+ * problem: that needs keccak256, which Node does not have (`sha3-256` is the
+ * NIST variant, with different padding, and is not interchangeable). So the
+ * caller still needs `ethers` for the address — see `docs/signers.md`.
+ */
+export function generatePrivateKey(): string {
+  const ecdh = createECDH('secp256k1');
+  ecdh.generateKeys();
+  return `0x${ecdh.getPrivateKey('hex').padStart(64, '0')}`;
 }

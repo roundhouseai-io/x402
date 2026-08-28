@@ -7,13 +7,17 @@ description: Pay for HTTP APIs with x402. Use when a request returns HTTP 402, w
 
 Three flows, two surfaces, one failure taxonomy.
 
-| Flow       | Question it answers                                                 |
-| ---------- | ------------------------------------------------------------------- |
-| `probe`    | What does this cost? (never pays)                                   |
-| `call`     | Get me the data (pays if a price is quoted and the limits allow it) |
-| `discover` | Who sells this capability cheapest?                                 |
+| Flow       | Question it answers                                                 | Needs a wallet? |
+| ---------- | ------------------------------------------------------------------- | --------------- |
+| `discover` | Who sells this capability, and what is the going rate?              | No              |
+| `probe`    | What does this cost? (never pays)                                   | No              |
+| `call`     | Get me the data (pays if a price is quoted and the limits allow it) | Yes             |
 
-**Surfaces.** The CLI (`x402 …`) and the local unified endpoint (`http://127.0.0.1:8403`, started with `x402 serve`). They share one wallet, one set of spend gates, one ledger and one set of error codes. Use the CLI if you can run commands; use the endpoint if you cannot.
+**Start with `discover`.** It needs no wallet, no key and no config: `discover.indexUrl` and `discover.unifiedUrl` ship pointing at the Roundhouse index, so `rh-x402 discover <capability>` reads the live Unified Services layer immediately and returns every provider with the market around them — `min`, `median`, `spot`, `spread`. Price an offer against that before spending, rather than paying the first endpoint you were handed.
+
+**The command is `rh-x402`.** There is no `x402` binary: the unscoped `x402` package on npm is a different project that ships its own, so this package does not claim that name. Zero-install is `npx @roundhouseai/x402`, never `npx x402`.
+
+**Surfaces.** The CLI (`rh-x402 …`; the binary is `rh-x402`, not `x402`) and the local unified endpoint (`http://127.0.0.1:8403`, started with `rh-x402 serve`). They share one wallet, one set of spend gates, one ledger and one set of error codes. Use the CLI if you can run commands; use the endpoint if you cannot.
 
 **Money is real.** Every `call` may spend from a live wallet. Always pass a per-call cap you are willing to pay. When you do not know the price, `probe` first.
 
@@ -22,7 +26,7 @@ Three flows, two surfaces, one failure taxonomy.
 CLI:
 
 ```bash
-x402 probe https://api.example.com/v1/lei
+rh-x402 probe https://api.example.com/v1/lei
 ```
 
 Endpoint:
@@ -57,7 +61,7 @@ Both return:
 CLI:
 
 ```bash
-x402 call https://api.example.com/v1/lei --data.query "Roundhouse AI Ltd." --max 0.01
+rh-x402 call https://api.example.com/v1/lei --data.query "Roundhouse AI Ltd." --max 0.01
 ```
 
 Endpoint:
@@ -83,12 +87,12 @@ Both return the same envelope:
 }
 ```
 
-The response body you want is `body`. `paid` tells you whether money moved; `amount` is what it cost; `receiptId` is what you quote if you need to verify settlement later (`x402 verify <receiptId>`).
+The response body you want is `body`. `paid` tells you whether money moved; `amount` is what it cost; `receiptId` is what you quote if you need to verify settlement later (`rh-x402 verify <receiptId>`).
 
 **Passing data.** `--data.<path> <value>` builds nested JSON: dots for objects, `[n]` for arrays.
 
 ```bash
-x402 call https://api.example.com/v1/screen \
+rh-x402 call https://api.example.com/v1/screen \
   --data.company.name "Roundhouse AI Ltd." \
   --data.checks[0] sanctions \
   --data.checks[1] pep \
@@ -109,8 +113,8 @@ Numbers, `true`/`false` and `null` are coerced; anything else is a string. Force
 CLI:
 
 ```bash
-x402 discover web-search
-x402 call x402:web-search --data.query "..." --max 0.02
+rh-x402 discover web-search
+rh-x402 call x402:web-search --data.query "..." --max 0.02
 ```
 
 Endpoint:
@@ -169,18 +173,18 @@ A capability URI (`x402:web-search`) can be used anywhere a URL can. It resolves
 
 The CLI exits with these; the endpoint returns the same number as `errorCode` (and MCP as `errorCode` inside the tool result). Branch on the number, not the message.
 
-| Code | Meaning                                  | What to do                                                                                                                |
-| ---- | ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| 0    | Success (paid or free)                   | Use `body`                                                                                                                |
-| 1    | Generic / network error                  | Safe to retry; nothing was paid                                                                                           |
-| 40   | Invalid 402 payload (not x402-compliant) | Do not retry; report the endpoint                                                                                         |
-| 42   | Denied by OWS policy                     | Do not retry; a human must widen the wallet policy                                                                        |
-| 43   | Denied by payTo/domain allowlist         | Do not retry; provider is not approved                                                                                    |
-| 44   | Price exceeds your `--max`               | Re-`probe`; raise `--max` only if a human authorised it                                                                   |
-| 45   | Session budget or daily cap exhausted    | Stop spending; report it                                                                                                  |
-| 46   | Insufficient wallet balance              | Stop; the wallet needs funding                                                                                            |
-| 47   | OWS unreachable or auth failed           | Retry once, then report the wallet layer as down                                                                          |
-| 50   | Payment sent, but no valid response      | **Money may have moved.** Re-run the identical command (it reuses the cached authorization). Never add `--no-cache` here. |
+| Code | Meaning                                                       | What to do                                                                                                                                                                                |
+| ---- | ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0    | Success (paid or free)                                        | Use `body`                                                                                                                                                                                |
+| 1    | Generic / network error                                       | Safe to retry; nothing was paid                                                                                                                                                           |
+| 40   | Invalid 402 payload (not x402-compliant)                      | Do not retry; report the endpoint                                                                                                                                                         |
+| 42   | Denied by OWS policy                                          | Do not retry; a human must widen the wallet policy. The message names what was refused — usually a token contract or chain outside the policy                                             |
+| 43   | Denied by payTo/domain allowlist                              | Do not retry; provider is not approved                                                                                                                                                    |
+| 44   | Price exceeds your `--max`                                    | Re-`probe`; raise `--max` only if a human authorised it                                                                                                                                   |
+| 45   | Session budget or daily cap exhausted                         | Stop spending; report it                                                                                                                                                                  |
+| 46   | Insufficient wallet balance                                   | Stop; the wallet needs funding                                                                                                                                                            |
+| 47   | Signer backend unreachable **or unable to do what was asked** | Read the message. Unreachable/auth: retry once, then report the wallet layer as down. Incapable (`cannot report balances`, `needs the optional peer dependency ethers`): never retryable. |
+| 50   | Payment sent, but no valid response                           | **Money may have moved.** Re-run the identical command (it reuses the cached authorization). Never add `--no-cache` here.                                                                 |
 
 ## Do and do not
 
@@ -188,6 +192,16 @@ The CLI exits with these; the endpoint returns the same number as `errorCode` (a
 - **Do** re-run the identical command after a transient failure; that is what makes retries safe.
 - **Do** use `x402:<capability>` rather than pinning a vendor URL, unless determinism matters more than price.
 - **Do not** add `--no-cache` to work around an error — it is the double-payment path.
-- **Do not** ask for or handle private keys. Signing belongs to the wallet backend, which only ever sees the payment authorization; there is no key flag.
+- **Do not** ask for or handle private keys. Signing belongs to the wallet backend, which only ever sees the payment authorization; there is no key flag. If no wallet is configured, say so and stop: tell the human to run `rh-x402 wallet create`, and let them answer it. Where money lives is their decision, not a step to improvise.
 - **Do not** turn on `--telemetry-payload full` for calls carrying personal data; the default (`hash`) exists for that reason.
 - **Do not** treat exit 42/43/45/46 as retryable. They need a human decision.
+- **Do not** read exit 47 as "the wallet is down" without reading the message; half the time it means the backend cannot do the thing at all, and retrying is pointless.
+- **Do not** treat an unavailable balance as a zero balance. See below.
+
+## Backend capabilities are not uniform
+
+Run `rh-x402 signer check` before relying on anything beyond signing. Backends declare what they can do, and the two that bite:
+
+- **Balances are optional.** `rh-x402 wallet balance` exits `47` with `the local backend cannot report balances` — the same code as an outage, which is why the message matters more than the code. The engine skips the pre-flight funding check rather than guessing, so a call can still fail at the provider for want of funds. Where the backend cannot answer, read the token contract directly instead of assuming.
+- **A policy refusal is a decision, not an outage.** Exit `42` means OWS evaluated a policy and said no — to a token contract or a chain the wallet is not allowed to sign for. Retrying is pointless and `--no-cache` will not help. Report what the message names and stop. Note the policy bounds _what_ may be signed, not _how much_: an amount over budget is exit `44`, not `42`.
+- **`local` needs `ethers` and refuses loose file permissions.** It is the only backend that signs in-process, and `ethers` is an optional peer dependency, so a default install carries no signing code at all. Missing it is exit `47` with `needs the optional peer dependency ethers (npm i ethers)`. It also refuses a group- or world-readable keystore and a world-readable key file — those refusals are the point, so do not `chmod` around them. `local` is for development and CI; it has no policy layer.

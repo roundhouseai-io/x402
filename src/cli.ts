@@ -13,22 +13,38 @@ import { configCommand } from './commands/config.js';
 import { signerCommand } from './commands/signer.js';
 import { serveCommand } from './commands/serve.js';
 
-const HELP = `x402 ${VERSION} — one command for the whole x402 payment loop
+const HELP = `rh-x402 ${VERSION} — one command for the whole x402 payment loop
+
+the command is rh-x402. this package deliberately ships no x402 binary: the
+unscoped x402 package on npm is a different project that ships its own, and on
+a machine with both the short name would be a coin toss.
 
 usage
-  x402 <url> [flags]                  sugar for: x402 call <url>
-  x402 call <url|x402:capability>     request, pay if a 402 is quoted, return the response
-  x402 probe <url>                    fetch payment requirements only; never pays
-  x402 pay <402-json|@file|->         build a signed X-PAYMENT header; no HTTP
-  x402 verify <receiptId|@file>       confirm settlement of a prior payment
-  x402 wallet <list|balance|address>  wallet queries against the signer backend
-  x402 history [urlSubstring]         query the local ledger
-  x402 discover <capability>          providers for a capability, cheapest first
-  x402 serve [--mcp]                  run the unified local endpoint
-  x402 serve token <create|list|revoke>
-  x402 signer <list|check>            inspect signer backends and capabilities
-  x402 signer keystore <list|add>     manage the local development keystore
-  x402 config <get|set|list>          manage ~/.x402/config.json
+  rh-x402 <url> [flags]                  sugar for: rh-x402 call <url>
+  rh-x402 call <url|x402:capability>     request, pay if a 402 is quoted, return the response
+  rh-x402 probe <url>                    fetch payment requirements only; never pays
+  rh-x402 pay <402-json|@file|->         build a signed X-PAYMENT header; no HTTP
+  rh-x402 verify <receiptId|@file>       confirm settlement of a prior payment
+  rh-x402 wallet create                  guided setup: pick a wallet, configure it
+  rh-x402 wallet policy                  put an OWS policy in front of this wallet
+  rh-x402 wallet <list|balance|address>  wallet queries against the signer backend
+  rh-x402 history [urlSubstring]         query the local ledger
+  rh-x402 discover <capability>          providers for a capability, cheapest first
+  rh-x402 serve [--mcp]                  run the unified local endpoint
+  rh-x402 serve token <create|list|revoke>
+  rh-x402 signer <list|check>            inspect signer backends and capabilities
+  rh-x402 signer keystore <list|add|generate>  manage the local development keystore
+  rh-x402 config <get|set|list>          manage ~/.x402/config.json
+
+wallet setup
+  --path <ows|import|generate>        how the key is held; prompts when omitted
+  --name <wallet>                     wallet name to create or adopt
+  --install [--install-global]        permit installing the OWS bindings
+  --vault <path>                      OWS vault location (default: ~/.ows)
+  --key-file <path>                   for --path import; a 0600 file, never argv
+  --policy / --no-policy              register an OWS policy and mint its key
+  --chain <name>                      chains the policy allows (repeatable)
+  --expires <30d|12h|ISO>             policy and key expiry
 
 data
   --data.<path> <value>               nested data, e.g. --data.company.name "Roundhouse AI Ltd."
@@ -60,6 +76,10 @@ payment
 exit codes
   0 ok   1 error   40 invalid 402   42 signer policy   43 allowlist   44 over --max
   45 budget/daily cap   46 balance   47 signer unavailable   50 paid, no valid response
+
+start here
+  rh-x402 discover web-search            works with no config: the Roundhouse index
+                                      is the built-in default
 
 docs  https://github.com/roundhouseai-io/x402
 `;

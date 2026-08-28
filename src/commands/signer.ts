@@ -3,7 +3,13 @@ import { writeJson, isTty, writeErr } from '../core/output.js';
 import { bool, str, type ParsedArgs } from '../core/args.js';
 import { buildContext } from './context.js';
 import { BUILTIN_BACKENDS, resolveSigner } from '../core/signers/index.js';
-import { addEntry, readKeystore, readKeyFile, keystorePath } from '../core/keystore.js';
+import {
+  addEntry,
+  readKeystore,
+  readKeyFile,
+  keystorePath,
+  generatePrivateKey,
+} from '../core/keystore.js';
 import { loadEthers } from '../core/signers/local.js';
 import type { LocalBackendConfig } from '../core/config.js';
 
@@ -77,7 +83,7 @@ export async function signerCommand(parsed: ParsedArgs): Promise<number> {
     return address === undefined ? ExitCode.OWS_UNREACHABLE : ExitCode.OK;
   }
 
-  throw new X402Error(ExitCode.GENERIC, 'usage: x402 signer <list|check|keystore>');
+  throw new X402Error(ExitCode.GENERIC, 'usage: rh-x402 signer <list|check|keystore>');
 }
 
 async function keystoreSubcommand(parsed: ParsedArgs): Promise<number> {
@@ -107,7 +113,7 @@ async function keystoreSubcommand(parsed: ParsedArgs): Promise<number> {
     if (!name || !keyFile) {
       throw new X402Error(
         ExitCode.GENERIC,
-        'usage: x402 signer keystore add <name> --key-file <path> [--replace]\n' +
+        'usage: rh-x402 signer keystore add <name> --key-file <path> [--replace]\n' +
           '       passphrase comes from X402_KEYSTORE_PASS',
       );
     }
@@ -148,5 +154,60 @@ async function keystoreSubcommand(parsed: ParsedArgs): Promise<number> {
     return ExitCode.OK;
   }
 
-  throw new X402Error(ExitCode.GENERIC, 'usage: x402 signer keystore <list|add>');
+  if (action === 'generate') {
+    const name = parsed.positionals[2];
+    if (!name) {
+      throw new X402Error(
+        ExitCode.GENERIC,
+        'usage: rh-x402 signer keystore generate <name> [--replace]\n' +
+          '       passphrase comes from X402_KEYSTORE_PASS',
+      );
+    }
+    const passphrase = process.env.X402_KEYSTORE_PASS;
+    if (!passphrase) {
+      throw new X402Error(
+        ExitCode.GENERIC,
+        'set X402_KEYSTORE_PASS to the passphrase that will encrypt this key',
+      );
+    }
+
+    // Generated in process and written straight to the encrypted keystore: the
+    // key is never printed, never passed as an argument and never put in the
+    // environment. There is deliberately no way to read it back out.
+    const privateKey = generatePrivateKey();
+    // Node has no keccak256, so the address still comes from ethers. Load it
+    // before writing anything, so a missing peer dependency does not leave a
+    // key on disk under a name the user thinks failed.
+    const { Wallet } = await loadEthers();
+    const address = new Wallet(privateKey).address;
+    const entry = addEntry({
+      name,
+      privateKey,
+      address,
+      passphrase,
+      file,
+      replace: bool(parsed.flags, 'replace'),
+    });
+
+    writeErr(
+      'generated a key in the CLI. This is the least safe of the three wallet options: ' +
+        'the key is decryptable by anything that has the keystore file and the passphrase, ' +
+        'and there is no policy layer behind it. Use it for development and CI, not for ' +
+        'a funded production wallet — see docs/signers.md.',
+    );
+    if (isTty()) {
+      process.stdout.write(`generated ${entry.name}  ${entry.address}  -> ${keystorePath(file)}\n`);
+    } else {
+      writeJson({
+        ok: true,
+        keystore: keystorePath(file),
+        name: entry.name,
+        address: entry.address,
+        generated: true,
+      });
+    }
+    return ExitCode.OK;
+  }
+
+  throw new X402Error(ExitCode.GENERIC, 'usage: rh-x402 signer keystore <list|add|generate>');
 }

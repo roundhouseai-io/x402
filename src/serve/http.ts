@@ -58,7 +58,8 @@ export function createServeServer(deps: ServeDeps): Server {
       if (!token) {
         sendJson(res, 401, {
           ok: false,
-          error: 'missing or invalid caller token; mint one with `x402 serve token create <name>`',
+          error:
+            'missing or invalid caller token; mint one with `rh-x402 serve token create <name>`',
           errorCode: ExitCode.OWS_UNREACHABLE,
           errorName: ExitCodeName[ExitCode.OWS_UNREACHABLE],
         });

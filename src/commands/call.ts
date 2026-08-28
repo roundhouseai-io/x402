@@ -9,7 +9,7 @@ import { readStdin } from '../core/stdin.js';
 export async function callCommand(parsed: ParsedArgs): Promise<number> {
   const target = parsed.positionals[0];
   if (!target)
-    throw new X402Error(ExitCode.GENERIC, 'usage: x402 call <url|x402:capability> [flags]');
+    throw new X402Error(ExitCode.GENERIC, 'usage: rh-x402 call <url|x402:capability> [flags]');
 
   const ctx = buildContext(parsed);
   const stdin = await readStdin({ force: str(parsed.flags, 'json') === '-' });
@@ -46,7 +46,7 @@ export async function callCommand(parsed: ParsedArgs): Promise<number> {
 
 export async function probeCommand(parsed: ParsedArgs): Promise<number> {
   const target = parsed.positionals[0];
-  if (!target) throw new X402Error(ExitCode.GENERIC, 'usage: x402 probe <url|x402:capability>');
+  if (!target) throw new X402Error(ExitCode.GENERIC, 'usage: rh-x402 probe <url|x402:capability>');
 
   const ctx = buildContext(parsed);
   const stdin = await readStdin({ force: str(parsed.flags, 'json') === '-' });

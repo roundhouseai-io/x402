@@ -23,8 +23,15 @@ import {
   readKeyFile,
   defaultKeystorePath,
   keystorePath,
+  generatePrivateKey,
 } from '../src/core/keystore.js';
 import { TRANSFER_WITH_AUTHORIZATION_TYPES, type TypedData } from '../src/core/eip3009.js';
+import {
+  OwsCoreSigner,
+  owsChainName,
+  explainOwsCoreError,
+  type OwsCoreModule,
+} from '../src/core/signers/owscore.js';
 
 const KEY = `0x${'11'.repeat(32)}`;
 const ADDRESS = '0x000000000000000000000000000000000000dEaD';
@@ -74,6 +81,33 @@ describe('keystore', () => {
     // The plaintext key must not appear anywhere in the file.
     expect(JSON.stringify(readKeystore(file()))).not.toContain(KEY.slice(2));
     expect(decryptEntry(entry, 'correct horse battery')).toBe(KEY);
+  });
+
+  it('generates a distinct, in-range secp256k1 key with no dependency', () => {
+    // secp256k1 group order: a scalar must be in [1, n-1] or it is not a key.
+    const N = BigInt('0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141');
+    const keys = new Set<string>();
+    for (let i = 0; i < 8; i++) {
+      const key = generatePrivateKey();
+      expect(key).toMatch(/^0x[0-9a-f]{64}$/);
+      const scalar = BigInt(key);
+      expect(scalar > 0n && scalar < N).toBe(true);
+      keys.add(key);
+    }
+    expect(keys.size).toBe(8);
+  });
+
+  it('seals a generated key like any other', () => {
+    const key = generatePrivateKey();
+    const entry = addEntry({
+      name: 'generated',
+      privateKey: key,
+      address: ADDRESS,
+      passphrase: 'correct horse battery',
+      file: file(),
+    });
+    expect(JSON.stringify(readKeystore(file()))).not.toContain(key.slice(2));
+    expect(decryptEntry(entry, 'correct horse battery')).toBe(key);
   });
 
   it('rejects the wrong passphrase', () => {
@@ -162,7 +196,7 @@ describe('keystore', () => {
 
 describe('backend resolution', () => {
   it('knows the built-in backends', () => {
-    expect(BUILTIN_BACKENDS).toEqual(['ows', 'local', 'exec']);
+    expect(BUILTIN_BACKENDS).toEqual(['ows', 'ows-core', 'local', 'exec']);
     expect(thirdPartyPackage('acme')).toBe('x402-signer-acme');
   });
 
@@ -320,5 +354,147 @@ process.stdout.write(JSON.stringify({ result: { typedData: true, signature: '0x'
     expect(exitCodeForExecError('unsupported')).toBe(ExitCode.OWS_UNREACHABLE);
     expect(exitCodeForExecError('auth_failed')).toBe(ExitCode.OWS_UNREACHABLE);
     expect(exitCodeForExecError(undefined)).toBe(ExitCode.GENERIC);
+  });
+});
+
+describe('ows-core backend', () => {
+  const SIG_BODY = `${'ab'.repeat(64)}1b`;
+
+  const wallet = (accounts: Array<{ chainId: string; address: string }>) => ({
+    id: 'w1',
+    name: 'agent',
+    accounts,
+  });
+
+  const evmWallet = wallet([
+    { chainId: 'eip155:8453', address: ADDRESS },
+    { chainId: 'solana:mainnet', address: 'So1111' },
+  ]);
+
+  /** A stand-in for the native bindings, so the sign path runs without them. */
+  const fakeCore = (over: Partial<OwsCoreModule> = {}): OwsCoreModule => ({
+    listWallets: () => [evmWallet],
+    getWallet: () => evmWallet,
+    createWallet: () => evmWallet,
+    createPolicy: () => undefined,
+    createApiKey: () => ({ token: 'ows_key_test', id: 'k1', name: 'x402-agent' }),
+    signTypedData: () => ({ signature: SIG_BODY, recoveryId: 27 }),
+    ...over,
+  });
+
+  const signerWith = (core: OwsCoreModule) => new OwsCoreSigner('agent', {}, async () => core);
+
+  it('declares typed-data signing, but neither policies nor balances', async () => {
+    expect(await signerWith(fakeCore()).capabilities()).toEqual({
+      typedData: true,
+      // Not `true`: OWS policies gate API-key callers, and in-process signing
+      // has no key to bind one to. See the comment on capabilities().
+      policies: false,
+      balances: false,
+      accounts: true,
+      declared: true,
+    });
+  });
+
+  it('adds the 0x prefix the bindings omit', async () => {
+    const signature = await signerWith(fakeCore()).signTypedData(typedData);
+    expect(signature).toBe(`0x${SIG_BODY}`);
+
+    // Already-prefixed output must survive unchanged, not gain a second prefix.
+    const prefixed = fakeCore({ signTypedData: () => ({ signature: `0x${SIG_BODY}` }) });
+    expect(await signerWith(prefixed).signTypedData(typedData)).toBe(`0x${SIG_BODY}`);
+  });
+
+  it('rejects a signature that is not 65 bytes rather than paying with it', async () => {
+    const short = fakeCore({ signTypedData: () => ({ signature: 'ab'.repeat(64) }) });
+    await expect(signerWith(short).signTypedData(typedData)).rejects.toThrow(/64-byte signature/);
+  });
+
+  it('maps a policy refusal to 42 and an outage to 47', async () => {
+    const denied = fakeCore({
+      signTypedData: () => {
+        throw new Error('policy denied: over the per-transaction cap');
+      },
+    });
+    await expect(signerWith(denied).signTypedData(typedData)).rejects.toMatchObject({
+      code: ExitCode.POLICY_DENIED,
+    });
+
+    const broken = fakeCore({
+      signTypedData: () => {
+        throw new Error('vault is locked');
+      },
+    });
+    await expect(signerWith(broken).signTypedData(typedData)).rejects.toMatchObject({
+      code: ExitCode.OWS_UNREACHABLE,
+    });
+  });
+
+  it('explains a wrong vault passphrase instead of naming an AEAD library', async () => {
+    // This one is worth a test because everything else looks healthy: the
+    // address resolves without the passphrase, so `signer check` passes and the
+    // first *payment* is what fails.
+    const locked = fakeCore({
+      signTypedData: () => {
+        throw new Error('decryption failed: aead::Error');
+      },
+    });
+    await expect(signerWith(locked).signTypedData(typedData)).rejects.toThrow(
+      /passphrase is wrong or missing/,
+    );
+    // The original text is kept, not swallowed.
+    await expect(signerWith(locked).signTypedData(typedData)).rejects.toThrow(/aead::Error/);
+    expect(explainOwsCoreError('vault is locked')).toBe('vault is locked');
+  });
+
+  it('names EVM chains the way OWS does', () => {
+    expect(owsChainName('8453')).toBe('base');
+    expect(owsChainName('84532')).toBe('base-sepolia');
+    // Unknown ids pass through: OWS should reject them, not this mapping.
+    expect(owsChainName('999999')).toBe('999999');
+  });
+
+  it('pays from the EVM account, and says so when there is none', async () => {
+    expect(await signerWith(fakeCore()).getAddress()).toBe(ADDRESS);
+    expect(await signerWith(fakeCore()).getAccounts()).toEqual([
+      { id: 'agent', address: ADDRESS, chains: ['eip155:8453', 'solana:mainnet'] },
+    ]);
+
+    const solanaOnly = wallet([{ chainId: 'solana:mainnet', address: 'So1111' }]);
+    const noEvm = fakeCore({ getWallet: () => solanaOnly });
+    await expect(signerWith(noEvm).getAddress()).rejects.toThrow(/no EVM account/);
+  });
+
+  it('reports a missing wallet as exit 47, naming it', async () => {
+    const missing = fakeCore({
+      getWallet: () => {
+        throw new Error('not found');
+      },
+    });
+    await expect(signerWith(missing).getAddress()).rejects.toThrow(
+      /ows-core has no wallet "agent"/,
+    );
+  });
+
+  it('reports the absent optional peer dependency as exit 47, naming the package', async () => {
+    // The real loader, with the package genuinely not installed.
+    try {
+      await new OwsCoreSigner('agent').signTypedData(typedData);
+      throw new Error('should have thrown');
+    } catch (err) {
+      // SAFETY: the assertion above proves this path threw; the two reads below
+      // fail the test if it was not an X402Error, which is the assertion.
+      expect((err as X402Error).code).toBe(ExitCode.OWS_UNREACHABLE);
+      expect((err as Error).message).toContain('@open-wallet-standard/core');
+    }
+  });
+
+  it('resolves through the backend registry', async () => {
+    const config = mergeDeep(DEFAULT_CONFIG, {
+      wallet: { backend: 'ows-core', default: 'agent' },
+    });
+    const signer = await resolveSigner(config);
+    expect(signer.backend).toBe('ows-core');
+    expect(signer.wallet).toBe('agent');
   });
 });

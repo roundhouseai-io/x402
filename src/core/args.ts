@@ -60,6 +60,16 @@ export const FLAGS: Record<string, { kind: FlagKind; alias?: string }> = {
   'key-file': { kind: 'string' },
   keystore: { kind: 'string' },
   replace: { kind: 'boolean' },
+
+  // guided wallet setup (`wallet create`)
+  path: { kind: 'string' },
+  name: { kind: 'string' },
+  vault: { kind: 'string' },
+  expires: { kind: 'string' },
+  policy: { kind: 'boolean' },
+  'no-policy': { kind: 'boolean' },
+  install: { kind: 'boolean' },
+  'install-global': { kind: 'boolean' },
 };
 
 const ALIASES: Record<string, string> = Object.fromEntries(
@@ -176,7 +186,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     if ((COMMANDS as readonly string[]).includes(first)) {
       command = positionals.shift();
     } else if (looksLikeUrl(first)) {
-      // `x402 <url>` is sugar for `x402 call <url>`.
+      // `rh-x402 <url>` is sugar for `rh-x402 call <url>`.
       command = 'call';
     }
   }

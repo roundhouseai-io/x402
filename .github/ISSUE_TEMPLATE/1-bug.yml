@@ -12,7 +12,7 @@ body:
       label: What happened
       description: What you ran, and what you got.
       placeholder: |
-        $ x402 call https://provider.example/v1/lei --data.query "Roundhouse AI Ltd." --max 0.01
+        $ rh-x402 call https://provider.example/v1/lei --data.query "Roundhouse AI Ltd." --max 0.01
         {"ok":false,"errorCode":40,...}
     validations:
       required: true
@@ -45,12 +45,12 @@ body:
       label: Did money move?
       options:
         - label: A payment was signed or settled as part of this bug
-        - label: I have checked `x402 history --since 24h` and the ledger matches what I expected
+        - label: I have checked `rh-x402 history --since 24h` and the ledger matches what I expected
   - type: input
     id: version
     attributes:
       label: Version
-      description: Output of `x402 --version`.
+      description: Output of `rh-x402 --version`.
     validations:
       required: true
   - type: input
@@ -64,7 +64,7 @@ body:
     id: config
     attributes:
       label: Relevant configuration
-      description: Output of `x402 config list` with anything sensitive removed. Never paste a token or a key.
+      description: Output of `rh-x402 config list` with anything sensitive removed. Never paste a token or a key.
       render: json
   - type: textarea
     id: extra

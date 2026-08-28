@@ -28,7 +28,7 @@ Non-goals for v1: non-Base chains, non-USDC assets, streaming responses, browser
 
 ```bash
 npx @roundhouseai/x402 <url> [flags]   # zero-install via npx
-npm i -g @roundhouseai/x402            # or global install, then: x402 <url>
+npm i -g @roundhouseai/x402            # or global install, then: rh-x402 <url>
 ```
 
 The bare form `npx @roundhouseai/x402 <url>` is sugar for `npx @roundhouseai/x402 call <url>`. If the first argument looks like a URL, `call` is assumed. This is the "very easy" path:
@@ -43,17 +43,17 @@ With a default wallet configured (section 7), that one line does: POST with a JS
 
 ## 3. Command surface
 
-| Command                                | Purpose                                                                                           |
-| -------------------------------------- | ------------------------------------------------------------------------------------------------- |
-| `x402 call <url>`                      | Full request + pay + retry loop (default command)                                                 |
-| `x402 probe <url>`                     | Fetch 402 payment requirements only. Never pays.                                                  |
-| `x402 pay <402-json>`                  | Build a signed `X-PAYMENT` header from a 402 payload. No HTTP.                                    |
-| `x402 verify <receipt>`                | Confirm settlement of a prior payment                                                             |
-| `x402 wallet <list\|balance\|address>` | Passthrough to OWS                                                                                |
-| `x402 history [query]`                 | Query the local ledger                                                                            |
-| `x402 discover <capability>`           | Providers for a capability, price-sorted, with the market's min/median/spot/max and spread        |
-| `x402 serve`                           | Run the unified endpoint: a local HTTP gateway and MCP server wrapping the full flow (section 10) |
-| `x402 config <get\|set\|list>`         | Manage `~/.x402/config.json`                                                                      |
+| Command                                   | Purpose                                                                                           |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `rh-x402 call <url>`                      | Full request + pay + retry loop (default command)                                                 |
+| `rh-x402 probe <url>`                     | Fetch 402 payment requirements only. Never pays.                                                  |
+| `rh-x402 pay <402-json>`                  | Build a signed `X-PAYMENT` header from a 402 payload. No HTTP.                                    |
+| `rh-x402 verify <receipt>`                | Confirm settlement of a prior payment                                                             |
+| `rh-x402 wallet <list\|balance\|address>` | Passthrough to OWS                                                                                |
+| `rh-x402 history [query]`                 | Query the local ledger                                                                            |
+| `rh-x402 discover <capability>`           | Providers for a capability, price-sorted, with the market's min/median/spot/max and spread        |
+| `rh-x402 serve`                           | Run the unified endpoint: a local HTTP gateway and MCP server wrapping the full flow (section 10) |
+| `rh-x402 config <get\|set\|list>`         | Manage `~/.x402/config.json`                                                                      |
 
 ---
 
@@ -66,7 +66,7 @@ Three mechanisms. They can be combined; later sources override earlier on key co
 `--data.<path> <value>` builds a nested object. Paths use dots for objects and `[n]` for arrays.
 
 ```bash
-x402 call https://api.example.com/v1/screen \
+rh-x402 call https://api.example.com/v1/screen \
   --data.company.name "Roundhouse AI Ltd." \
   --data.company.jurisdiction SG \
   --data.checks[0] sanctions \
@@ -91,9 +91,9 @@ Produces:
 ### 4.2 JSON blob
 
 ```bash
-x402 call <url> --json '{"company":{"name":"Roundhouse AI Ltd."}}'
-x402 call <url> --json @payload.json     # from file
-cat payload.json | x402 call <url> --json -   # from stdin
+rh-x402 call <url> --json '{"company":{"name":"Roundhouse AI Ltd."}}'
+rh-x402 call <url> --json @payload.json     # from file
+cat payload.json | rh-x402 call <url> --json -   # from stdin
 ```
 
 ### 4.3 Placement rules
@@ -232,7 +232,7 @@ Auth-like request headers (`Authorization`, `X-Api-Key`, `Cookie`, `X-PAYMENT`) 
 
 ### 6.3 Remote sink
 
-Off by default. When configured, ledger records are batched (max 50 records or 10s) and POSTed to the sink, itself authenticated via a static bearer token from config. Intended target: the Roundhouse indexer ingest endpoint, which turns fleet-wide payment telemetry into pricing and liveness data for `x402 discover`.
+Off by default. When configured, ledger records are batched (max 50 records or 10s) and POSTed to the sink, itself authenticated via a static bearer token from config. Intended target: the Roundhouse indexer ingest endpoint, which turns fleet-wide payment telemetry into pricing and liveness data for `rh-x402 discover`.
 
 ```json
 "telemetry": {
@@ -250,9 +250,9 @@ Sink failures never fail the call. Records queue locally (`~/.x402/outbox/`) and
 ### 6.4 History queries
 
 ```bash
-x402 history --since 24h --paid-only --json
-x402 history --sum                     # total spend by asset
-x402 history --by payTo --sum          # spend grouped by recipient
+rh-x402 history --since 24h --paid-only --json
+rh-x402 history --sum                     # total spend by asset
+rh-x402 history --by payTo --sum          # spend grouped by recipient
 ```
 
 ---
@@ -328,13 +328,13 @@ Agents branch on exit codes; the codes are a stability contract from v1.
 
 ---
 
-## 10. Unified endpoint (`x402 serve`)
+## 10. Unified endpoint (`rh-x402 serve`)
 
-Not every agent can shell out to a CLI. Browser-based agents, hosted workflows, and MCP-native clients need the same capability over plain HTTP or as an MCP tool. `x402 serve` runs the CLI's engine as a long-lived local service exposing one unified surface. Same wallet integration, same gates, same ledger; one process, many callers.
+Not every agent can shell out to a CLI. Browser-based agents, hosted workflows, and MCP-native clients need the same capability over plain HTTP or as an MCP tool. `rh-x402 serve` runs the CLI's engine as a long-lived local service exposing one unified surface. Same wallet integration, same gates, same ledger; one process, many callers.
 
 ```bash
-x402 serve                    # HTTP on 127.0.0.1:8403
-x402 serve --mcp              # additionally expose an MCP server (stdio or SSE)
+rh-x402 serve                    # HTTP on 127.0.0.1:8403
+rh-x402 serve --mcp              # additionally expose an MCP server (stdio or SSE)
 ```
 
 ### 10.1 HTTP API
@@ -357,7 +357,7 @@ Response is the same JSON envelope as the CLI (section 8): `ok`, `status`, `paid
 
 **`POST /v1/probe`** - `{ "url": ... }`, returns parsed 402 requirements, never pays.
 
-**`GET /v1/discover?capability=lei`** - proxies `x402 discover`.
+**`GET /v1/discover?capability=lei`** - proxies `rh-x402 discover`.
 
 **`GET /v1/history`** - ledger queries, filtered to the calling token's own records unless the token has the `admin` scope.
 
@@ -388,8 +388,8 @@ With `--mcp`, the same engine is exposed as MCP tools: `x402_call`, `x402_probe`
 The unified endpoint is a spend-authorized proxy. Anything that can reach it can spend from the wallet, so treat it like a hot wallet API even on localhost:
 
 - Binds to `127.0.0.1` by default. `--host 0.0.0.0` requires `--i-understand-this-exposes-spending` and TLS config, and is still discouraged; put real network exposure behind your own gateway.
-- Callers authenticate with tokens minted via `x402 serve token create <name> --budget-daily 1.00 --max-per-call 0.01 [--capabilities lei,kyb] [--admin]`. Tokens are stored hashed.
-- Per-token budgets are enforced by the server from the ledger, on top of (not instead of) the global caps and any signer backend policy layer. Ledger records carry the token name in the `agent` block, so `x402 history --by agent --sum` gives per-agent spend.
+- Callers authenticate with tokens minted via `rh-x402 serve token create <name> --budget-daily 1.00 --max-per-call 0.01 [--capabilities lei,kyb] [--admin]`. Tokens are stored hashed.
+- Per-token budgets are enforced by the server from the ledger, on top of (not instead of) the global caps and any signer backend policy layer. Ledger records carry the token name in the `agent` block, so `rh-x402 history --by agent --sum` gives per-agent spend.
 - Token limits fail with the same exit-code taxonomy (`45` budget exhausted, `44` over per-call max) surfaced as `errorCode`.
 
 ### 10.5 Concurrency and idempotency

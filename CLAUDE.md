@@ -37,6 +37,7 @@ src/
     paths.ts             ~/.x402 layout, 0600/0700 file creation
     signer.ts            the SignerBackend interface (spec §5.3)
     signers/index.ts     backend registry, capability gate, x402-signer-* discovery
+    signers/owscore.ts   in-process OWS, via the @open-wallet-standard/core bindings
     signers/local.ts     encrypted-keystore backend (development and CI only)
     signers/exec.ts      external signer protocol, JSON over stdio
     stdin.ts             non-blocking stdin detection
@@ -83,7 +84,7 @@ These are not preferences. Breaking one is a breaking change to the product, and
 npm install
 npm run typecheck     # tsc --noEmit over src + test
 npm run lint          # oxlint + vendored anti-slop rules over src + test (needs Node 22)
-npm test              # vitest run (146 tests, no network)
+npm test              # vitest run (157 tests, no network)
 npm run build         # tsc → dist/
 npm run format:check  # prettier
 node dist/cli.js --help
@@ -116,9 +117,9 @@ Tests never touch the network and never touch a real `~/.x402`: they stub `fetch
 
 ## Known open questions
 
-Seven questions block v1 and are tracked as issues; they are listed in [`docs/roadmap.md`](docs/roadmap.md). **OWS must expose EIP-712 typed-data signing** (`signTypedData`): its published core types show `signMessage` with `utf8`/`hex` only, and EIP-3009 cannot be signed with either. `core/ows.ts` calls `POST /v1/wallets/:wallet/sign-typed-data` and maps a 404/405/501 onto a clear exit 47. Since the signer abstraction landed this no longer blocks the tool — `local` and `exec` work today — but it does block OWS as the flagship backend. Two newer questions matter before the interface sets: reviewing prior art (Solana's `pay` describes a similar wallet-backend split) and pinning down the `exec` protocol, drafted in [`docs/exec-signer.md`](docs/exec-signer.md).
+Six questions block v1 and are tracked as issues; they are listed in [`docs/roadmap.md`](docs/roadmap.md). The seventh — **does OWS expose EIP-712 typed-data signing?**, the longest-standing one — is answered: `@open-wallet-standard/core@1.4.2` exports `signTypedData`, verified by signing a real `TransferWithAuthorization` payload with it. That is what the `ows-core` backend is built on. It settles the capability, not the transport: the HTTP daemon's `POST /v1/wallets/:wallet/sign-typed-data` route has still not been exercised against a running OWS, so `core/ows.ts` keeps `declared: false` and maps a 404/405/501 onto a clear exit 47. Two newer questions matter before the interface sets: reviewing prior art (Solana's `pay` describes a similar wallet-backend split) and pinning down the `exec` protocol, drafted in [`docs/exec-signer.md`](docs/exec-signer.md).
 
-Also note a bare `npx x402` cannot resolve to this package: the unscoped `x402` name on npm belongs to another project. The zero-install form is `npx @roundhouseai/x402 <url>`; a global install still gives you the `x402` binary. Do not write docs that promise otherwise.
+Also note a bare `npx x402` cannot resolve to this package: the unscoped `x402` name on npm belongs to another project. The zero-install form is `npx @roundhouseai/x402 <url>`, and the binary a global install puts on `PATH` is **`rh-x402`** — the `x402` bin was dropped for exactly that collision. Do not write docs that promise otherwise.
 
 ## Workflow gotcha worth remembering
 

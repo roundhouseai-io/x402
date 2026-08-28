@@ -11,6 +11,40 @@ export interface OwsBackendConfig {
   timeoutMs?: number;
 }
 
+export interface OwsCoreBackendConfig {
+  /** OWS vault directory; OWS's own default when unset. */
+  vaultPath?: string;
+  /**
+   * Vault passphrase. Use an `env:` indirection, never the literal.
+   *
+   * This is *owner* access: it can sign anything the wallet can sign. Prefer
+   * `apiKey`, which is the same vault behind a policy.
+   */
+  passphrase?: string;
+  /**
+   * An OWS API key token. Use an `env:` indirection, never the literal.
+   *
+   * Signing with this instead of the passphrase is what puts the OWS policy
+   * engine in front of every signature — it is the difference between a spend
+   * control that binds and one this CLI merely promises. Create one with
+   * `rh-x402 wallet policy`.
+   */
+  apiKey?: string;
+  /**
+   * Refuse to sign at all unless `apiKey` resolves.
+   *
+   * `env:` indirections resolve to undefined when the variable is unset — an
+   * unset token is a disabled feature, not a bogus credential. For a policy
+   * credential that default is wrong: it would silently downgrade a
+   * policy-gated wallet to owner access, and the operator would never know,
+   * because payments keep working. This flag makes the opt-in durable, so a
+   * shell missing the token gets an error instead of an ungated signature.
+   *
+   * Written by `rh-x402 wallet policy` and by the guided setup.
+   */
+  requireApiKey?: boolean;
+}
+
 export interface LocalBackendConfig {
   /** Encrypted keystore path; `~` is expanded. Defaults to `$X402_HOME/keystore.json`. */
   keystore?: string;
@@ -31,6 +65,7 @@ export interface X402Config {
     default?: string;
     backends: {
       ows: OwsBackendConfig;
+      'ows-core'?: OwsCoreBackendConfig;
       local: LocalBackendConfig;
       exec?: ExecBackendConfig;
       /** Third-party backends resolved as `x402-signer-<name>`. */
@@ -65,7 +100,7 @@ export interface X402Config {
     /** Capability documents, which carry the market stats `indexUrl` does not. */
     unifiedUrl: string;
   };
-  /** Settlement confirmation source for `x402 verify`. */
+  /** Settlement confirmation source for `rh-x402 verify`. */
   facilitator: {
     url?: string;
     token?: string;

@@ -1,5 +1,46 @@
 # @roundhouseai/x402
 
+## 0.1.1
+
+### Patch Changes
+
+- 33fba09: Add `rh-x402 wallet create`, a guided wallet setup, and correct the `ows-core` policy claim.
+
+  - **`rh-x402 wallet create`** asks how the key should be held (OWS, import a key file, or generate one), installs `@open-wallet-standard/core` if you pick OWS and it is missing, creates the wallet, writes the config, and prints the address to fund. It installs nothing without a prompt or `--install`, adopts an existing OWS wallet rather than creating over it, and never takes a passphrase as a flag. Without a terminal it needs `--path` and errors rather than hanging on an unanswerable question.
+  - **The install targets the `node_modules` that owns this package**, not the shell's cwd. `loadOwsCore` imports from this module's location, so a plain `npm i` in the wrong directory would appear to succeed and still fail to load — for a globally installed CLI it now uses `-g`, and for a project install a `--prefix`.
+  - **`ows-core` no longer claims a policy layer it does not have when signing with the vault passphrase.** OWS gates policies on _API-key_ callers — `createApiKey(name, walletIds, policyIds, …)` is what binds one — and a passphrase is owner access with nothing to bind a policy to. See the policy-gate entry below for what signing with an API key changes.
+  - **A wrong or missing vault passphrase is explained rather than reported as `decryption failed: aead::Error`.** This one hid well: the address resolves without the passphrase, so `signer check` passes and the first _payment_ is what fails. Setup now also records the `env:OWS_VAULT_PASS` indirection whenever the vault has a passphrase, and says to export it.
+
+- 871832e: Add the `ows-core` signer backend, drop the `x402` bin, and make the three ways to hold a key explicit.
+
+  - **`ows-core`** signs through the `@open-wallet-standard/core` bindings in process, with no OWS daemon to run. It resolves this repo's longest-standing open question: the package does export `signTypedData`, verified by signing a real `TransferWithAuthorization` payload. It declares `balances: false` — the package exports no balance function, so the pre-flight funding check is skipped rather than guessed at.
+  - **`@open-wallet-standard/core` is a new optional peer dependency**, alongside `ethers`. A default install still carries no signing code and no runtime dependencies.
+  - **`rh-x402 signer keystore generate <name>`** creates a key in process and writes it straight to the encrypted keystore. It is never printed and cannot be read back. Not recommended for a funded wallet, and it warns on stderr.
+  - **Breaking for global installs: the `x402` bin is gone**, leaving `rh-x402`. The unscoped `x402` name on npm belongs to another project, and shipping that bin name invited a collision. `npx @roundhouseai/x402` is unaffected.
+
+- a8e1170: Make the OWS policy gate actually bind, and add `rh-x402 wallet policy`.
+
+  `ows-core` signed with the vault passphrase, which is owner access: OWS gates policies on API-key callers, so nothing constrained what the CLI could sign. It now signs with an OWS API key when one is configured, which puts the policy engine in front of every signature.
+
+  - **`rh-x402 wallet policy`** registers a policy built from this CLI's own chain and asset tables — may sign EIP-3009 transfers of known USDC contracts, on the chains you name, and nothing else — mints an OWS API key bound to it, and points the backend at that key. `wallet create` offers the same thing during setup. A refused contract or chain is exit `42` from inside OWS, before the key is decrypted.
+  - **`capabilities().policies` now reflects the configured credential**, so `signer check` says `true` only when a signature genuinely cannot bypass a policy.
+  - **`requireApiKey` closes a silent downgrade.** `env:` indirections resolve to `undefined` when unset, so a shell that never exported the token would have fallen back to the passphrase — payments still working, policy quietly gone. That is now exit `47` with an explicit refusal instead.
+  - **A policy cannot cap an amount.** OWS's rules are chains, typed-data contracts and expiry; there is no value limit. `limits.maxPerCall` and `limits.dailyCap` remain the only amount controls and remain advisory. The docs say so rather than implying a policy covers it.
+
+- 737bacb: Install as `rh-x402`, and correct four things the docs got wrong.
+
+  - **The binary is now `rh-x402`.** The unscoped `x402` package on npm is a different project that ships its own `x402` binary, so on a machine with both the short name was a coin toss. `rh-x402` is unique to this package. (This shipped first as an alias alongside `x402`; the `x402` bin is dropped in the same release — see below.)
+  - **README and SKILL.md now lead with `discover`**, which needs no wallet, key or config: `discover.indexUrl` and `discover.unifiedUrl` ship pointing at the Roundhouse index, so it reads the live Unified Services layer immediately and gives you the market — min, median, spot, spread — before anything is spent.
+
+  Four corrections, each found by driving the published package against production rather than reading the source, and each one that could have cost money as a wrong instruction:
+
+  - **The README recommended the double-payment path.** Its exit-50 row said "investigate before retrying with `--no-cache`", directly contradicting `SKILL.md`'s "never add `--no-cache` here". After a 50 the correct move is re-running the _identical_ command so the cached authorization is reused; `--no-cache` there pays twice. Fixed, and the `--no-cache` example is now labelled as the deliberate re-pay path.
+  - **Exit 47 means two different things** and the docs only described one. A backend that is unreachable is retryable; a backend that is _incapable_ — `cannot report balances`, `needs the optional peer dependency ethers` — never is. `docs/exit-codes.md` said to "treat the wallet layer as down", which is wrong for half the cases.
+  - **`wallet balance` is not universal.** It is a per-backend capability; `local` does not have it and exits 47, which reads like an outage. An unavailable balance is not a zero balance — the engine skips the pre-flight check rather than guessing, so where a backend cannot answer, read the token contract directly.
+  - **The `local` backend needs `ethers`** (an optional peer dependency, so a default install carries no signing code at all) and refuses a group- or world-readable keystore or a world-readable key file. Neither was in the README.
+
+  Also guards the release workflow against the mis-tag that shipped v0.1.0: it now fails loudly if the tag for the version being published already exists at a different commit, rather than publishing against a tag that describes different code.
+
 ## 0.1.0
 
 ### Minor Changes

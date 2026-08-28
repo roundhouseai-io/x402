@@ -26,7 +26,8 @@ function requireWallet(backend: string, wallet: string | undefined): string {
   if (!wallet) {
     throw new X402Error(
       ExitCode.OWS_UNREACHABLE,
-      `no wallet selected for the ${backend} backend: pass --wallet or set wallet.default`,
+      `no wallet selected for the ${backend} backend. Run \`rh-x402 wallet create\` to set ` +
+        'one up, or pass --wallet / set wallet.default if you already have one.',
     );
   }
   return wallet;

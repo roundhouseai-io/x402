@@ -27,14 +27,17 @@ usage
   rh-x402 verify <receiptId|@file>       confirm settlement of a prior payment
   rh-x402 wallet create                  guided setup: pick a wallet, configure it
   rh-x402 wallet policy                  put an OWS policy in front of this wallet
+  rh-x402 wallet forget <name>           hide a wallet here; never deletes it
   rh-x402 wallet <list|balance|address>  wallet queries against the signer backend
   rh-x402 history [urlSubstring]         query the local ledger
   rh-x402 discover <capability>          providers for a capability, cheapest first
   rh-x402 serve [--mcp]                  run the unified local endpoint
   rh-x402 serve token <create|list|revoke>
   rh-x402 signer <list|check>            inspect signer backends and capabilities
+                                         (backends: ows-core, local, exec, ows;
+                                          exec protocol: docs/exec-signer.md)
   rh-x402 signer keystore <list|add|generate>  manage the local development keystore
-  rh-x402 config <get|set|list>          manage ~/.x402/config.json
+  rh-x402 config <get|set|unset|list>    manage ~/.x402/config.json
 
 wallet setup
   --path <ows|import|generate>        how the key is held; prompts when omitted

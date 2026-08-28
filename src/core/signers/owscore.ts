@@ -29,6 +29,19 @@ interface OwsSignResult {
   recoveryId?: number;
 }
 
+/**
+ * The subset of the OWS bindings this package is allowed to call.
+ *
+ * `deleteWallet`, `exportWallet` and `renameWallet` exist in
+ * `@open-wallet-standard/core` and are **deliberately absent here**. This CLI
+ * must never destroy a wallet, rename one out from under another tool, or pull
+ * a secret out of the vault — a wallet holds money, and removing it from *this
+ * tool* must never mean removing it from OWS. `rh-x402 wallet forget` hides a
+ * wallet locally and leaves the vault alone.
+ *
+ * `test/owssafety.test.ts` fails if any of those names appears in `src/`, so
+ * this is a guarantee rather than an intention.
+ */
 export interface OwsCoreModule {
   listWallets(vaultPath?: string): OwsWallet[];
   getWallet(nameOrId: string, vaultPath?: string): OwsWallet;

@@ -42,6 +42,8 @@ Three layers, later wins:
 }
 ```
 
+**`config list` says which values you chose.** Everything it prints is the _effective_ config, so a default and a deliberate setting look identical — `wallet.backend: "ows"` appears whether or not anyone set it. The JSON output carries an `origins` map (`default` | `user` | `project` | `flag`) per key, and the terminal output lists which keys are showing defaults. If a setting looks like it is being ignored, check there first: the usual cause is that the key you set is not the key being read.
+
 | Key                                      | Meaning                                                                                                                            |
 | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | `wallet.backend`                         | Active signer backend: `ows`, `ows-core`, `local`, `exec`, or a third-party `x402-signer-<name>`. See [`signers.md`](signers.md).  |
@@ -121,6 +123,7 @@ Any string value may be an `env:NAME` indirection, resolved from the environment
 
 ```bash
 rh-x402 config set wallet.backends.ows.apiKey env:OWS_API_KEY
+rh-x402 config unset wallet.backends.ows.apiKey   # remove a key entirely
 ```
 
 A missing variable resolves to _absent_, not to the literal string `env:NAME` — an unset token is a disabled feature, not a bogus credential. Nothing in the config file needs to be a secret, and nothing in it should be.

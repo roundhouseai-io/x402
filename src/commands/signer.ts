@@ -11,6 +11,7 @@ import {
   generatePrivateKey,
 } from '../core/keystore.js';
 import { loadEthers } from '../core/signers/local.js';
+import { interactive, secretTwice } from '../core/prompt.js';
 import type { LocalBackendConfig } from '../core/config.js';
 
 /**
@@ -117,11 +118,16 @@ async function keystoreSubcommand(parsed: ParsedArgs): Promise<number> {
           '       passphrase comes from X402_KEYSTORE_PASS',
       );
     }
-    const passphrase = process.env.X402_KEYSTORE_PASS;
+    const passphrase =
+      process.env.X402_KEYSTORE_PASS ??
+      (interactive()
+        ? await secretTwice('Keystore passphrase: ', 'Confirm passphrase: ')
+        : undefined);
     if (!passphrase) {
       throw new X402Error(
         ExitCode.GENERIC,
-        'set X402_KEYSTORE_PASS to the passphrase that will encrypt this key',
+        'set X402_KEYSTORE_PASS to the passphrase that will encrypt this key ' +
+          '(or run this from a terminal and it will ask)',
       );
     }
 
@@ -163,11 +169,19 @@ async function keystoreSubcommand(parsed: ParsedArgs): Promise<number> {
           '       passphrase comes from X402_KEYSTORE_PASS',
       );
     }
-    const passphrase = process.env.X402_KEYSTORE_PASS;
+    // Ask when there is a terminal, the way `wallet create` does. Requiring an
+    // env var to do something interactive is friction for a human and tells
+    // them nothing until after it has failed.
+    const passphrase =
+      process.env.X402_KEYSTORE_PASS ??
+      (interactive()
+        ? await secretTwice('Keystore passphrase: ', 'Confirm passphrase: ')
+        : undefined);
     if (!passphrase) {
       throw new X402Error(
         ExitCode.GENERIC,
-        'set X402_KEYSTORE_PASS to the passphrase that will encrypt this key',
+        'set X402_KEYSTORE_PASS to the passphrase that will encrypt this key ' +
+          '(or run this from a terminal and it will ask)',
       );
     }
 

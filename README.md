@@ -87,7 +87,7 @@ rh-x402 wallet create --path ows --name my-agent --install --policy
 rh-x402 wallet create --path import --name dev --key-file ./testnet.key
 ```
 
-Or point it at an OWS daemon:
+Or point it at an OWS HTTP service you already run — note `@open-wallet-standard/core` ships **no** daemon, so this is only for a separate OWS service; `ows-core` above is the in-process path:
 
 ```bash
 rh-x402 config set wallet.backend ows

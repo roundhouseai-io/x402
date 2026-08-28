@@ -104,6 +104,8 @@ rh-x402 config set wallet.default my-agent
 
 An [Open Wallet Standard](https://github.com/open-wallet-standard) agent access layer: API-key auth, policy-gated signing. The CLI holds a key scoped to one wallet; the policies live on the OWS side and are the binding spend control.
 
+> **There is no daemon in `@open-wallet-standard/core`.** Its `ows` CLI has `wallet`, `sign`, `mnemonic`, `fund`, `pay`, `policy`, `key`, `config`, `update` and `uninstall` — and no `serve` or `daemon`. Nothing listens on `127.0.0.1:8402` unless you are running a separate OWS service that provides it. If you are looking for the daemon to start, stop looking: **use [`ows-core`](#ows-core--ows-in-process-no-daemon)**, which talks to the same vault in process. This backend is for an OWS HTTP service you already have.
+
 ```json
 "wallet": {
   "backend": "ows",
@@ -207,6 +209,19 @@ The escape hatch that keeps this genuinely wallet-agnostic: a hardware wallet br
 ```
 
 One process per request, one JSON line in, one JSON line out; stderr passes through so a helper can talk to the operator. The protocol is in [`exec-signer.md`](exec-signer.md).
+
+## Removing a wallet
+
+There is no `rh-x402 wallet delete`, and that is deliberate.
+
+```bash
+rh-x402 wallet forget my-agent    # hides it here
+rh-x402 wallet restore my-agent   # brings it back
+```
+
+`forget` adds the name to `wallet.hidden` and clears `wallet.default` if it pointed there. **The backend is untouched:** an OWS wallet keeps its funds, still appears in `ows wallet list`, and can be restored here at any time. `wallet list` reports how many are hidden so they are not invisible-invisible.
+
+`@open-wallet-standard/core` does expose `deleteWallet`, `exportWallet` and `renameWallet`. This package declares none of them on its module interface and references none of them anywhere in `src/` — `test/owssafety.test.ts` fails the build if that changes. A wallet holds money, and a tool that can spend it should not also be able to destroy it or pull its secret out. If you genuinely want a wallet gone, that is a decision for the OWS CLI, made deliberately, with the vault in front of you.
 
 ## Third-party backends
 

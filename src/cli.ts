@@ -25,14 +25,22 @@ usage
   rh-x402 probe <url>                    fetch payment requirements only; never pays
   rh-x402 pay <402-json|@file|->         build a signed X-PAYMENT header; no HTTP
   rh-x402 verify <receiptId|@file>       confirm settlement of a prior payment
+  rh-x402 wallet create                  guided setup: pick a wallet, configure it
   rh-x402 wallet <list|balance|address>  wallet queries against the signer backend
   rh-x402 history [urlSubstring]         query the local ledger
   rh-x402 discover <capability>          providers for a capability, cheapest first
   rh-x402 serve [--mcp]                  run the unified local endpoint
   rh-x402 serve token <create|list|revoke>
   rh-x402 signer <list|check>            inspect signer backends and capabilities
-  rh-x402 signer keystore <list|add>     manage the local development keystore
+  rh-x402 signer keystore <list|add|generate>  manage the local development keystore
   rh-x402 config <get|set|list>          manage ~/.x402/config.json
+
+wallet setup
+  --path <ows|import|generate>        how the key is held; prompts when omitted
+  --name <wallet>                     wallet name to create or adopt
+  --install [--install-global]        permit installing the OWS bindings
+  --vault <path>                      OWS vault location (default: ~/.ows)
+  --key-file <path>                   for --path import; a 0600 file, never argv
 
 data
   --data.<path> <value>               nested data, e.g. --data.company.name "Roundhouse AI Ltd."

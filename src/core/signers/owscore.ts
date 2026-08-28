@@ -32,6 +32,11 @@ interface OwsSignResult {
 export interface OwsCoreModule {
   listWallets(vaultPath?: string): OwsWallet[];
   getWallet(nameOrId: string, vaultPath?: string): OwsWallet;
+  /**
+   * Used only by the guided setup, never by the payment loop. The signing path
+   * must never create a wallet as a side effect of a call.
+   */
+  createWallet(name: string, passphrase?: string, words?: number, vaultPath?: string): OwsWallet;
   signTypedData(
     wallet: string,
     chain: string,
@@ -86,6 +91,26 @@ export function exitCodeForOwsCoreError(message: string): ExitCodeValue {
 }
 
 /**
+ * Translate the one OWS failure that is both common and unreadable.
+ *
+ * A wrong or missing vault passphrase surfaces from the Rust core as
+ * `decryption failed: aead::Error`. It is worth special-casing because
+ * everything up to that point looks healthy — `signer check` reports the
+ * address fine, since that is unencrypted metadata — so the first sign of
+ * trouble is a failed payment with a message naming an AEAD library.
+ */
+export function explainOwsCoreError(message: string): string {
+  if (/aead|decryption failed/i.test(message)) {
+    return (
+      `the vault passphrase is wrong or missing (${message}). Set OWS_VAULT_PASS, ` +
+      'or `rh-x402 config set wallet.backends.ows-core.passphrase env:OWS_VAULT_PASS`, ' +
+      'to the passphrase this vault was created with.'
+    );
+  }
+  return message;
+}
+
+/**
  * The bindings return 65 bytes with `v` already appended, but *without* a `0x`
  * prefix. Handing that to the X-PAYMENT encoder unprefixed produces a header no
  * facilitator will accept, so normalise here rather than at the call site.
@@ -128,9 +153,19 @@ export class OwsCoreSigner implements SignerBackend {
 
   async capabilities(): Promise<SignerCapabilities> {
     // Declared, not assumed: these come from the package's own API surface.
-    // `@open-wallet-standard/core` exports no balance function at all, so the
-    // pre-flight funding check is skipped rather than guessed at.
-    return { typedData: true, policies: true, balances: false, accounts: true, declared: true };
+    //
+    // `policies: false` is the conservative reading, and deliberately so. OWS
+    // describes its policy engine as gating *agent (API key)* operations, and
+    // `createApiKey(name, walletIds, policyIds, ...)` is what binds a policy to
+    // a caller; `signTypedData` takes no key or policy argument, so an
+    // in-process call authenticated by the vault passphrase has nothing to bind
+    // one to. Claiming `true` here would tell an operator they have a spend
+    // control they may not have, which is the expensive direction to be wrong
+    // in. A binding policy layer means an API key and the HTTP `ows` backend.
+    //
+    // `balances: false` is not conservatism: the package exports no balance
+    // function at all, so the pre-flight funding check is skipped, not guessed.
+    return { typedData: true, policies: false, balances: false, accounts: true, declared: true };
   }
 
   async getAccounts(): Promise<SignerAccount[]> {
@@ -178,7 +213,10 @@ export class OwsCoreSigner implements SignerBackend {
       // SAFETY: as above — `.message` off a non-Error is `undefined`, and the
       // `??` falls back to the stringified value rather than losing the reason.
       const message = (err as Error).message ?? String(err);
-      throw new X402Error(exitCodeForOwsCoreError(message), `ows-core refused to sign: ${message}`);
+      throw new X402Error(
+        exitCodeForOwsCoreError(message),
+        `ows-core refused to sign: ${explainOwsCoreError(message)}`,
+      );
     }
     return normaliseSignature(result.signature);
   }

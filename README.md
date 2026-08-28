@@ -43,26 +43,40 @@ npm i -g @roundhouseai/x402      # then: rh-x402 <url>
 npx @roundhouseai/x402 <url>     # or zero-install
 ```
 
-Node 20.10+ is required. Then point it at a wallet — there are three ways to hold a key, and they are not equivalent:
-
-|                         | Where the key lives                              | Needs                                          | Policy layer       |
-| ----------------------- | ------------------------------------------------ | ---------------------------------------------- | ------------------ |
-| **OWS** _(recommended)_ | An OWS vault, in process or behind a daemon      | `@open-wallet-standard/core`, or a running OWS | Yes                |
-| **Bring your own key**  | An encrypted keystore you loaded from a key file | `ethers`                                       | No — CLI caps only |
-| **Generated here**      | An encrypted keystore, from a key this CLI made  | `ethers`                                       | No — CLI caps only |
-
-Both keystore paths put a decryptable key on the same disk as the tool that spends it, and the CLI-side caps are computed from a local ledger — they stop mistakes, not an attacker. Use OWS for anything holding real money. The full comparison is in [`docs/signers.md`](docs/signers.md).
+Node 20.10+ is required. Then create a wallet — one command, and it asks the questions:
 
 ```bash
-# OWS, in process — no daemon to run
-npm i @open-wallet-standard/core
-rh-x402 config set wallet.backend ows-core
+rh-x402 wallet create
+```
 
-# or bring a key you already have; or generate a throwaway one
-npm i ethers
-export X402_KEYSTORE_PASS='…'
-rh-x402 signer keystore add dev --key-file ./testnet.key   # never from argv
-rh-x402 signer keystore generate dev                       # not recommended: no policy layer
+It offers the three ways to hold a key, installs the OWS bindings if you pick that and they are missing, creates the wallet, writes the config, and prints the address to fund. Nothing is installed without asking, and the passphrase is typed at the prompt rather than passed as a flag.
+
+```
+How should this wallet hold its key?
+
+  1) Open Wallet Standard  (recommended)
+     The key stays encrypted in the OWS vault and is never handed to this CLI.
+  2) Import a private key you already have
+     Read from a key file into an encrypted keystore. Development and CI.
+  3) Generate a key here  (not recommended)
+     Same keystore, but the key is made by this tool. Throwaway wallets only.
+```
+
+The three are not equivalent, and the difference is what an attacker gets:
+
+|                         | Where the key lives   | Needs                        | Does this CLI ever hold the key?                        |
+| ----------------------- | --------------------- | ---------------------------- | ------------------------------------------------------- |
+| **OWS** _(recommended)_ | An OWS vault          | `@open-wallet-standard/core` | **No** — it sends one payload and gets a signature back |
+| **Import**              | An encrypted keystore | `ethers`                     | Yes — decrypted in this process to sign                 |
+| **Generate**            | An encrypted keystore | `ethers`                     | Yes — same, and the key is made here                    |
+
+**A binding spend policy is a fourth thing, and none of these give it to you.** OWS policies gate _API-key_ callers; in-process signing is owner access. If you want a limit that holds even when this CLI misbehaves, create an OWS policy and an API key bound to it (`ows policy create`, `ows key create`) and use the `ows` backend. Otherwise `limits.maxPerCall` and `limits.dailyCap` are the only caps, and they are computed from a local ledger — they stop mistakes, not an attacker. Full comparison in [`docs/signers.md`](docs/signers.md).
+
+Non-interactively, for a script or an agent:
+
+```bash
+rh-x402 wallet create --path ows --name my-agent --install
+rh-x402 wallet create --path import --name dev --key-file ./testnet.key
 ```
 
 Or point it at an OWS daemon:

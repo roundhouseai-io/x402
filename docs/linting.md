@@ -25,12 +25,12 @@ Prettier does not format the vendored directory: it is upstream's code, kept as 
 
 | Count | Rule                                        | Why it is not enforced yet                                                                                                                                    |
 | ----: | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-|   107 | `require-safety-comment-for-type-assertion` | Each needs a `SAFETY:` comment stating the checked invariant. Mechanical, but 107 of them, and a comment written to silence a linter is worse than none.      |
+|   110 | `require-safety-comment-for-type-assertion` | Each needs a `SAFETY:` comment stating the checked invariant. Mechanical, but 110 of them, and a comment written to silence a linter is worse than none.      |
 |    48 | `no-runtime-typeof`                         | See below.                                                                                                                                                    |
 |    44 | `no-unsafe-dictionary-type`                 | See below.                                                                                                                                                    |
 |    44 | `no-unknown-parameters`                     | See below.                                                                                                                                                    |
-|    26 | `no-conditional-empty-object-spread`        | `...(x ? { a: x } : {})`. Genuinely clearer rewritten; a contained cleanup.                                                                                   |
-|    13 | `no-known-value-widening`                   | Explicit broad types where inference or `satisfies` would keep the evidence.                                                                                  |
+|    28 | `no-conditional-empty-object-spread`        | `...(x ? { a: x } : {})`. Genuinely clearer rewritten; a contained cleanup.                                                                                   |
+|    16 | `no-known-value-widening`                   | Explicit broad types where inference or `satisfies` would keep the evidence.                                                                                  |
 |    10 | `no-unknown-returns`                        | Mostly boundary decoders that really do return an unvalidated payload.                                                                                        |
 |     9 | `no-chained-type-assertions`                | Five are `as unknown as T` inside the generic deep-merge and `env:` resolver in `core/config.ts`. Removing them means restructuring those generic signatures. |
 

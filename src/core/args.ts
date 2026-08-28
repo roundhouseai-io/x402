@@ -60,6 +60,13 @@ export const FLAGS: Record<string, { kind: FlagKind; alias?: string }> = {
   'key-file': { kind: 'string' },
   keystore: { kind: 'string' },
   replace: { kind: 'boolean' },
+
+  // guided wallet setup (`wallet create`)
+  path: { kind: 'string' },
+  name: { kind: 'string' },
+  vault: { kind: 'string' },
+  install: { kind: 'boolean' },
+  'install-global': { kind: 'boolean' },
 };
 
 const ALIASES: Record<string, string> = Object.fromEntries(

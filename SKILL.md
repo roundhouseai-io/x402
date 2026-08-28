@@ -192,7 +192,7 @@ The CLI exits with these; the endpoint returns the same number as `errorCode` (a
 - **Do** re-run the identical command after a transient failure; that is what makes retries safe.
 - **Do** use `x402:<capability>` rather than pinning a vendor URL, unless determinism matters more than price.
 - **Do not** add `--no-cache` to work around an error — it is the double-payment path.
-- **Do not** ask for or handle private keys. Signing belongs to the wallet backend, which only ever sees the payment authorization; there is no key flag. If no wallet is configured, say so and stop — setting one up is a human decision about where money lives, not a step to improvise.
+- **Do not** ask for or handle private keys. Signing belongs to the wallet backend, which only ever sees the payment authorization; there is no key flag. If no wallet is configured, say so and stop: tell the human to run `rh-x402 wallet create`, and let them answer it. Where money lives is their decision, not a step to improvise.
 - **Do not** turn on `--telemetry-payload full` for calls carrying personal data; the default (`hash`) exists for that reason.
 - **Do not** treat exit 42/43/45/46 as retryable. They need a human decision.
 - **Do not** read exit 47 as "the wallet is down" without reading the message; half the time it means the backend cannot do the thing at all, and retrying is pointless.

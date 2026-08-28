@@ -26,7 +26,12 @@ import {
   generatePrivateKey,
 } from '../src/core/keystore.js';
 import { TRANSFER_WITH_AUTHORIZATION_TYPES, type TypedData } from '../src/core/eip3009.js';
-import { OwsCoreSigner, owsChainName, type OwsCoreModule } from '../src/core/signers/owscore.js';
+import {
+  OwsCoreSigner,
+  owsChainName,
+  explainOwsCoreError,
+  type OwsCoreModule,
+} from '../src/core/signers/owscore.js';
 
 const KEY = `0x${'11'.repeat(32)}`;
 const ADDRESS = '0x000000000000000000000000000000000000dEaD';
@@ -370,16 +375,19 @@ describe('ows-core backend', () => {
   const fakeCore = (over: Partial<OwsCoreModule> = {}): OwsCoreModule => ({
     listWallets: () => [evmWallet],
     getWallet: () => evmWallet,
+    createWallet: () => evmWallet,
     signTypedData: () => ({ signature: SIG_BODY, recoveryId: 27 }),
     ...over,
   });
 
   const signerWith = (core: OwsCoreModule) => new OwsCoreSigner('agent', {}, async () => core);
 
-  it('declares typed-data signing and policies, but not balances', async () => {
+  it('declares typed-data signing, but neither policies nor balances', async () => {
     expect(await signerWith(fakeCore()).capabilities()).toEqual({
       typedData: true,
-      policies: true,
+      // Not `true`: OWS policies gate API-key callers, and in-process signing
+      // has no key to bind one to. See the comment on capabilities().
+      policies: false,
       balances: false,
       accounts: true,
       declared: true,
@@ -418,6 +426,23 @@ describe('ows-core backend', () => {
     await expect(signerWith(broken).signTypedData(typedData)).rejects.toMatchObject({
       code: ExitCode.OWS_UNREACHABLE,
     });
+  });
+
+  it('explains a wrong vault passphrase instead of naming an AEAD library', async () => {
+    // This one is worth a test because everything else looks healthy: the
+    // address resolves without the passphrase, so `signer check` passes and the
+    // first *payment* is what fails.
+    const locked = fakeCore({
+      signTypedData: () => {
+        throw new Error('decryption failed: aead::Error');
+      },
+    });
+    await expect(signerWith(locked).signTypedData(typedData)).rejects.toThrow(
+      /passphrase is wrong or missing/,
+    );
+    // The original text is kept, not swallowed.
+    await expect(signerWith(locked).signTypedData(typedData)).rejects.toThrow(/aead::Error/);
+    expect(explainOwsCoreError('vault is locked')).toBe('vault is locked');
   });
 
   it('names EVM chains the way OWS does', () => {

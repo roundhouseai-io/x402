@@ -23,37 +23,42 @@ Four rules hold for every backend, and they are why the interface is this narrow
 
 ## Three ways to hold a key
 
-Before picking a backend, pick how the key is held. There are three, in descending order of how much you should want them.
-
-|                        | Where the key lives                                              | Needs                                          | Policy layer            |
-| ---------------------- | ---------------------------------------------------------------- | ---------------------------------------------- | ----------------------- |
-| **OWS**                | An OWS vault, in process (`ows-core`) or behind a daemon (`ows`) | `@open-wallet-standard/core`, or a running OWS | Yes — OWS policies bind |
-| **Bring your own key** | An encrypted keystore you loaded from a key file                 | `ethers`                                       | No — CLI caps only      |
-| **Generated here**     | An encrypted keystore, from a key this CLI made                  | `ethers`                                       | No — CLI caps only      |
-
-**Use OWS for anything holding real money.** It is the only one of the three with a policy layer, and it is the only one where a compromised CLI process does not hand over the key itself. Both other paths put a decryptable key on the same disk as the tool that spends it; the CLI-side caps are computed from a local ledger, so they stop mistakes, not an attacker.
+`rh-x402 wallet create` is the guided version of this whole section: it asks how the key should be held, installs the OWS bindings if you pick that and they are missing, creates the wallet, writes the config, and prints the address to fund.
 
 ```bash
-npm i @open-wallet-standard/core            # in-process OWS, no daemon
-rh-x402 config set wallet.backend ows-core
-rh-x402 config set wallet.default my-agent
+rh-x402 wallet create                                             # asks
+rh-x402 wallet create --path ows --name my-agent --install        # or don't
+rh-x402 wallet create --path import --name dev --key-file ./k.hex
 ```
 
-**Bring your own key** when you already have one — a testnet key, a CI key, a key from another tool. It never passes through argv or the environment:
+It never installs anything without being asked (a prompt, or `--install`), never creates over an existing OWS wallet — it adopts it and says so — and never takes a passphrase as a flag, because a flag lands in argv and in shell history. Non-interactively, an unanswerable question is an error, not a hang: `--path` is required when there is no terminal.
+
+|                         | Where the key lives   | Needs                        | Does this CLI ever hold the key?           |
+| ----------------------- | --------------------- | ---------------------------- | ------------------------------------------ |
+| **OWS** _(recommended)_ | An OWS vault          | `@open-wallet-standard/core` | **No** — one payload in, one signature out |
+| **Import**              | An encrypted keystore | `ethers`                     | Yes — decrypted in this process to sign    |
+| **Generate**            | An encrypted keystore | `ethers`                     | Yes — same, and the key is made here       |
+
+**Prefer OWS, and be clear about why.** The reason is custody, not policy: the key stays in the OWS vault and this CLI never receives it, so a bug or a compromise here cannot leak the key itself. Both keystore paths decrypt the key into this process on every signature.
+
+**A binding spend policy is a fourth thing, and none of the three give it to you.** OWS describes its policy engine as gating _agent (API key)_ operations, and `createApiKey(name, walletIds, policyIds, …)` is what binds a policy to a caller — `signTypedData` takes no key or policy argument, so an in-process call authenticated by the vault passphrase has nothing to bind one to. That is why `ows-core` declares `policies: false`. If you want a limit that holds even when this CLI misbehaves:
 
 ```bash
-export X402_KEYSTORE_PASS='…'
-rh-x402 signer keystore add dev --key-file ./testnet.key
+ows policy create --file ./policy.json
+ows key create --name x402-agent --wallet my-agent --policy <id>
+rh-x402 config set wallet.backend ows   # the HTTP backend authenticates with that key
 ```
 
-**Generate one here** only when you want a throwaway wallet and nothing else to install:
+Otherwise `limits.maxPerCall` and `limits.dailyCap` are the only caps you have, and they are computed from a local ledger — they stop mistakes, not an attacker.
+
+### Generating a key here
 
 ```bash
 export X402_KEYSTORE_PASS='…'
 rh-x402 signer keystore generate dev
 ```
 
-The key is generated in process, written straight to the encrypted keystore, and never printed — there is deliberately no way to read it back out. It is **not recommended** for a funded wallet, and the command says so on stderr every time.
+The key is generated in process, written straight to the encrypted keystore, and never printed — there is deliberately no way to read it back out. Not recommended for a funded wallet, and the command says so on stderr every time.
 
 One caveat worth stating plainly, because it undercuts the reason you might reach for this: generating a key does _not_ avoid a dependency. Node's crypto can make a secp256k1 key (`createECDH`), but it has no keccak256 — `sha3-256` is the NIST variant, with different padding, and is not interchangeable — so deriving the Ethereum address still needs `ethers`, and so does signing. If you are installing `ethers` either way, prefer bringing a key you already control.
 
@@ -114,9 +119,16 @@ Error mapping (`mapOwsError`):
 The same vault as `ows`, loaded directly through the [`@open-wallet-standard/core`](https://www.npmjs.com/package/@open-wallet-standard/core) native bindings instead of over HTTP. There is no service to start, and the key still never leaves OWS: the engine hands over one EIP-712 payload and gets a signature back.
 
 ```bash
+rh-x402 wallet create --path ows --install   # installs, creates, configures
+rh-x402 signer check
+```
+
+Or by hand:
+
+```bash
 npm i @open-wallet-standard/core
 rh-x402 config set wallet.backend ows-core
-rh-x402 signer check ows-core
+rh-x402 config set wallet.default my-agent
 ```
 
 ```json
@@ -125,13 +137,13 @@ rh-x402 signer check ows-core
 
 Both keys are optional: omit `vaultPath` and OWS uses its own default location; omit `passphrase` and it prompts or uses an unlocked vault, per your OWS setup.
 
-| Capability  | Value   | Why                                                                                 |
-| ----------- | ------- | ----------------------------------------------------------------------------------- |
-| `typedData` | `true`  | Verified against the package, not assumed — see above                               |
-| `policies`  | `true`  | OWS policies bind on every signature                                                |
-| `balances`  | `false` | The package exports no balance function, so the pre-flight funding check is skipped |
-| `accounts`  | `true`  | `listWallets` / `getWallet`                                                         |
-| `declared`  | `true`  | These come from the package's own API surface                                       |
+| Capability  | Value   | Why                                                                                     |
+| ----------- | ------- | --------------------------------------------------------------------------------------- |
+| `typedData` | `true`  | Verified against the package, not assumed — see above                                   |
+| `policies`  | `false` | Policies gate API-key callers; in-process signing has no key to bind one to — see above |
+| `balances`  | `false` | The package exports no balance function, so the pre-flight funding check is skipped     |
+| `accounts`  | `true`  | `listWallets` / `getWallet`                                                             |
+| `declared`  | `true`  | These come from the package's own API surface                                           |
 
 `balances: false` is worth reading twice: **`rh-x402 wallet balance` is not universal.** Only the HTTP `ows` backend can answer it; `ows-core` and `local` cannot, and `local` says so in as many words. A funding check has to read the token contract directly rather than asking the signer.
 

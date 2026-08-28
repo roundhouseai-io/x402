@@ -1,5 +1,35 @@
 # @roundhouseai/x402
 
+## 0.1.2
+
+### Patch Changes
+
+- 99fc914: Stop `config set` accepting keys that do nothing, and point a stuck agent at `wallet create`.
+
+  All four of these come from watching an agent try to set up a wallet unaided and fail in ways that were the CLI's fault, not its own.
+
+  - **`config set` accepted any dotted key and reported success.** `rh-x402 config set signer.backend local` — the wrong key; the real one is `wallet.backend` — returned `ok: true`, wrote a branch nothing reads, and left every later command using the default backend while `config.json` looked configured. Unknown keys are now refused, with the nearest match named: `unknown config key "signer.backend". Did you mean wallet.backend, wallet.backends?`. Backend and pin subtrees stay open, since a third-party `x402-signer-<name>` may need keys this package cannot know.
+  - **`config unset <key>` is new.** There was no way to remove a key without hand-editing `config.json`, so a mistaken `set` was unfixable through the CLI. It prunes objects it empties, and deliberately skips validation so keys written before this check can still be removed.
+  - **"no wallet selected" now names `rh-x402 wallet create`.** Without that pointer an agent reads the message as an invitation to assemble a wallet by hand out of `npm i ethers`, `signer keystore generate` and `config set`, which is exactly what the guided command exists to prevent.
+  - **The docs no longer imply an OWS daemon exists.** `@open-wallet-standard/core` ships no `serve` or `daemon` command, so an agent told to point at `http://127.0.0.1:8402` goes looking for a service to start and finds nothing. Both README and `docs/signers.md` now say plainly that the HTTP backend is for a separate OWS service you already run, and that `ows-core` is the in-process path.
+
+  Note for anyone scripting against this: a `config set` of a key that never did anything now fails instead of silently succeeding. That is the fix, but it is a behaviour change.
+
+- 7286ff8: Point people at the backend that needs no daemon, and show which config values nobody chose.
+
+  From a second round of agent testing against a real OWS wallet, where the whole session was spent hunting a daemon that does not exist.
+
+  - **"OWS unreachable at 127.0.0.1:8402" now names the fix.** On a loopback endpoint it adds: nothing is listening, `@open-wallet-standard/core` ships no daemon, so switch to `ows-core`, which talks to the same vault in process. Previously the message read as a service that had failed to start, and the reasonable response was to go looking for it — `ows --help | grep daemon`, `ps aux | grep ows`, both empty. Remote endpoints are left alone, since a service there may genuinely be down.
+  - **`config list` distinguishes a default from a choice.** JSON output carries an `origins` map (`default` | `user` | `project` | `flag`) per key; terminal output lists which keys are showing defaults. `wallet.backend: "ows"` printed identically whether or not anyone set it, which is how an untouched default came to look like it was overriding something.
+  - **`signer keystore add` and `generate` prompt for a passphrase on a terminal**, the way `wallet create` already does, instead of requiring `X402_KEYSTORE_PASS` and only saying so after failing.
+  - **`--help` names the exec protocol doc** (`docs/exec-signer.md`), which existed and was hard to find from the CLI.
+
+- 3f3ccd6: Never delete an OWS wallet; hide it instead.
+
+  - **`rh-x402 wallet forget <name>`** removes a wallet from this CLI's view by writing the name to `wallet.hidden` and clearing `wallet.default` if it pointed there. **The backend is untouched** — an OWS wallet keeps its funds, still appears in `ows wallet list`, and comes back with `rh-x402 wallet restore <name>`. `wallet list` reports how many are hidden, so a hidden wallet is not silently invisible.
+  - **The destructive OWS bindings are unreachable, not merely unused.** `@open-wallet-standard/core` exposes `deleteWallet`, `exportWallet` and `renameWallet`; none is declared on `OwsCoreModule`, and `test/owssafety.test.ts` fails the build if any is referenced from `src/`. A wallet holds money, so a tool that can spend from it should not also be able to destroy it — and `exportWallet` would pull a secret out of the vault, which the no-raw-private-keys rule already forbids. Recorded as an invariant in `CLAUDE.md`.
+  - **New config key `wallet.hidden`.**
+
 ## 0.1.1
 
 ### Patch Changes

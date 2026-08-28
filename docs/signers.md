@@ -210,6 +210,19 @@ The escape hatch that keeps this genuinely wallet-agnostic: a hardware wallet br
 
 One process per request, one JSON line in, one JSON line out; stderr passes through so a helper can talk to the operator. The protocol is in [`exec-signer.md`](exec-signer.md).
 
+## Removing a wallet
+
+There is no `rh-x402 wallet delete`, and that is deliberate.
+
+```bash
+rh-x402 wallet forget my-agent    # hides it here
+rh-x402 wallet restore my-agent   # brings it back
+```
+
+`forget` adds the name to `wallet.hidden` and clears `wallet.default` if it pointed there. **The backend is untouched:** an OWS wallet keeps its funds, still appears in `ows wallet list`, and can be restored here at any time. `wallet list` reports how many are hidden so they are not invisible-invisible.
+
+`@open-wallet-standard/core` does expose `deleteWallet`, `exportWallet` and `renameWallet`. This package declares none of them on its module interface and references none of them anywhere in `src/` — `test/owssafety.test.ts` fails the build if that changes. A wallet holds money, and a tool that can spend it should not also be able to destroy it or pull its secret out. If you genuinely want a wallet gone, that is a decision for the OWS CLI, made deliberately, with the vault in front of you.
+
 ## Third-party backends
 
 An unknown backend name is resolved as the npm package `x402-signer-<name>`, which must export `createSigner({ config, wallet })` returning a `SignerBackend`:

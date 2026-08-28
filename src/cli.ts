@@ -27,6 +27,7 @@ usage
   rh-x402 verify <receiptId|@file>       confirm settlement of a prior payment
   rh-x402 wallet create                  guided setup: pick a wallet, configure it
   rh-x402 wallet policy                  put an OWS policy in front of this wallet
+  rh-x402 wallet forget <name>           hide a wallet here; never deletes it
   rh-x402 wallet <list|balance|address>  wallet queries against the signer backend
   rh-x402 history [urlSubstring]         query the local ledger
   rh-x402 discover <capability>          providers for a capability, cheapest first

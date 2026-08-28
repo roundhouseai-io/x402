@@ -3,7 +3,7 @@ import { writeJson, isTty, writeErr } from '../core/output.js';
 import { bool, str, list, type ParsedArgs } from '../core/args.js';
 import { buildContext } from './context.js';
 import { findAsset, findChain, caip2 } from '../core/assets.js';
-import { runSetup, writeConfig } from '../core/setup.js';
+import { runSetup, writeConfig, unsetConfig, type ConfigValue } from '../core/setup.js';
 import { grantPolicyKey } from '../core/owspolicy.js';
 
 /** Wallet queries against the active signer backend, plus the guided setup. */
@@ -14,17 +14,28 @@ export async function walletCommand(parsed: ParsedArgs): Promise<number> {
   // when there is no wallet yet, so resolving a signer first would fail.
   if (sub === 'create') return walletCreate(parsed);
   if (sub === 'policy') return walletPolicy(parsed);
+  if (sub === 'forget' || sub === 'restore') return walletVisibility(parsed, sub);
 
   const ctx = buildContext(parsed);
 
   if (sub === 'list') {
     const signer = await ctx.signer();
-    const accounts = await signer.getAccounts();
+    const all = await signer.getAccounts();
+    // Hidden wallets are filtered here, never removed from the backend. The
+    // count is still reported so a hidden wallet is not silently invisible.
+    const hidden = ctx.config.wallet.hidden ?? [];
+    const accounts = all.filter((a) => !hidden.includes(a.id));
+    const hiddenCount = all.length - accounts.length;
     if (isTty()) {
       if (accounts.length === 0) process.stdout.write('no wallets\n');
       for (const a of accounts) {
         const mark = a.id === ctx.walletName ? '*' : ' ';
         process.stdout.write(`${mark} ${a.id}  ${a.address}\n`);
+      }
+      if (hiddenCount > 0) {
+        process.stdout.write(
+          `${hiddenCount} hidden (still in the backend; \`rh-x402 wallet restore <name>\`)\n`,
+        );
       }
     } else {
       writeJson({
@@ -32,6 +43,7 @@ export async function walletCommand(parsed: ParsedArgs): Promise<number> {
         backend: signer.backend,
         default: ctx.walletName ?? null,
         wallets: accounts,
+        hidden,
       });
     }
     return ExitCode.OK;
@@ -198,5 +210,53 @@ async function walletPolicy(parsed: ParsedArgs): Promise<number> {
       'amount rule, so limits.maxPerCall is still the only cap on HOW MUCH, and it is ' +
       'still advisory.',
   );
+  return ExitCode.OK;
+}
+
+/**
+ * Hide a wallet from this CLI, or bring it back.
+ *
+ * Deliberately not a delete. `@open-wallet-standard/core` exposes
+ * `deleteWallet`, and this package never calls it: a wallet holds money, and
+ * "remove it from my tooling" must never quietly mean "destroy it". Forgetting
+ * writes a name to `wallet.hidden` and clears `wallet.default` if it pointed
+ * there. The vault is untouched, and `ows wallet list` still shows it.
+ */
+async function walletVisibility(parsed: ParsedArgs, sub: 'forget' | 'restore'): Promise<number> {
+  const ctx = buildContext(parsed);
+  const name = parsed.positionals[1];
+  if (!name) {
+    throw new X402Error(ExitCode.GENERIC, `usage: rh-x402 wallet ${sub} <name>`);
+  }
+
+  const hidden = new Set(ctx.config.wallet.hidden ?? []);
+  if (sub === 'forget') hidden.add(name);
+  else hidden.delete(name);
+
+  const entries: Record<string, ConfigValue> = { 'wallet.hidden': [...hidden] };
+  // A hidden wallet must not stay the default, or every later command resolves
+  // to something this CLI is pretending not to see.
+  const clearedDefault = sub === 'forget' && ctx.config.wallet.default === name;
+  writeConfig(entries);
+  if (clearedDefault) unsetConfig('wallet.default');
+
+  const note =
+    sub === 'forget'
+      ? `"${name}" is hidden from rh-x402. It still exists in the backend with its funds ` +
+        'intact — this changed local config only. Bring it back with ' +
+        `\`rh-x402 wallet restore ${name}\`.`
+      : `"${name}" is visible again.`;
+
+  if (isTty()) process.stdout.write(`${note}\n`);
+  else {
+    writeJson({
+      ok: true,
+      wallet: name,
+      hidden: [...hidden],
+      clearedDefault,
+      backendUnchanged: true,
+      note,
+    });
+  }
   return ExitCode.OK;
 }

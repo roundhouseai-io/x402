@@ -2,7 +2,10 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, sep } from 'node:path';
 import { X402Error, ExitCode } from './errors.js';
-import { readRawConfig, writeRawConfig, setPath } from './config.js';
+import { readRawConfig, writeRawConfig, setPath, unsetPath } from './config.js';
+
+/** What the guided setup and `wallet forget` write into config.json. */
+export type ConfigValue = string | boolean | string[];
 import { addEntry, generatePrivateKey, readKeyFile, keystorePath } from './keystore.js';
 import { loadEthers } from './signers/local.js';
 import { loadOwsCore, type OwsCoreModule, type OwsWallet } from './signers/owscore.js';
@@ -46,7 +49,7 @@ export interface SetupResult {
   wallet: string;
   address: string;
   /** Dotted config keys this wrote, so the caller can show its work. */
-  configured: Record<string, string | boolean>;
+  configured: Record<string, ConfigValue>;
   /** Things the operator still has to do; never empty for a funded wallet. */
   nextSteps: string[];
   installed?: string;
@@ -61,7 +64,7 @@ function isKeyPath(value: string): value is KeyPath {
 }
 
 /** Config is written key by key, the same way `config set` writes it. */
-export function writeConfig(entries: Record<string, string | boolean>): void {
+export function writeConfig(entries: Record<string, ConfigValue>): void {
   let raw = readRawConfig();
   for (const [key, value] of Object.entries(entries)) {
     raw = setPath(raw, key, value);
@@ -297,7 +300,7 @@ function finishOws(
   hasPassphrase: boolean,
   policy: SetupResult['policy'],
 ): SetupResult {
-  const configured: Record<string, string | boolean> = {
+  const configured: Record<string, ConfigValue> = {
     'wallet.backend': 'ows-core',
     'wallet.default': name,
   };
@@ -431,4 +434,11 @@ export async function runSetup(opts: SetupOptions): Promise<SetupResult> {
   const path = await choosePath(opts);
   if (path === 'ows') return setupOws(opts);
   return setupKeystore(path, opts);
+}
+
+/** Remove a key from config.json, the counterpart to `writeConfig`. */
+export function unsetConfig(key: string): boolean {
+  const { config, removed } = unsetPath(readRawConfig(), key);
+  writeRawConfig(config);
+  return removed;
 }

@@ -63,6 +63,14 @@ export interface X402Config {
     backend: string;
     /** Wallet name or id within the active backend. */
     default?: string;
+    /**
+     * Wallets to hide from this CLI. They are untouched in the backend.
+     *
+     * This exists so "remove this wallet from my tooling" never has to mean
+     * "destroy this wallet". A hidden OWS wallet still holds its funds and is
+     * still there for `ows wallet list`; it simply stops appearing here.
+     */
+    hidden?: string[];
     backends: {
       ows: OwsBackendConfig;
       'ows-core'?: OwsCoreBackendConfig;
@@ -274,6 +282,7 @@ export const CONFIG_KEYS: readonly string[] = [
   'wallet',
   'wallet.backend',
   'wallet.default',
+  'wallet.hidden',
   'wallet.backends',
   'limits',
   'limits.maxPerCall',

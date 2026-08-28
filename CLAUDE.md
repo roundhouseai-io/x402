@@ -76,7 +76,8 @@ These are not preferences. Breaking one is a breaking change to the product, and
 5. **State files are 0600, state dirs 0700.** Use `writePrivate`/`appendPrivate`/`ensureDir` from `core/paths.ts`; never raw `writeFileSync` for anything under `~/.x402`.
 6. **The authorization cache is the double-payment defence.** Never sign without first checking it (unless `--no-cache`), and never widen its key so that a retry misses. See [`docs/idempotency.md`](docs/idempotency.md).
 7. **Gate order is fixed:** domain/payTo allowlist → `--max` → session `--budget` → daily cap → the backend's policy layer. First failure aborts, and CLI-side gates never make a network call before failing.
-8. **Zero runtime dependencies.** The CLI ships with none, on purpose: it is a payments tool, and every dependency is supply-chain risk against a hot wallet. Adding one needs an issue and a maintainer's agreement first — Node 20+ built-ins cover HTTP, crypto and JSON-RPC.
+8. **This CLI never destroys a wallet.** `@open-wallet-standard/core` exposes `deleteWallet`, `exportWallet` and `renameWallet`; none is declared on `OwsCoreModule` and none may be referenced from `src/`, which `test/owssafety.test.ts` enforces. A wallet holds money, so "remove it from my tooling" must never mean "destroy it": `wallet forget` writes the name to `wallet.hidden` and leaves the vault alone. `exportWallet` is doubly banned — it would pull a secret out of OWS, which invariant 1 forbids.
+9. **Zero runtime dependencies.** The CLI ships with none, on purpose: it is a payments tool, and every dependency is supply-chain risk against a hot wallet. Adding one needs an issue and a maintainer's agreement first — Node 20+ built-ins cover HTTP, crypto and JSON-RPC.
 
 ## Working here
 

@@ -153,6 +153,16 @@ export function installArgs(
 }
 
 /**
+ * npm's own stdout goes to *our stderr*, not our stdout.
+ *
+ * stdout is the machine-readable envelope, and a plain `inherit` puts npm's
+ * "added 2 packages" ahead of the JSON, so anything parsing this command's
+ * output gets a syntax error instead of a wallet. The operator still sees the
+ * install progress; it is just on the stream that carries progress.
+ */
+export const INSTALL_STDIO = ['inherit', 2, 'inherit'] as const;
+
+/**
  * Install the OWS bindings, only ever with explicit consent. The exact command
  * is printed first: this runs a package manager on the user's machine, which is
  * not something to do quietly in a tool that spends money.
@@ -161,7 +171,7 @@ function installOws(forceGlobal: boolean): string {
   const args = installArgs(forceGlobal);
   const printed = `npm ${args.join(' ')}`;
   process.stderr.write(`\nrunning: ${printed}\n\n`);
-  const result = spawnSync('npm', args, { stdio: 'inherit' });
+  const result = spawnSync('npm', args, { stdio: [...INSTALL_STDIO] });
   if (result.error || result.status !== 0) {
     throw new X402Error(
       ExitCode.OWS_UNREACHABLE,

@@ -1,5 +1,5 @@
 ---
-'@roundhouseai/x402': minor
+'@roundhouseai/x402': patch
 ---
 
 Make the OWS policy gate actually bind, and add `rh-x402 wallet policy`.

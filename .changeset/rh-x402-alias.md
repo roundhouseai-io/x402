@@ -1,5 +1,5 @@
 ---
-'@roundhouseai/x402': minor
+'@roundhouseai/x402': patch
 ---
 
 Install as `rh-x402`, and correct four things the docs got wrong.

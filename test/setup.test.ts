@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ExitCode, X402Error } from '../src/core/errors.js';
-import { installArgs, runSetup, KEY_PATHS, OWS_PACKAGE } from '../src/core/setup.js';
+import { installArgs, runSetup, KEY_PATHS, OWS_PACKAGE, INSTALL_STDIO } from '../src/core/setup.js';
 import { readRawConfig } from '../src/core/config.js';
 import { defaultKeystorePath } from '../src/core/keystore.js';
 
@@ -58,6 +58,15 @@ describe('choosing where to install the bindings', () => {
       '/srv/app',
       OWS_PACKAGE,
     ]);
+  });
+
+  it('keeps npm output off stdout, so the JSON envelope stays parseable', () => {
+    // Regression: with a plain 'inherit', npm's "added 2 packages" landed on
+    // stdout ahead of the JSON, so anything parsing this command's output got a
+    // syntax error instead of a wallet. Index 1 is the child's stdout; 2 is our
+    // stderr, where progress belongs.
+    expect(INSTALL_STDIO[1]).toBe(2);
+    expect(INSTALL_STDIO).toEqual(['inherit', 2, 'inherit']);
   });
 });
 

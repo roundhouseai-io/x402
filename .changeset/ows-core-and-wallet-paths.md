@@ -1,5 +1,5 @@
 ---
-'@roundhouseai/x402': minor
+'@roundhouseai/x402': patch
 ---
 
 Add the `ows-core` signer backend, drop the `x402` bin, and make the three ways to hold a key explicit.

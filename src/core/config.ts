@@ -204,6 +204,8 @@ export interface LoadOptions {
 export interface LoadedConfig {
   config: X402Config;
   sources: string[];
+  /** Which layer each leaf came from, so a default is distinguishable. */
+  origins: Record<string, ValueOrigin>;
 }
 
 /** ~/.x402/config.json < ./.x402rc < flags. `env:` values resolved last. */
@@ -211,24 +213,31 @@ export function loadConfig(opts: LoadOptions = {}): LoadedConfig {
   const sources: string[] = [];
   let merged: X402Config = DEFAULT_CONFIG;
 
+  const layers: { user?: Json; project?: Json; flags?: Json } = {};
+
   const userFile = opts.file ? resolve(opts.file) : paths.config();
   if (existsSync(userFile)) {
-    merged = mergeDeep(merged, readJsonFile(userFile));
+    const user = readJsonFile(userFile);
+    merged = mergeDeep(merged, user);
+    layers.user = user;
     sources.push(userFile);
   }
 
   const rc = join(opts.cwd ?? process.cwd(), '.x402rc');
   if (existsSync(rc)) {
-    merged = mergeDeep(merged, readJsonFile(rc));
+    const project = readJsonFile(rc);
+    merged = mergeDeep(merged, project);
+    layers.project = project;
     sources.push(rc);
   }
 
   if (opts.overrides && Object.keys(opts.overrides).length > 0) {
     merged = mergeDeep(merged, opts.overrides);
+    layers.flags = opts.overrides as Json;
     sources.push('flags');
   }
 
-  return { config: resolveEnv(merged), sources };
+  return { config: resolveEnv(merged), sources, origins: originsOf(layers) };
 }
 
 /** The raw (unresolved) user config file, for `config get|set|list`. */
@@ -421,4 +430,38 @@ export function unsetPath(obj: Json, dotted: string): { config: Json; removed: b
   };
 
   return { config: walk(obj, 0), removed };
+}
+
+/** Where an effective config value came from. */
+export type ValueOrigin = 'default' | 'user' | 'project' | 'flag';
+
+/**
+ * Label each leaf of the effective config with the layer it came from.
+ *
+ * `config list` shows a merged object, so a defaulted value and one the user
+ * chose look identical. That is how `wallet.backend: "ows"` reads as something
+ * deliberate when nobody set it — and why an unset default can look like it is
+ * "overriding" a key that was set somewhere else. Saying which layer won makes
+ * that self-diagnosing.
+ */
+export function originsOf(layers: {
+  user?: Json;
+  project?: Json;
+  flags?: Json;
+}): Record<string, ValueOrigin> {
+  const out: Record<string, ValueOrigin> = {};
+  const mark = (node: unknown, origin: ValueOrigin, prefix = ''): void => {
+    if (!isPlainObject(node)) return;
+    for (const [key, value] of Object.entries(node)) {
+      const path = prefix ? `${prefix}.${key}` : key;
+      if (isPlainObject(value)) mark(value, origin, path);
+      else out[path] = origin;
+    }
+  };
+  // Later layers win, matching how the config itself is merged.
+  for (const path of defaultedConfigKeys()) out[path] = 'default';
+  mark(layers.user, 'user');
+  mark(layers.project, 'project');
+  mark(layers.flags, 'flag');
+  return out;
 }

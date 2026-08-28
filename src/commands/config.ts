@@ -18,12 +18,20 @@ export function configCommand(parsed: ParsedArgs): number {
   const sub = parsed.positionals[0] ?? 'list';
 
   if (sub === 'list') {
-    const { config, sources } = loadConfig();
+    const { config, sources, origins } = loadConfig();
     if (isTty()) {
       process.stdout.write(`# sources: ${sources.join(', ') || 'defaults only'}\n`);
       process.stdout.write(`${JSON.stringify(config, null, 2)}\n`);
+      // Naming the defaults is what stops a value nobody chose reading as a
+      // deliberate setting that is "overriding" something.
+      const defaults = Object.entries(origins)
+        .filter(([, origin]) => origin === 'default')
+        .map(([key]) => key);
+      if (defaults.length > 0) {
+        process.stdout.write(`\n# not set by you, showing defaults: ${defaults.join(', ')}\n`);
+      }
     } else {
-      writeJson({ ok: true, file: paths.config(), sources, config });
+      writeJson({ ok: true, file: paths.config(), sources, config, origins });
     }
     return ExitCode.OK;
   }

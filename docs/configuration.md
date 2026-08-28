@@ -42,6 +42,8 @@ Three layers, later wins:
 }
 ```
 
+**`config list` says which values you chose.** Everything it prints is the _effective_ config, so a default and a deliberate setting look identical — `wallet.backend: "ows"` appears whether or not anyone set it. The JSON output carries an `origins` map (`default` | `user` | `project` | `flag`) per key, and the terminal output lists which keys are showing defaults. If a setting looks like it is being ignored, check there first: the usual cause is that the key you set is not the key being read.
+
 | Key                                      | Meaning                                                                                                                            |
 | ---------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | `wallet.backend`                         | Active signer backend: `ows`, `ows-core`, `local`, `exec`, or a third-party `x402-signer-<name>`. See [`signers.md`](signers.md).  |

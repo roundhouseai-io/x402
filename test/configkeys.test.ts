@@ -5,6 +5,7 @@ import {
   suggestConfigKeys,
   assertKnownConfigKey,
   unsetPath,
+  originsOf,
   type Json,
 } from '../src/core/config.js';
 import { ExitCode, X402Error } from '../src/core/errors.js';
@@ -101,5 +102,26 @@ describe('removing a config key', () => {
     const { config: out, removed } = unsetPath(stale, 'signer.backend');
     expect(removed).toBe(true);
     expect(out).toEqual({ wallet: { backend: 'local' } });
+  });
+});
+
+describe('telling defaults apart from choices', () => {
+  it('labels a value nobody set as a default', () => {
+    // The confusion this prevents: `config list` shows wallet.backend "ows"
+    // whether or not anyone chose it, so an untouched default reads as a
+    // deliberate setting — and then as one that is "overriding" something.
+    const origins = originsOf({ user: { wallet: { default: 'my-wallet' } } });
+    expect(origins['wallet.backend']).toBe('default');
+    expect(origins['wallet.default']).toBe('user');
+  });
+
+  it('lets a later layer win, matching how the config merges', () => {
+    const origins = originsOf({
+      user: { wallet: { backend: 'local' } },
+      project: { wallet: { backend: 'ows-core' } },
+      flags: { defaults: { chain: 'base-sepolia' } },
+    });
+    expect(origins['wallet.backend']).toBe('project');
+    expect(origins['defaults.chain']).toBe('flag');
   });
 });

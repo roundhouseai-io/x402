@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { readRawConfig, writeRawConfig, type Json } from '../src/core/config.js';
 import { writeConfig, unsetConfig } from '../src/core/setup.js';
+import { noDaemonHint } from '../src/core/ows.js';
 
 /**
  * A wallet holds money. Removing it from *this tool* must never mean removing
@@ -104,5 +105,24 @@ describe('hiding a wallet instead of deleting it', () => {
     writeRawConfig(before);
     writeConfig({ 'wallet.hidden': ['treasury'] });
     expect(readdirSync(home).sort()).toEqual(['config.json']);
+  });
+});
+
+describe('an OWS endpoint that nothing is listening on', () => {
+  it('names the daemon-free backend instead of implying a service to start', () => {
+    // The failure this comes from: an agent read "OWS unreachable at
+    // 127.0.0.1:8402" as a service that had not started, and spent the session
+    // grepping `ows --help` and `ps aux` for a daemon that does not exist.
+    const hint = noDaemonHint('http://127.0.0.1:8402');
+    expect(hint).toContain('ships no daemon');
+    expect(hint).toContain('ows-core');
+  });
+
+  it('says nothing extra about a remote endpoint, where a service may well exist', () => {
+    expect(noDaemonHint('https://ows.internal.example.com')).toBe('');
+  });
+
+  it('says nothing about an endpoint it cannot parse', () => {
+    expect(noDaemonHint('not a url')).toBe('');
   });
 });

@@ -34,6 +34,8 @@ usage
   rh-x402 serve [--mcp]                  run the unified local endpoint
   rh-x402 serve token <create|list|revoke>
   rh-x402 signer <list|check>            inspect signer backends and capabilities
+                                         (backends: ows-core, local, exec, ows;
+                                          exec protocol: docs/exec-signer.md)
   rh-x402 signer keystore <list|add|generate>  manage the local development keystore
   rh-x402 config <get|set|unset|list>    manage ~/.x402/config.json
 

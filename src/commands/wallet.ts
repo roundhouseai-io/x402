@@ -72,5 +72,5 @@ export async function walletCommand(parsed: ParsedArgs): Promise<number> {
     return balance ? ExitCode.OK : ExitCode.GENERIC;
   }
 
-  throw new X402Error(ExitCode.GENERIC, `usage: x402 wallet <list|balance|address>`);
+  throw new X402Error(ExitCode.GENERIC, `usage: rh-x402 wallet <list|balance|address>`);
 }

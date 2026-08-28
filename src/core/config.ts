@@ -11,6 +11,13 @@ export interface OwsBackendConfig {
   timeoutMs?: number;
 }
 
+export interface OwsCoreBackendConfig {
+  /** OWS vault directory; OWS's own default when unset. */
+  vaultPath?: string;
+  /** Vault passphrase. Use an `env:` indirection, never the literal. */
+  passphrase?: string;
+}
+
 export interface LocalBackendConfig {
   /** Encrypted keystore path; `~` is expanded. Defaults to `$X402_HOME/keystore.json`. */
   keystore?: string;
@@ -31,6 +38,7 @@ export interface X402Config {
     default?: string;
     backends: {
       ows: OwsBackendConfig;
+      'ows-core'?: OwsCoreBackendConfig;
       local: LocalBackendConfig;
       exec?: ExecBackendConfig;
       /** Third-party backends resolved as `x402-signer-<name>`. */
@@ -65,7 +73,7 @@ export interface X402Config {
     /** Capability documents, which carry the market stats `indexUrl` does not. */
     unifiedUrl: string;
   };
-  /** Settlement confirmation source for `x402 verify`. */
+  /** Settlement confirmation source for `rh-x402 verify`. */
   facilitator: {
     url?: string;
     token?: string;

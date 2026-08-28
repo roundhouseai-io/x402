@@ -27,7 +27,7 @@ export async function payCommand(parsed: ParsedArgs): Promise<number> {
   if (!raw || raw.trim() === '') {
     throw new X402Error(
       ExitCode.GENERIC,
-      'usage: x402 pay <402-json|@file|-> (reads the 402 body from argv, a file, or stdin)',
+      'usage: rh-x402 pay <402-json|@file|-> (reads the 402 body from argv, a file, or stdin)',
     );
   }
 

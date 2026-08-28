@@ -21,20 +21,56 @@ Four rules hold for every backend, and they are why the interface is this narrow
 3. **Backends may refuse.** A policy refusal maps to exit `42`, which agents must not retry.
 4. **No automatic fallback.** If the chosen backend denies or is unavailable, the call fails. There is no second backend to try, ever.
 
+## Three ways to hold a key
+
+Before picking a backend, pick how the key is held. There are three, in descending order of how much you should want them.
+
+|                        | Where the key lives                                              | Needs                                          | Policy layer            |
+| ---------------------- | ---------------------------------------------------------------- | ---------------------------------------------- | ----------------------- |
+| **OWS**                | An OWS vault, in process (`ows-core`) or behind a daemon (`ows`) | `@open-wallet-standard/core`, or a running OWS | Yes — OWS policies bind |
+| **Bring your own key** | An encrypted keystore you loaded from a key file                 | `ethers`                                       | No — CLI caps only      |
+| **Generated here**     | An encrypted keystore, from a key this CLI made                  | `ethers`                                       | No — CLI caps only      |
+
+**Use OWS for anything holding real money.** It is the only one of the three with a policy layer, and it is the only one where a compromised CLI process does not hand over the key itself. Both other paths put a decryptable key on the same disk as the tool that spends it; the CLI-side caps are computed from a local ledger, so they stop mistakes, not an attacker.
+
+```bash
+npm i @open-wallet-standard/core            # in-process OWS, no daemon
+rh-x402 config set wallet.backend ows-core
+rh-x402 config set wallet.default my-agent
+```
+
+**Bring your own key** when you already have one — a testnet key, a CI key, a key from another tool. It never passes through argv or the environment:
+
+```bash
+export X402_KEYSTORE_PASS='…'
+rh-x402 signer keystore add dev --key-file ./testnet.key
+```
+
+**Generate one here** only when you want a throwaway wallet and nothing else to install:
+
+```bash
+export X402_KEYSTORE_PASS='…'
+rh-x402 signer keystore generate dev
+```
+
+The key is generated in process, written straight to the encrypted keystore, and never printed — there is deliberately no way to read it back out. It is **not recommended** for a funded wallet, and the command says so on stderr every time.
+
+One caveat worth stating plainly, because it undercuts the reason you might reach for this: generating a key does _not_ avoid a dependency. Node's crypto can make a secp256k1 key (`createECDH`), but it has no keccak256 — `sha3-256` is the NIST variant, with different padding, and is not interchangeable — so deriving the Ethereum address still needs `ethers`, and so does signing. If you are installing `ethers` either way, prefer bringing a key you already control.
+
 ## Choosing one
 
 ```bash
-x402 signer list                   # what is available, and what is active
-x402 signer check                  # resolve the active backend and report its capabilities
-x402 signer check local            # check a specific one
-x402 call <url> --signer local     # per call
+rh-x402 signer list                   # what is available, and what is active
+rh-x402 signer check                  # resolve the active backend and report its capabilities
+rh-x402 signer check local            # check a specific one
+rh-x402 call <url> --signer local     # per call
 ```
 
 Per-project in `.x402rc`, or globally:
 
 ```bash
-x402 config set wallet.backend ows
-x402 config set wallet.default my-agent
+rh-x402 config set wallet.backend ows
+rh-x402 config set wallet.default my-agent
 ```
 
 ## `ows` — the reference backend (default)
@@ -57,9 +93,11 @@ An [Open Wallet Standard](https://github.com/open-wallet-standard) agent access 
 | `getBalance()`    | `GET /v1/wallets/:wallet/balance?asset=&chain=`                   |
 | `signTypedData()` | `POST /v1/wallets/:wallet/sign-typed-data`                        |
 
-**The open question.** EIP-3009 requires EIP-712 typed-data signing: the digest is `keccak256(0x1901 ‖ domainSeparator ‖ hashStruct(message))` over a typed structure, not an arbitrary string. The published OWS core types show `signMessage` with `utf8`/`hex` only, and neither can produce that signature — nor can a wallet that signs opaque bytes show a human or a policy engine _what_ is being authorised, which is the point of EIP-712 for payments.
+**The open question, answered.** EIP-3009 requires EIP-712 typed-data signing: the digest is `keccak256(0x1901 ‖ domainSeparator ‖ hashStruct(message))` over a typed structure, not an arbitrary string. This repo's longest-standing blocker was that the published OWS core types showed `signMessage` with `utf8`/`hex` only, neither of which can produce that signature.
 
-Because OWS does not advertise capabilities yet, the backend assumes typed-data support (`declared: false`) and a missing method surfaces as exit `47` with a message that says so. The signer abstraction means this no longer blocks the CLI — `local` and `exec` can ship first — but it does block OWS as the flagship backend. Tracked as an issue.
+`@open-wallet-standard/core@1.4.2` **does** export `signTypedData`. It was checked the only way worth trusting — by signing a real `TransferWithAuthorization` payload with it and inspecting the result: 65 bytes, `v` appended, recovery id 27/28. That is what the `ows-core` backend below is built on.
+
+What that settles and what it does not: the _capability_ exists in OWS, so EIP-3009 over OWS is no longer hypothetical. The HTTP daemon's `POST /v1/wallets/:wallet/sign-typed-data` route has **not** been exercised against a running OWS, so the `ows` backend still assumes typed-data support (`declared: false`) and surfaces a missing method as exit `47`. If you want OWS today, `ows-core` is the path that is known to work.
 
 Error mapping (`mapOwsError`):
 
@@ -71,15 +109,51 @@ Error mapping (`mapOwsError`):
 | 404/405/501                                | 47, pointing at typed-data support |
 | Connection refused, timeout, anything else | 47 `ows_unavailable`               |
 
+## `ows-core` — OWS in process, no daemon
+
+The same vault as `ows`, loaded directly through the [`@open-wallet-standard/core`](https://www.npmjs.com/package/@open-wallet-standard/core) native bindings instead of over HTTP. There is no service to start, and the key still never leaves OWS: the engine hands over one EIP-712 payload and gets a signature back.
+
+```bash
+npm i @open-wallet-standard/core
+rh-x402 config set wallet.backend ows-core
+rh-x402 signer check ows-core
+```
+
+```json
+"backends": { "ows-core": { "vaultPath": "~/.ows/vault", "passphrase": "env:OWS_VAULT_PASS" } }
+```
+
+Both keys are optional: omit `vaultPath` and OWS uses its own default location; omit `passphrase` and it prompts or uses an unlocked vault, per your OWS setup.
+
+| Capability  | Value   | Why                                                                                 |
+| ----------- | ------- | ----------------------------------------------------------------------------------- |
+| `typedData` | `true`  | Verified against the package, not assumed — see above                               |
+| `policies`  | `true`  | OWS policies bind on every signature                                                |
+| `balances`  | `false` | The package exports no balance function, so the pre-flight funding check is skipped |
+| `accounts`  | `true`  | `listWallets` / `getWallet`                                                         |
+| `declared`  | `true`  | These come from the package's own API surface                                       |
+
+`balances: false` is worth reading twice: **`rh-x402 wallet balance` is not universal.** Only the HTTP `ows` backend can answer it; `ows-core` and `local` cannot, and `local` says so in as many words. A funding check has to read the token contract directly rather than asking the signer.
+
+Two details the backend handles, both found by running the package rather than reading its types:
+
+- The bindings return a 65-byte signature **without** a `0x` prefix. Passed through unchanged it produces an `X-PAYMENT` header no facilitator will accept, so it is normalised at the backend boundary. A result that is not 65 bytes is an error, not something to pay with.
+- OWS names EVM chains (`base`, `base-sepolia`), not CAIP-2. Chain ids are mapped through `core/assets.ts` so the rest of the tool keeps its own vocabulary.
+
+Failures map the usual way: a policy refusal is exit `42` and must not be retried; anything else — locked vault, unknown wallet, a wallet with no EVM account, the package not installed — is exit `47`.
+
+`@open-wallet-standard/core` is an **optional** peer dependency, exactly like `ethers`, so a default install still carries no signing code. It ships prebuilt bindings for macOS and Linux on x64 and arm64 only.
+
 ## `local` — development and CI only
 
 An encrypted keystore: scrypt (N=16384, r=8, p=1) stretches the passphrase, AES-256-GCM seals the key. The file is `0600`, and loading refuses a group- or world-readable file.
 
 ```bash
 export X402_KEYSTORE_PASS='…'
-x402 signer keystore add dev --key-file ./testnet.key   # never from argv
-x402 signer keystore list
-x402 call <url> --signer local --wallet dev
+rh-x402 signer keystore add dev --key-file ./testnet.key   # never from argv
+rh-x402 signer keystore generate dev                        # or make one; not recommended
+rh-x402 signer keystore list
+rh-x402 call <url> --signer local --wallet dev
 ```
 
 ```json
@@ -106,8 +180,8 @@ An unknown backend name is resolved as the npm package `x402-signer-<name>`, whi
 
 ```bash
 npm i x402-signer-acme
-x402 config set wallet.backend acme
-x402 config set wallet.backends.acme.region eu-west-1
+rh-x402 config set wallet.backend acme
+rh-x402 config set wallet.backends.acme.region eu-west-1
 ```
 
 An unknown name that is not installed fails with exit `47` naming the package it looked for.

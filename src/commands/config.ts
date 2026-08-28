@@ -22,7 +22,7 @@ export function configCommand(parsed: ParsedArgs): number {
 
   if (sub === 'get') {
     const key = parsed.positionals[1];
-    if (!key) throw new X402Error(ExitCode.GENERIC, 'usage: x402 config get <dotted.key>');
+    if (!key) throw new X402Error(ExitCode.GENERIC, 'usage: rh-x402 config get <dotted.key>');
     const { config } = loadConfig();
     const value = getPath(config, key);
     if (isTty()) process.stdout.write(`${value === undefined ? '' : JSON.stringify(value)}\n`);
@@ -34,7 +34,7 @@ export function configCommand(parsed: ParsedArgs): number {
     const key = parsed.positionals[1];
     const raw = parsed.positionals[2];
     if (!key || raw === undefined) {
-      throw new X402Error(ExitCode.GENERIC, 'usage: x402 config set <dotted.key> <value>');
+      throw new X402Error(ExitCode.GENERIC, 'usage: rh-x402 config set <dotted.key> <value>');
     }
     // `env:NAME` stays a literal in the file and is resolved at read time, so
     // secrets never land in config.json.
@@ -46,5 +46,5 @@ export function configCommand(parsed: ParsedArgs): number {
     return ExitCode.OK;
   }
 
-  throw new X402Error(ExitCode.GENERIC, 'usage: x402 config <get|set|list>');
+  throw new X402Error(ExitCode.GENERIC, 'usage: rh-x402 config <get|set|list>');
 }

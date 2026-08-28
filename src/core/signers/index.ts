@@ -1,16 +1,18 @@
 import { X402Error, ExitCode } from '../errors.js';
 import { OwsClient, OwsSigner } from '../ows.js';
 import { LocalSigner } from './local.js';
+import { OwsCoreSigner } from './owscore.js';
 import { ExecSigner } from './exec.js';
 import type {
   ExecBackendConfig,
   LocalBackendConfig,
   OwsBackendConfig,
+  OwsCoreBackendConfig,
   X402Config,
 } from '../config.js';
 import type { SignerBackend, SignerFactory, SignerSelector } from '../signer.js';
 
-export const BUILTIN_BACKENDS = ['ows', 'local', 'exec'] as const;
+export const BUILTIN_BACKENDS = ['ows', 'ows-core', 'local', 'exec'] as const;
 export type BuiltinBackend = (typeof BUILTIN_BACKENDS)[number];
 
 /** Third-party backends live in `x402-signer-<name>` packages. */
@@ -46,6 +48,10 @@ async function construct(
         ...(ows.timeoutMs ? { timeoutMs: ows.timeoutMs } : {}),
       });
       return new OwsSigner(client, requireWallet(backend, wallet));
+    }
+    case 'ows-core': {
+      const core = (backends['ows-core'] ?? {}) as OwsCoreBackendConfig;
+      return new OwsCoreSigner(requireWallet(backend, wallet), core);
     }
     case 'local': {
       const local = (backends.local ?? {}) as LocalBackendConfig;

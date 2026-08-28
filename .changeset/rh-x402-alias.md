@@ -4,7 +4,7 @@
 
 Install as `rh-x402`, and correct four things the docs got wrong.
 
-- **New `rh-x402` binary**, alongside the existing `x402`. The unscoped `x402` package on npm is a different project that also ships an `x402` binary, so on a machine with both the short name is a coin toss. `rh-x402` is unique to this package and is now what the docs tell you to write down. `x402` still works and nothing is removed.
+- **The binary is now `rh-x402`.** The unscoped `x402` package on npm is a different project that ships its own `x402` binary, so on a machine with both the short name was a coin toss. `rh-x402` is unique to this package. (This shipped first as an alias alongside `x402`; the `x402` bin is dropped in the same release — see below.)
 - **README and SKILL.md now lead with `discover`**, which needs no wallet, key or config: `discover.indexUrl` and `discover.unifiedUrl` ship pointing at the Roundhouse index, so it reads the live Unified Services layer immediately and gives you the market — min, median, spot, spread — before anything is spent.
 
 Four corrections, each found by driving the published package against production rather than reading the source, and each one that could have cost money as a wrong instruction:

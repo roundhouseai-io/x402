@@ -8,7 +8,7 @@ import { buildContext } from './context.js';
 export async function discoverCommand(parsed: ParsedArgs): Promise<number> {
   const ctx = buildContext(parsed);
   const raw = parsed.positionals[0] ?? str(parsed.flags, 'capability');
-  if (!raw) throw new X402Error(ExitCode.GENERIC, 'usage: x402 discover <capability>');
+  if (!raw) throw new X402Error(ExitCode.GENERIC, 'usage: rh-x402 discover <capability>');
   const capability = capabilityOf(raw) ?? raw;
 
   const market = await discoverMarket(capability, ctx.config);

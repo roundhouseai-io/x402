@@ -14,7 +14,7 @@ If a live entry exists, its signature and `X-PAYMENT` header are reused and no s
 
 Entries expire at their own `validBefore` — the EIP-3009 authorization is worthless afterwards. Expired entries are dropped on read and pruned opportunistically on every write.
 
-Within one process (and inside `x402 serve`), signing is serialised per engine: two concurrent identical calls produce one authorization, not two.
+Within one process (and inside `rh-x402 serve`), signing is serialised per engine: two concurrent identical calls produce one authorization, not two.
 
 ## Why the key omits `validBefore`
 
@@ -41,7 +41,7 @@ Never add `--no-cache` to "clear a stuck state" after a 50. That is the double-p
 
 ## The unified endpoint
 
-`x402 serve` shares this cache, and adds request-level replay: send an `Idempotency-Key` header and a replay within the authorization's validity window returns the original receipt without touching the provider.
+`rh-x402 serve` shares this cache, and adds request-level replay: send an `Idempotency-Key` header and a replay within the authorization's validity window returns the original receipt without touching the provider.
 
 Response bodies are only replayable when `telemetry.payload` is `full` — at `hash` (the default) the body was never stored, so the replay returns the receipt with `bodyReplay: false`. That is the deliberate trade: not keeping a plaintext copy of every paid response beats being able to replay it.
 

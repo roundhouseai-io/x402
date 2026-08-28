@@ -9,7 +9,7 @@ This tool authorises payments. A bug here can cost real money, so please report 
 Use [GitHub's private vulnerability reporting](https://github.com/roundhouseai-io/x402/security/advisories/new) for this repository, or email **security@roundhouse.ai** with:
 
 - what you found and what an attacker (or a confused agent) can do with it;
-- the version (`x402 --version`) and platform;
+- the version (`rh-x402 --version`) and platform;
 - a reproduction — a mock provider or a testnet transcript is ideal;
 - whether you believe it has been exploited.
 
@@ -29,7 +29,7 @@ We aim to acknowledge within two working days, agree an assessment and timeline 
 
 - Vulnerabilities in the OWS implementation you point the CLI at, in a provider's API, or in a facilitator. Report those to their owners.
 - Consequences of `--unsafe-private-key-file`, which warns on every use and is documented as development-only.
-- Consequences of running `x402 serve` on a public interface, which requires an explicit acknowledgement flag.
+- Consequences of running `rh-x402 serve` on a public interface, which requires an explicit acknowledgement flag.
 - Losses from a wallet policy that permits more than you intended. Mirror your caps as OWS policies; the CLI-side checks are conveniences.
 - Missing hardening with no exploit path (version disclosure, verbose errors on a local port, and so on). Still worth an issue, just not an advisory.
 

@@ -115,9 +115,9 @@ switch (input.method) {
 ```
 
 ```bash
-x402 config set wallet.backend exec
-x402 config set wallet.backends.exec.command /usr/local/bin/my-signer
-x402 signer check exec
+rh-x402 config set wallet.backend exec
+rh-x402 config set wallet.backends.exec.command /usr/local/bin/my-signer
+rh-x402 signer check exec
 ```
 
 ## Notes for helper authors

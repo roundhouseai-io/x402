@@ -44,7 +44,7 @@ Append-only JSONL at `~/.x402/ledger.jsonl`, created 0600. One record per call, 
 }
 ```
 
-`agent.session` and `agent.tag` come from `X402_SESSION` and `X402_AGENT`. `agent.token` is the `x402 serve` caller token name, which is what makes per-agent spend attribution work.
+`agent.session` and `agent.tag` come from `X402_SESSION` and `X402_AGENT`. `agent.token` is the `rh-x402 serve` caller token name, which is what makes per-agent spend attribution work.
 
 A record is written for failures too, with the `exitCode` and `error` that ended the call — including gate refusals, where `payment.paid` is `false` and `amount` is `"0"`. A truncated final line (process killed mid-write) is skipped on read rather than breaking `history`.
 
@@ -63,7 +63,7 @@ Set with `--telemetry-payload` or config `telemetry.payload`.
 Turn `full` on per call, for debugging and for endpoints you own:
 
 ```bash
-x402 call https://my-own-endpoint.example/v1/thing --telemetry-payload full
+rh-x402 call https://my-own-endpoint.example/v1/thing --telemetry-payload full
 ```
 
 `telemetry.redactKeys` masks specific dot paths even at `full`, and understands `*` for one level of wildcard:
@@ -91,21 +91,21 @@ Off by default. When enabled, records are batched (50 records or 10 seconds, whi
 }
 ```
 
-The intended target is the Roundhouse indexer, which turns fleet-wide payment telemetry into the pricing and liveness data behind `x402 discover`.
+The intended target is the Roundhouse indexer, which turns fleet-wide payment telemetry into the pricing and liveness data behind `rh-x402 discover`.
 
-**Sink failures never fail a call.** A failed batch is written to `~/.x402/outbox/` and flushed on the next invocation. `x402 serve` flushes on a timer, and `GET /v1/health` reports `outboxDepth` so a stuck sink is visible.
+**Sink failures never fail a call.** A failed batch is written to `~/.x402/outbox/` and flushed on the next invocation. `rh-x402 serve` flushes on a timer, and `GET /v1/health` reports `outboxDepth` so a stuck sink is visible.
 
 Note what leaves the machine: whatever the payload level says. At `hash` that is URLs, hashes, key names, amounts, `payTo` addresses, timings and exit codes. At `full` it is your request and response bodies. Do not enable `full` and a remote sink together without deciding that is what you want.
 
 ## History queries
 
 ```bash
-x402 history --since 24h --paid-only        # recent paid calls
-x402 history --sum                          # total spend, by asset
-x402 history --by payTo --sum               # spend by recipient
-x402 history --by agent --sum               # spend by serve caller token
-x402 history --by day --sum                 # daily spend
-x402 history --since 7d --limit 20 provider.example   # filter by URL substring
+rh-x402 history --since 24h --paid-only        # recent paid calls
+rh-x402 history --sum                          # total spend, by asset
+rh-x402 history --by payTo --sum               # spend by recipient
+rh-x402 history --by agent --sum               # spend by serve caller token
+rh-x402 history --by day --sum                 # daily spend
+rh-x402 history --since 7d --limit 20 provider.example   # filter by URL substring
 ```
 
 `--by` accepts `payTo`, `url`, `wallet`, `asset`, `agent`, `day`, `capability`. On a TTY the output is a table; piped, it is JSON. The same queries are available over HTTP at `GET /v1/history`, filtered to the calling token's own records unless the token has the `admin` scope.

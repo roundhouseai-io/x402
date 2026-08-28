@@ -26,8 +26,7 @@
   },
   "type": "module",
   "bin": {
-    "rh-x402": "dist/cli.js",
-    "x402": "dist/cli.js"
+    "rh-x402": "dist/cli.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -71,10 +70,14 @@
     "vitest": "^2.1.4"
   },
   "peerDependencies": {
-    "ethers": "^6.13.0"
+    "ethers": "^6.13.0",
+    "@open-wallet-standard/core": "^1.4.2"
   },
   "peerDependenciesMeta": {
     "ethers": {
+      "optional": true
+    },
+    "@open-wallet-standard/core": {
       "optional": true
     }
   },

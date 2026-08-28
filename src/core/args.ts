@@ -176,7 +176,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
     if ((COMMANDS as readonly string[]).includes(first)) {
       command = positionals.shift();
     } else if (looksLikeUrl(first)) {
-      // `x402 <url>` is sugar for `x402 call <url>`.
+      // `rh-x402 <url>` is sugar for `rh-x402 call <url>`.
       command = 'call';
     }
   }

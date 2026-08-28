@@ -89,6 +89,22 @@ jobs:
           git commit -m 'chore: release v${{ steps.version.outputs.version }}'
           git push origin HEAD:main
 
+      # v0.1.0 shipped with its tag pointing at a pre-release commit, because a
+      # tag of that name already existed: `changeset publish` created nothing
+      # and `git push --tags` had nothing to push, silently. Fail loudly here
+      # instead of publishing a version whose tag describes different code.
+      - name: Refuse a tag that already points somewhere else
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          EXISTING=$(git rev-parse -q --verify "refs/tags/$TAG^{commit}" 2>/dev/null || true)
+          if [ -n "$EXISTING" ] && [ "$EXISTING" != "$(git rev-parse HEAD)" ]; then
+            echo "::error::$TAG already exists at $EXISTING but this run is publishing $(git rev-parse HEAD)."
+            echo "::error::Move or delete the tag before releasing; a stale tag makes the release describe different code."
+            exit 1
+          fi
+
       # Deliberately ungated. `changeset publish` asks npm what exists and
       # publishes only what is missing, so this is safe to re-run and is the
       # recovery path when the version landed on main but the publish failed.

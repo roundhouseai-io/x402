@@ -26,6 +26,7 @@
   },
   "type": "module",
   "bin": {
+    "rh-x402": "dist/cli.js",
     "x402": "dist/cli.js"
   },
   "main": "./dist/index.js",

@@ -7,13 +7,23 @@
 [![node](https://img.shields.io/node/v/@roundhouseai/x402.svg)](https://nodejs.org)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
+**Start here — this needs no wallet, no key and no config:**
+
+```bash
+npx @roundhouseai/x402 discover web-search
+```
+
+It is a Roundhouse client out of the box. `discover.indexUrl` ships pointing at `https://www.roundhouse.studio/api/v0` and `discover.unifiedUrl` at `/unified.json`, so that one line reads the live Unified Services layer and prints every provider of a capability with the market around them — min, median, spot, spread — before you spend anything.
+
+Then pay for one:
+
 ```bash
 npx @roundhouseai/x402 https://blockrun.ai/api/v1/exa/answer --data.query "What is the LEI of Roundhouse AI Ltd.?"
 ```
 
-That is a real, live endpoint — $0.011 USDC on Base, listed on the [Roundhouse index](https://www.roundhouse.studio). With a wallet configured, that one line does: POST with a JSON body → receives 402 → checks the price against your limits → signs an EIP-3009 authorization via your OWS wallet → retries with `X-PAYMENT` → prints the JSON body → writes a ledger entry.
+A real, live endpoint — $0.011 USDC on Base. With a wallet configured, that line does: POST with a JSON body → receives 402 → checks the price against your limits → signs an EIP-3009 authorization → retries with `X-PAYMENT` → prints the JSON body → writes a ledger entry.
 
-> **On `npx x402`** — the unscoped `x402` name on npm belongs to another project, so the zero-install form is `npx @roundhouseai/x402`. A global install (`npm i -g @roundhouseai/x402`) gives you the short `x402` command.
+> **Two commands, and why.** A global install gives you **`rh-x402`** and `x402`. Prefer `rh-x402` in anything you commit: the unscoped `x402` package on npm is a different project that also ships an `x402` binary, so on a machine with both installed the short name is a coin toss. For the same reason the zero-install form is `npx @roundhouseai/x402`, never `npx x402`.
 
 ## Why
 
@@ -29,7 +39,7 @@ Paying for an HTTP call from an agent normally means gluing together a 402 parse
 ## Install
 
 ```bash
-npm i -g @roundhouseai/x402      # then: x402 <url>
+npm i -g @roundhouseai/x402      # then: rh-x402 <url>   (or x402, see above)
 npx @roundhouseai/x402 <url>     # or zero-install
 ```
 
@@ -149,7 +159,7 @@ The signed authorization is cached at `~/.x402/authcache/`, keyed by the request
 ```bash
 x402 call https://api.example.com/v1/lei          # times out after paying → exit 50
 x402 call https://api.example.com/v1/lei          # reuses the authorization, cacheHit: true
-x402 call https://api.example.com/v1/lei --no-cache   # deliberate fresh signature
+x402 call https://api.example.com/v1/lei --no-cache   # pay AGAIN, on purpose — not an error escape
 ```
 
 Double payment is the most likely agent failure mode; see [`docs/idempotency.md`](docs/idempotency.md) for the details and the one deliberate departure from the spec.
@@ -172,20 +182,32 @@ On a TTY you get a human summary. Without one — the agent case — stdout is a
 
 `--raw` prints the response body alone. `--out <file>` writes the body to a file.
 
-| Code | Meaning                                                                                                      |
-| ---- | ------------------------------------------------------------------------------------------------------------ |
-| 0    | Success (paid or free)                                                                                       |
-| 1    | Generic / network error                                                                                      |
-| 40   | Invalid 402 payload (endpoint not x402-compliant)                                                            |
-| 42   | Denied by OWS policy                                                                                         |
-| 43   | Denied by payTo/domain allowlist                                                                             |
-| 44   | Price exceeds `--max`                                                                                        |
-| 45   | Session budget or daily cap exhausted                                                                        |
-| 46   | Insufficient wallet balance                                                                                  |
-| 47   | OWS unreachable or auth failed                                                                               |
-| 50   | Payment sent, but no valid response returned (receipt logged; investigate before retrying with `--no-cache`) |
+| Code | Meaning                                                                                                                                                              |
+| ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0    | Success (paid or free)                                                                                                                                               |
+| 1    | Generic / network error                                                                                                                                              |
+| 40   | Invalid 402 payload (endpoint not x402-compliant)                                                                                                                    |
+| 42   | Denied by OWS policy                                                                                                                                                 |
+| 43   | Denied by payTo/domain allowlist                                                                                                                                     |
+| 44   | Price exceeds `--max`                                                                                                                                                |
+| 45   | Session budget or daily cap exhausted                                                                                                                                |
+| 46   | Insufficient wallet balance                                                                                                                                          |
+| 47   | Signer backend unreachable, unauthenticated, **or unable to do what was asked** (see below)                                                                          |
+| 50   | Payment sent, but no valid response returned. **Money may have moved.** Re-run the _identical_ command — it reuses the cached authorization. Never add `--no-cache`. |
 
 These are a stability contract from v1. See [`docs/exit-codes.md`](docs/exit-codes.md).
+
+## Four things that cost money if you get them wrong
+
+Found by driving the published package against production, not by reading the source. Each was a gap between what this README said and what the tool does.
+
+**1. `--no-cache` is the double-payment path, never the escape from an error.** It forces a fresh signature and writes none, so the next identical call signs again too. After exit `50` — payment sent, response lost — the correct move is to re-run the _identical_ command: the cached authorization is reused and you either get the response you already paid for or fail cleanly. Adding `--no-cache` there is how you pay twice. Use it only when you actually mean "bill me again".
+
+**2. `wallet balance` is not universal, and its failure looks like an outage.** Balance reporting is a per-backend capability. The `local` backend does not have it, so the command exits `47` with `the local backend cannot report balances` — the same code you would get if OWS were down. Do not read that as an infrastructure problem, and do not treat a missing balance as zero. Check with `x402 signer check`, and where the backend cannot answer, read the token contract directly for your funding pre-flight. The engine skips the pre-flight check rather than guessing, so a call can still fail at the provider for want of funds.
+
+**3. The `local` backend needs `ethers`, and refuses a loose key file.** It is the only part of the tool that signs locally, and `ethers` is an _optional_ peer dependency — a default install carries no signing code at all, which is deliberate. Without it you get exit `47` and `needs the optional peer dependency ethers (npm i ethers)`. It also refuses to read a group- or world-readable keystore (`chmod 600` it) and a world-readable raw key file. Those refusals are the feature; do not chmod around them.
+
+**4. `npx x402` is a different project.** The unscoped name on npm belongs to someone else. Zero-install is `npx @roundhouseai/x402`; a global install gives you `rh-x402` (unique) alongside `x402` (short, and contested). Scripts should say `rh-x402`.
 
 ## Telemetry
 

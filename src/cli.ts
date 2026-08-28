@@ -15,6 +15,10 @@ import { serveCommand } from './commands/serve.js';
 
 const HELP = `x402 ${VERSION} — one command for the whole x402 payment loop
 
+installed as two commands: rh-x402 (unique to this package) and x402 (short,
+but the unscoped x402 package on npm is a different project and also ships an
+x402 binary — prefer rh-x402 in scripts).
+
 usage
   x402 <url> [flags]                  sugar for: x402 call <url>
   x402 call <url|x402:capability>     request, pay if a 402 is quoted, return the response
@@ -60,6 +64,10 @@ payment
 exit codes
   0 ok   1 error   40 invalid 402   42 signer policy   43 allowlist   44 over --max
   45 budget/daily cap   46 balance   47 signer unavailable   50 paid, no valid response
+
+start here
+  x402 discover web-search            works with no config: the Roundhouse index
+                                      is the built-in default
 
 docs  https://github.com/roundhouseai-io/x402
 `;

@@ -34,7 +34,7 @@ usage
   rh-x402 serve token <create|list|revoke>
   rh-x402 signer <list|check>            inspect signer backends and capabilities
   rh-x402 signer keystore <list|add|generate>  manage the local development keystore
-  rh-x402 config <get|set|list>          manage ~/.x402/config.json
+  rh-x402 config <get|set|unset|list>    manage ~/.x402/config.json
 
 wallet setup
   --path <ows|import|generate>        how the key is held; prompts when omitted

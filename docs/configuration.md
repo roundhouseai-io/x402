@@ -121,6 +121,7 @@ Any string value may be an `env:NAME` indirection, resolved from the environment
 
 ```bash
 rh-x402 config set wallet.backends.ows.apiKey env:OWS_API_KEY
+rh-x402 config unset wallet.backends.ows.apiKey   # remove a key entirely
 ```
 
 A missing variable resolves to _absent_, not to the literal string `env:NAME` — an unset token is a disabled feature, not a bogus credential. Nothing in the config file needs to be a secret, and nothing in it should be.

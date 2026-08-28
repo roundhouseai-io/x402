@@ -104,6 +104,8 @@ rh-x402 config set wallet.default my-agent
 
 An [Open Wallet Standard](https://github.com/open-wallet-standard) agent access layer: API-key auth, policy-gated signing. The CLI holds a key scoped to one wallet; the policies live on the OWS side and are the binding spend control.
 
+> **There is no daemon in `@open-wallet-standard/core`.** Its `ows` CLI has `wallet`, `sign`, `mnemonic`, `fund`, `pay`, `policy`, `key`, `config`, `update` and `uninstall` — and no `serve` or `daemon`. Nothing listens on `127.0.0.1:8402` unless you are running a separate OWS service that provides it. If you are looking for the daemon to start, stop looking: **use [`ows-core`](#ows-core--ows-in-process-no-daemon)**, which talks to the same vault in process. This backend is for an OWS HTTP service you already have.
+
 ```json
 "wallet": {
   "backend": "ows",

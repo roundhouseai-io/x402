@@ -118,6 +118,16 @@ describe('reading balances from the chain', () => {
     expect(ids).toEqual([8453, 1]);
   });
 
+  it('needs no signer, so an address can be checked before a wallet exists', async () => {
+    // readBalances takes an address and nothing else. The command mirrors this:
+    // with --address it never resolves a backend, so `wallet balance --address`
+    // works on a machine with no wallet configured — which is exactly when
+    // checking an address by hand is most useful.
+    stubRpc(() => word(0n));
+    const out = await readBalances(ADDRESS, 'base');
+    expect(out.address).toBe(ADDRESS);
+  });
+
   it('refuses an unknown chain and a non-address', async () => {
     await expect(readBalances(ADDRESS, 'solana')).rejects.toThrow(/unknown chain "solana"/);
     await expect(readBalances('not-an-address', 'base')).rejects.toThrow(/not an EVM address/);

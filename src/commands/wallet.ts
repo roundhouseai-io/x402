@@ -63,8 +63,13 @@ export async function walletCommand(parsed: ParsedArgs): Promise<number> {
     // balance function and the `local` keystore has nothing to ask, so asking
     // the backend made this a per-backend capability that usually answered
     // "cannot". The address is all that is actually needed.
-    const signer = await ctx.signer();
-    const address = str(parsed.flags, 'address') ?? (await signer.getAddress());
+    // With an explicit --address the backend is not needed at all: the balance
+    // comes from the chain. Resolving a signer anyway would fail on a machine
+    // with no wallet configured, which is exactly when checking an address by
+    // hand is most useful.
+    const given = str(parsed.flags, 'address');
+    const signer = given ? undefined : await ctx.signer();
+    const address = given ?? (await signer?.getAddress()) ?? '';
     // `--chain` is a single-value flag everywhere else in the CLI, so a repeat
     // silently keeps the last one. Comma-separate instead of pretending the
     // flag repeats: `--chain base,ethereum`.
@@ -100,7 +105,7 @@ export async function walletCommand(parsed: ParsedArgs): Promise<number> {
         );
       }
     } else {
-      writeJson({ ok: true, wallet: signer.wallet, address, balances: results });
+      writeJson({ ok: true, wallet: signer?.wallet ?? null, address, balances: results });
     }
     return results.every((r) => r.canPayX402) ? ExitCode.OK : ExitCode.INSUFFICIENT_BALANCE;
   }

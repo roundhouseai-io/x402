@@ -28,7 +28,8 @@ usage
   rh-x402 wallet create                  guided setup: pick a wallet, configure it
   rh-x402 wallet policy                  put an OWS policy in front of this wallet
   rh-x402 wallet forget <name>           hide a wallet here; never deletes it
-  rh-x402 wallet <list|balance|address>  wallet queries against the signer backend
+  rh-x402 wallet balance [usdc]          native + token balances, read from the chain
+  rh-x402 wallet <list|address|forget>   wallet queries against the signer backend
   rh-x402 history [urlSubstring]         query the local ledger
   rh-x402 discover <capability>          providers for a capability, cheapest first
   rh-x402 serve [--mcp]                  run the unified local endpoint
@@ -48,6 +49,11 @@ wallet setup
   --policy / --no-policy              register an OWS policy and mint its key
   --chain <name>                      chains the policy allows (repeatable)
   --expires <30d|12h|ISO>             policy and key expiry
+
+balances
+  --chain <a,b>                       base | ethereum | base-sepolia (comma-separated)
+  --address <0x…>                     read any address, not just your wallet's
+                                      override an endpoint: config set rpc.base <url>
 
 data
   --data.<path> <value>               nested data, e.g. --data.company.name "Roundhouse AI Ltd."

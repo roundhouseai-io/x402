@@ -2,9 +2,10 @@ import { X402Error, ExitCode } from '../core/errors.js';
 import { writeJson, isTty, writeErr } from '../core/output.js';
 import { bool, str, list, type ParsedArgs } from '../core/args.js';
 import { buildContext } from './context.js';
-import { findAsset, findChain, caip2 } from '../core/assets.js';
+
 import { runSetup, writeConfig, unsetConfig, type ConfigValue } from '../core/setup.js';
 import { grantPolicyKey } from '../core/owspolicy.js';
+import { readBalances } from '../core/rpc.js';
 
 /** Wallet queries against the active signer backend, plus the guided setup. */
 export async function walletCommand(parsed: ParsedArgs): Promise<number> {
@@ -58,43 +59,55 @@ export async function walletCommand(parsed: ParsedArgs): Promise<number> {
   }
 
   if (sub === 'balance') {
-    const chainName = str(parsed.flags, 'chain') ?? ctx.config.defaults.chain;
-    const chain = findChain(chainName);
-    if (!chain) throw new X402Error(ExitCode.GENERIC, `unknown chain: ${chainName}`);
-    const asset = findAsset(parsed.positionals[1] ?? 'usdc', chain.chainId);
-    if (!asset) {
-      throw new X402Error(
-        ExitCode.GENERIC,
-        `unknown asset on ${chain.network}: ${parsed.positionals[1]}`,
+    // Read from the chain, not from the signer backend. `ows-core` exports no
+    // balance function and the `local` keystore has nothing to ask, so asking
+    // the backend made this a per-backend capability that usually answered
+    // "cannot". The address is all that is actually needed.
+    const signer = await ctx.signer();
+    const address = str(parsed.flags, 'address') ?? (await signer.getAddress());
+    // `--chain` is a single-value flag everywhere else in the CLI, so a repeat
+    // silently keeps the last one. Comma-separate instead of pretending the
+    // flag repeats: `--chain base,ethereum`.
+    const wanted = (str(parsed.flags, 'chain') ?? ctx.config.defaults.chain)
+      .split(',')
+      .map((c) => c.trim())
+      .filter(Boolean);
+    const symbol = parsed.positionals[1];
+
+    const results = [];
+    for (const chain of wanted) {
+      results.push(
+        await readBalances(address, chain, {
+          rpc: ctx.config.rpc,
+          ...(symbol ? { symbol } : {}),
+        }),
       );
     }
 
-    const signer = await ctx.signer();
-    if (!signer.getBalance) {
-      throw new X402Error(
-        ExitCode.OWS_UNREACHABLE,
-        `the ${signer.backend} backend cannot report balances`,
-      );
-    }
-    const balance = await signer.getBalance(asset.address, caip2(chain.chainId));
     if (isTty()) {
-      process.stdout.write(`${balance?.amount ?? 'unknown'} ${asset.symbol} on ${chain.network}\n`);
+      for (const r of results) {
+        process.stdout.write(`${r.chain} (${r.address})\n`);
+        process.stdout.write(`  ${r.native.amount.padEnd(24)} ${r.native.symbol}  (gas)\n`);
+        for (const t of r.tokens) {
+          process.stdout.write(`  ${t.amount.padEnd(24)} ${t.symbol.toUpperCase()}\n`);
+        }
+        // Said plainly because the opposite is a common and expensive
+        // misreading: an x402 payment is an EIP-3009 authorization the
+        // facilitator submits, so the payer needs the token and no ETH at all.
+        process.stdout.write(
+          `  can pay x402 here: ${r.canPayX402 ? 'yes' : 'no — needs USDC'}` +
+            ' (x402 needs no ETH; the facilitator pays the gas)\n',
+        );
+      }
     } else {
-      writeJson({
-        ok: balance !== undefined,
-        backend: signer.backend,
-        wallet: signer.wallet,
-        asset: asset.symbol,
-        chain: caip2(chain.chainId),
-        amount: balance?.amount ?? null,
-      });
+      writeJson({ ok: true, wallet: signer.wallet, address, balances: results });
     }
-    return balance ? ExitCode.OK : ExitCode.GENERIC;
+    return results.every((r) => r.canPayX402) ? ExitCode.OK : ExitCode.INSUFFICIENT_BALANCE;
   }
 
   throw new X402Error(
     ExitCode.GENERIC,
-    `usage: rh-x402 wallet <create|policy|list|balance|address>`,
+    `usage: rh-x402 wallet <create|policy|list|balance|address|forget|restore>`,
   );
 }
 

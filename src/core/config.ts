@@ -115,6 +115,13 @@ export interface X402Config {
   };
   /** Capability -> fixed provider URL. Determinism over price. */
   pins: Record<string, string>;
+  /**
+   * chain -> JSON-RPC endpoint, overriding the built-in public one.
+   *
+   * Read-only, and used only by `wallet balance`. The payment path never calls
+   * an RPC: an x402 payment is a signed authorization the facilitator submits.
+   */
+  rpc: Record<string, string>;
   serve: {
     host: string;
     port: number;
@@ -143,6 +150,7 @@ export const DEFAULT_CONFIG: X402Config = {
   },
   facilitator: {},
   pins: {},
+  rpc: {},
   serve: { host: '127.0.0.1', port: 8403 },
 };
 
@@ -275,7 +283,7 @@ export function setPath(obj: Json, dotted: string, value: unknown): Json {
  * `x402-signer-acme` may want `region`, and this file cannot know that.
  * `pins` is a capability -> URL map with arbitrary keys.
  */
-const OPEN_SUBTREES = ['wallet.backends', 'pins'];
+const OPEN_SUBTREES = ['wallet.backends', 'pins', 'rpc'];
 
 /**
  * Every settable dotted path.
@@ -318,6 +326,7 @@ export const CONFIG_KEYS: readonly string[] = [
   'facilitator.url',
   'facilitator.token',
   'pins',
+  'rpc',
   'serve',
   'serve.host',
   'serve.port',

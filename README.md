@@ -99,6 +99,27 @@ rh-x402 signer check     # does this backend do what x402 needs?
 rh-x402 wallet list
 ```
 
+## Is the wallet funded?
+
+```bash
+rh-x402 wallet balance                       # the active wallet, on defaults.chain
+rh-x402 wallet balance --chain base --chain ethereum
+rh-x402 wallet balance --address 0x2D43…14C  # any address
+```
+
+```
+base (0x2D43136FfBbbe0ED5CBaaB2E8B2b8c968059114C)
+  0                        ETH  (gas)
+  0.928                    USDC
+  can pay x402 here: yes (x402 needs no ETH; the facilitator pays the gas)
+```
+
+Read from the chain over JSON-RPC, so it gives the same answer for every backend — `ows-core` exports no balance function and the `local` keystore has nothing to ask, which used to make this a per-backend capability that mostly answered "cannot". Base, Ethereum and Base Sepolia ship with public endpoints; override one with `rh-x402 config set rpc.base <url>`.
+
+**That last line matters.** An x402 payment is an EIP-3009 authorization the facilitator submits, so the payer needs USDC and **no ETH at all**. A zero ETH balance does not stop an x402 call — it only stops a direct on-chain transfer, which is a different thing. `wallet balance` exits `46` when the token balance is zero, and never on the gas balance.
+
+Nothing in the payment path calls an RPC, so a rate-limited endpoint costs you this command and nothing else.
+
 ## The three flows
 
 **What does this cost?** `probe` never pays.

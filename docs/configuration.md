@@ -69,6 +69,7 @@ Three layers, later wins:
 | `discover.indexUrl`                      | Roundhouse index base URL. Queried as `<indexUrl>/endpoints?q=<capability>`.                                                       |
 | `facilitator.url`                        | Settlement confirmation source for `rh-x402 verify`                                                                                |
 | `pins`                                   | Capability → fixed provider URL, when determinism beats price                                                                      |
+| `rpc.<chain>`                            | JSON-RPC endpoint for `wallet balance`, overriding the built-in public one. Read-only; the payment path never calls an RPC.        |
 | `serve.host` / `serve.port`              | Defaults for `rh-x402 serve`                                                                                                       |
 
 ## Discovery

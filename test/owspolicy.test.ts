@@ -63,12 +63,22 @@ describe('building an x402 policy', () => {
   });
 
   it('refuses an unknown chain rather than registering a policy that denies everything', () => {
-    expect(() => buildX402Policy({ id: 'p', name: 'n', chains: ['ethereum'], now })).toThrow(
-      /unknown chain "ethereum"/,
+    // Not `ethereum` — that is a known chain now. Something genuinely absent.
+    expect(() => buildX402Policy({ id: 'p', name: 'n', chains: ['polygon'], now })).toThrow(
+      /unknown chain "polygon"/,
     );
     expect(() => buildX402Policy({ id: 'p', name: 'n', chains: [], now })).toThrow(
       /at least one chain/,
     );
+  });
+
+  it('builds a policy for ethereum, with mainnet USDC', () => {
+    const policy = buildX402Policy({ id: 'p', name: 'n', chains: ['ethereum'], now });
+    expect(policy.rules[0]).toEqual({ type: 'allowed_chains', chain_ids: ['eip155:1'] });
+    expect(policy.rules[1]).toEqual({
+      type: 'allowed_typed_data_contracts',
+      contracts: ['0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'],
+    });
   });
 
   it('covers every known asset on the chosen chains', () => {

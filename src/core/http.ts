@@ -16,6 +16,27 @@ export interface HttpResponse {
   latencyMs: number;
 }
 
+/**
+ * Say so when a proxy is configured and Node is ignoring it.
+ *
+ * Node's global `fetch` does not read `HTTPS_PROXY`; `--use-env-proxy` is what
+ * turns that on, and it landed in Node 22. On a machine where the proxy is the
+ * only route out, every request fails with a bare 403 or a connection error
+ * that says nothing about the proxy, and the obvious readings — the endpoint is
+ * down, the URL is wrong, the service rejected us — are all wrong.
+ */
+export function proxyHint(env: NodeJS.ProcessEnv = process.env): string {
+  const configured = env.HTTPS_PROXY ?? env.https_proxy ?? env.HTTP_PROXY ?? env.http_proxy;
+  if (!configured) return '';
+  const alreadyOn =
+    (env.NODE_OPTIONS ?? '').includes('--use-env-proxy') || env.NODE_USE_ENV_PROXY === '1';
+  if (alreadyOn) return '';
+  return (
+    ` A proxy is set (${configured}) but Node's fetch ignores it by default — rerun with ` +
+    'NODE_OPTIONS=--use-env-proxy (Node 22+), or unset the proxy if it is not needed.'
+  );
+}
+
 /** Single fetch with a hard timeout and no redirect surprises for paid calls. */
 export async function request(req: HttpRequest): Promise<HttpResponse> {
   const controller = new AbortController();
@@ -50,7 +71,7 @@ export async function request(req: HttpRequest): Promise<HttpResponse> {
         transient: true,
       });
     }
-    throw new X402Error(ExitCode.GENERIC, `network error: ${e.message}`, {
+    throw new X402Error(ExitCode.GENERIC, `network error: ${e.message}.${proxyHint()}`, {
       url: req.url,
       cause: e.cause?.code,
       transient: true,

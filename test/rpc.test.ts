@@ -1,7 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { readBalances } from '../src/core/rpc.js';
 import { proxyHint } from '../src/core/http.js';
+import { bypassesProxy, proxyFromEnv } from '../src/core/proxy.js';
 import { findChain, findAsset } from '../src/core/assets.js';
+import { parsePaymentRequired } from '../src/core/x402.js';
 import { ExitCode, X402Error } from '../src/core/errors.js';
 
 const ADDRESS = '0x2D43136FfBbbe0ED5CBaaB2E8B2b8c968059114C';
@@ -170,27 +172,56 @@ describe('the chain table these balances come from', () => {
   });
 });
 
-describe('a proxy Node is quietly ignoring', () => {
-  let saved: NodeJS.ProcessEnv;
-  beforeEach(() => {
-    saved = { ...process.env };
-  });
-  afterEach(() => {
-    process.env = saved;
+describe('a proxy, and which route a request took', () => {
+  it('says the proxy was used when it was', () => {
+    expect(proxyHint(true, { HTTPS_PROXY: 'http://127.0.0.1:8080' })).toContain(
+      'Routed through the proxy at http://127.0.0.1:8080',
+    );
   });
 
-  it('names the flag when a proxy is set and not enabled', () => {
-    const hint = proxyHint({ HTTPS_PROXY: 'http://127.0.0.1:8080' });
-    expect(hint).toContain('http://127.0.0.1:8080');
-    expect(hint).toContain('--use-env-proxy');
+  it('says the request went direct when it bypassed', () => {
+    // The wrong version of this said "the proxy was used" on a loopback
+    // request that never touched it, which points debugging at the wrong hop.
+    const hint = proxyHint(false, { HTTPS_PROXY: 'http://127.0.0.1:8080' });
+    expect(hint).toContain('bypassed it');
+    expect(hint).toContain('went direct');
   });
 
   it('says nothing when no proxy is configured', () => {
-    expect(proxyHint({})).toBe('');
+    expect(proxyHint(true, {})).toBe('');
+    expect(proxyHint(false, {})).toBe('');
+  });
+});
+
+describe('deciding whether a host goes through the proxy', () => {
+  it('never proxies loopback, where the OWS backend lives', () => {
+    for (const host of ['localhost', '127.0.0.1', '::1']) {
+      expect(bypassesProxy(host, 8402, [])).toBe(true);
+    }
   });
 
-  it('says nothing once the flag is already on', () => {
-    expect(proxyHint({ HTTPS_PROXY: 'http://p', NODE_OPTIONS: '--use-env-proxy' })).toBe('');
-    expect(proxyHint({ HTTPS_PROXY: 'http://p', NODE_USE_ENV_PROXY: '1' })).toBe('');
+  it('honours NO_PROXY entries, including suffixes and ports', () => {
+    expect(bypassesProxy('registry.npmjs.org', 443, ['registry.npmjs.org'])).toBe(true);
+    expect(bypassesProxy('api.internal.example', 443, ['.internal.example'])).toBe(true);
+    expect(bypassesProxy('example.com', 443, ['example.com:8080'])).toBe(false);
+    expect(bypassesProxy('example.com', 8080, ['example.com:8080'])).toBe(true);
+    expect(bypassesProxy('anything.at.all', 443, ['*'])).toBe(true);
+  });
+
+  it('proxies everything else', () => {
+    expect(bypassesProxy('mainnet.base.org', 443, ['registry.npmjs.org'])).toBe(false);
+  });
+
+  it('prefers the lowercase variables, the way curl does', () => {
+    expect(proxyFromEnv({ https_proxy: 'http://lower', HTTPS_PROXY: 'http://upper' })?.url).toBe(
+      'http://lower',
+    );
+    expect(proxyFromEnv({ HTTPS_PROXY: 'http://upper' })?.url).toBe('http://upper');
+    expect(proxyFromEnv({})).toBeUndefined();
+    expect(proxyFromEnv({ HTTPS_PROXY: 'http://p', NO_PROXY: 'a, .b ,c:1' })?.noProxy).toEqual([
+      'a',
+      '.b',
+      'c:1',
+    ]);
   });
 });

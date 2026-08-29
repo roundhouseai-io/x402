@@ -8,6 +8,16 @@ export interface ChainInfo {
   /** Native currency symbol, for balance reporting. */
   nativeSymbol: string;
   /**
+   * Whether an x402 payment may be settled on this chain.
+   *
+   * A chain can be readable without being payable. Ethereum mainnet is here so
+   * `wallet balance` can see funds held there, but x402 does not need it — Base
+   * is where the payments happen, and settling on mainnet would cost a
+   * multiple of the payment in gas for no benefit. A 402 quoting a chain with
+   * this false is refused, with the reason said out loud.
+   */
+  x402: boolean;
+  /**
    * A public JSON-RPC endpoint, used only for reading balances.
    *
    * Override with `rpc.<network>`. Nothing in the payment path calls an RPC —
@@ -24,6 +34,7 @@ export const CHAINS: ChainInfo[] = [
     aliases: ['base', 'base-mainnet', 'eip155:8453', '8453'],
     nativeSymbol: 'ETH',
     rpcUrl: 'https://mainnet.base.org',
+    x402: true,
   },
   {
     network: 'ethereum',
@@ -31,6 +42,7 @@ export const CHAINS: ChainInfo[] = [
     aliases: ['ethereum', 'mainnet', 'eth', 'eip155:1', '1'],
     nativeSymbol: 'ETH',
     rpcUrl: 'https://ethereum-rpc.publicnode.com',
+    x402: false,
   },
   {
     network: 'base-sepolia',
@@ -38,6 +50,7 @@ export const CHAINS: ChainInfo[] = [
     aliases: ['base-sepolia', 'basesepolia', 'eip155:84532', '84532'],
     nativeSymbol: 'ETH',
     rpcUrl: 'https://sepolia.base.org',
+    x402: true,
   },
 ];
 

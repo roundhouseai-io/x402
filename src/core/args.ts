@@ -100,6 +100,7 @@ export const COMMANDS = [
   'serve',
   'signer',
   'config',
+  'skill',
   'help',
   'version',
 ] as const;

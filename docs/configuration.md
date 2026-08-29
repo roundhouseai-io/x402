@@ -72,6 +72,14 @@ Three layers, later wins:
 | `rpc.<chain>`                            | JSON-RPC endpoint for `wallet balance`, overriding the built-in public one. Read-only; the payment path never calls an RPC.        |
 | `serve.host` / `serve.port`              | Defaults for `rh-x402 serve`                                                                                                       |
 
+## Behind a proxy
+
+`HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` are honoured, lowercase first as curl does it. HTTPS goes through a `CONNECT` tunnel opened with Node's built-ins — no dependency, and no `--use-env-proxy`, which is Node 22+ only while this package supports Node 20.
+
+Loopback is never proxied, so an OWS backend on `127.0.0.1:8402` is reached directly whatever the environment says. `NO_PROXY=*` disables proxying entirely; entries may be a bare host, a `.suffix`, or `host:port`. Credentials in the proxy URL become a `Proxy-Authorization` header.
+
+A proxy that refuses `CONNECT` is reported as such, with its status, rather than as a socket error — a policy answer and a transport failure need different fixes.
+
 ## Discovery
 
 `rh-x402 discover <capability>` and `x402:<capability>` resolution both call the Roundhouse index, across two surfaces tried in order:

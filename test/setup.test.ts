@@ -6,6 +6,7 @@ import { ExitCode, X402Error } from '../src/core/errors.js';
 import { installArgs, runSetup, KEY_PATHS, OWS_PACKAGE, INSTALL_STDIO } from '../src/core/setup.js';
 import { readRawConfig } from '../src/core/config.js';
 import { defaultKeystorePath } from '../src/core/keystore.js';
+import { isInstalled } from './optional.js';
 
 let home: string;
 
@@ -85,25 +86,28 @@ describe('guided setup, without a terminal', () => {
     await expect(runSetup({})).rejects.toThrow(/no terminal attached/);
   });
 
-  it('names the package to install rather than installing it unasked', async () => {
-    try {
-      await runSetup({ path: 'ows', name: 'agent' });
-      throw new Error('should have thrown');
-    } catch (err) {
-      // SAFETY: the assertion above proves this threw; the reads below fail the
-      // test if it was not an X402Error, which is what is being asserted.
-      expect((err as X402Error).code).toBe(ExitCode.OWS_UNREACHABLE);
-      expect((err as Error).message).toContain(OWS_PACKAGE);
-      expect((err as Error).message).toContain('--install');
-    }
-  });
+  it.skipIf(isInstalled(OWS_PACKAGE))(
+    'names the package to install rather than installing it unasked',
+    async () => {
+      try {
+        await runSetup({ path: 'ows', name: 'agent' });
+        throw new Error('should have thrown');
+      } catch (err) {
+        // SAFETY: the assertion above proves this threw; the reads below fail
+        // the test if it was not an X402Error, which is what is being asserted.
+        expect((err as X402Error).code).toBe(ExitCode.OWS_UNREACHABLE);
+        expect((err as Error).message).toContain(OWS_PACKAGE);
+        expect((err as Error).message).toContain('--install');
+      }
+    },
+  );
 
   it('requires a key file to import, never a key on the command line', async () => {
     process.env.X402_KEYSTORE_PASS = 'correct horse battery';
     await expect(runSetup({ path: 'import' })).rejects.toThrow(/--key-file/);
   });
 
-  it('will not write a keystore it cannot finish', async () => {
+  it.skipIf(isInstalled('ethers'))('will not write a keystore it cannot finish', async () => {
     // `ethers` is not installed here, and the address needs it. Loading it
     // before `addEntry` is what stops a key landing on disk under a name the
     // user believes failed.

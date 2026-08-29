@@ -72,13 +72,13 @@ describe('building an x402 policy', () => {
     );
   });
 
-  it('builds a policy for ethereum, with mainnet USDC', () => {
-    const policy = buildX402Policy({ id: 'p', name: 'n', chains: ['ethereum'], now });
-    expect(policy.rules[0]).toEqual({ type: 'allowed_chains', chain_ids: ['eip155:1'] });
-    expect(policy.rules[1]).toEqual({
-      type: 'allowed_typed_data_contracts',
-      contracts: ['0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'],
-    });
+  it('refuses a chain the CLI does not pay on, however well known it is', () => {
+    // Ethereum is in the chain table so `wallet balance` can read it. Letting a
+    // policy allow signing there would grant more than the engine can use, and
+    // an allowlist that is wider than the thing it guards is not a control.
+    expect(() => buildX402Policy({ id: 'p', name: 'n', chains: ['ethereum'], now })).toThrow(
+      /ethereum is not a chain this CLI pays on/,
+    );
   });
 
   it('covers every known asset on the chosen chains', () => {

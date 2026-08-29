@@ -169,7 +169,7 @@ Both keys are optional: omit `vaultPath` and OWS uses its own default location; 
 | `accounts`  | `true`  | `listWallets` / `getWallet`                                                                     |
 | `declared`  | `true`  | These come from the package's own API surface                                                   |
 
-`balances: false` is worth reading twice: **`rh-x402 wallet balance` is not universal.** Only the HTTP `ows` backend can answer it; `ows-core` and `local` cannot, and `local` says so in as many words. A funding check has to read the token contract directly rather than asking the signer.
+`balances: false` no longer means what it used to. **`rh-x402 wallet balance` does not go through the signer at all** — it reads the chain over JSON-RPC, so it answers on every backend. The capability now gates only the engine's pre-flight funding check, which is skipped where the backend cannot answer; the call then fails at the provider instead of before it.
 
 Two details the backend handles, both found by running the package rather than reading its types:
 

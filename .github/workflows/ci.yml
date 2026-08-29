@@ -117,6 +117,30 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           exit "$STATUS"
 
+  signing:
+    name: signing and the x402 loop
+    # On merge only. It installs the optional peer dependencies and drives a
+    # real OWS wallet through a real 402, which the unit suite deliberately
+    # cannot do: it stubs `fetch` and implements a fake `Signer`, so nothing in
+    # it would notice a signature a facilitator would reject. That is the part
+    # that costs money when it is wrong.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      # --no-save: these are optional peers, and the lockfile must keep saying
+      # a default install carries no signing code at all.
+      - name: Install the optional signing peers
+        run: npm i --no-save @open-wallet-standard/core ethers
+      - name: Sign a real 402 and check the recovered address
+        run: node test/integration/x402-loop.mjs
+
   install:
     name: install from tarball
     runs-on: ubuntu-latest

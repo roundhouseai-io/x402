@@ -1,5 +1,6 @@
 import { X402Error, ExitCode } from './errors.js';
 import { request, proxyHint } from './http.js';
+import { bypassesProxy, proxyFromEnv } from './proxy.js';
 import {
   ASSETS,
   CHAINS,
@@ -59,7 +60,7 @@ async function rpcCall(url: string, method: string, params: unknown[]): Promise<
   } catch {
     throw new X402Error(
       ExitCode.GENERIC,
-      `RPC ${url} returned ${res.status}, not JSON.${proxyHint()}`,
+      `RPC ${url} returned ${res.status}, not JSON.${proxyHint(usedProxy(url))}`,
     );
   }
   if (body.error) {
@@ -173,4 +174,17 @@ async function readToken(url: string, address: string, asset: AssetInfo): Promis
     decimals: asset.decimals,
     contract: asset.address,
   };
+}
+
+/** Whether a request to `url` would have gone through the proxy. */
+function usedProxy(url: string): boolean {
+  const proxy = proxyFromEnv();
+  if (!proxy) return false;
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'https:') return false;
+    return !bypassesProxy(parsed.hostname, Number(parsed.port || 443), proxy.noProxy);
+  } catch {
+    return false;
+  }
 }

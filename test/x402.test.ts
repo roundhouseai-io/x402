@@ -200,3 +200,62 @@ describe('requirementsFromHeaders (x402 v2)', () => {
     expect(() => parsePaymentRequired(body)).toThrow(/network/);
   });
 });
+
+describe('what a 402 is allowed to tell the CLI about the token', () => {
+  const withAsset = (over: Record<string, unknown>) => ({
+    ...canonical.accepts[0],
+    ...over,
+  });
+
+  it('refuses a token contract it does not know on that chain', () => {
+    // Not a compatibility gap to shim: an unknown contract's decimals and
+    // EIP-712 domain would have to come from the counterparty, and the price
+    // gate is computed from the decimals.
+    try {
+      parsePaymentRequired(withAsset({ asset: '0xdeAdbeefdEAdbeefdEadbEEFdeadbeEFdEaDbeeF' }));
+      throw new Error('should have thrown');
+    } catch (err) {
+      // SAFETY: the line above proves this threw; the reads below fail the test
+      // if it was not an X402Error, which is the assertion.
+      expect((err as X402Error).code).toBe(ExitCode.INVALID_402);
+      expect((err as Error).message).toMatch(/is not a token this CLI knows on base/);
+      expect((err as Error).message).toContain('usdc');
+    }
+  });
+
+  it('refuses a payload that declares decimals the token does not have', () => {
+    // The attack this closes. `--max` is compared in atomic units scaled by
+    // these decimals, so a provider quoting 6-decimal USDC while declaring 18
+    // gets a cap 10^12 too large: `--max 0.05` would wave through a demand for
+    // fifty billion USDC while the gate reported that it held.
+    expect(() => parsePaymentRequired(withAsset({ extra: { decimals: 18 } }))).toThrow(
+      /declares 18 decimals for usdc, which has 6/,
+    );
+    expect(() =>
+      parsePaymentRequired(
+        withAsset({ maxAmountRequired: '50000000000000000', extra: { decimals: 18 } }),
+      ),
+    ).toThrow(/Refusing rather than pricing the call/);
+  });
+
+  it('accepts a payload whose declared decimals agree with the table', () => {
+    const [option] = parsePaymentRequired(withAsset({ extra: { decimals: 6 } })).options;
+    expect(option!.decimals).toBe(6);
+    expect(option!.amount).toBe('0.002');
+  });
+
+  it('takes the EIP-712 domain from the table, not from the seller', () => {
+    // `extra` is the provider describing a contract it does not own. The table
+    // values were read from the contract.
+    const [option] = parsePaymentRequired(
+      withAsset({ extra: { name: 'Not USD Coin', version: '9' } }),
+    ).options;
+    expect(option!.eip712).toEqual({ name: 'USD Coin', version: '2' });
+  });
+
+  it('still says "missing asset" when there is no asset at all', () => {
+    const bare = { ...canonical.accepts[0] } as Record<string, unknown>;
+    delete bare.asset;
+    expect(() => parsePaymentRequired(bare)).toThrow(/missing asset address/);
+  });
+});

@@ -58,9 +58,9 @@ The scope is `@roundhouseai`, matching the `roundhouseai-io` GitHub org.
 
 **Spec:** §4 lists stdin as a data mechanism.
 
-**Implementation:** stdin is read when it is a pipe, socket or redirected file, or when a `-` argument explicitly asks for it. A terminal or character device (`/dev/null`, a detached tty in a hosted agent runtime) is never read.
+**Implementation:** stdin is read when it is a pipe, socket or redirected file, or when a `-` argument explicitly asks for it. A terminal or character device (`/dev/null`, a detached tty in a hosted agent runtime) is never read. On a pipe, the wait for the _first_ byte is bounded — 500 ms by default, `X402_STDIN_WAIT_MS` to change it, no bound at all after an explicit `-`. Once any data arrives the read runs to EOF with no deadline.
 
-**Why:** reading a character-device stdin can block forever, which to an agent is indistinguishable from a hung payment. `cat payload.json | rh-x402 call <url> --json -` and `rh-x402 call <url> < payload.json` both work.
+**Why:** reading a character-device stdin can block forever, which to an agent is indistinguishable from a hung payment. The bound closes the same failure one layer up: `spawn(cli, args, { stdio: 'pipe' })` — the ordinary way an agent runs a subprocess — opens stdin and never writes to it, and nothing at the descriptor level tells that pipe apart from a slow one. Bounding only the first byte means a producer that has started is never truncated. `cat payload.json | rh-x402 call <url> --json -` and `rh-x402 call <url> < payload.json` both work.
 
 ## 8. `signer` is an extra command, and the keystore has one too
 

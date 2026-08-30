@@ -1,5 +1,27 @@
 # @roundhouseai/x402
 
+## 0.2.0
+
+### Minor Changes
+
+- 049effe: Honour `HTTPS_PROXY`, ship `SKILL.md` through the CLI, and close two ways a call could hang or overspend.
+
+  - **A price gate the counterparty can no longer rescale.** `--max` is compared in atomic units scaled by the asset's decimals, and those decimals were taken from the 402 payload. A provider quoting real 6-decimal USDC while declaring 18 got a cap 10^12 too large: `--max 0.05` would wave through a demand for fifty billion USDC while reporting that the gate held. Decimals now come from the asset table, a payload that disagrees is refused (exit `40`), and the EIP-712 domain comes from the table too — `extra` is the seller describing a contract it does not own.
+  - **An unknown token contract is refused rather than priced on the seller's word** (exit `40`), naming what is known on that chain. Adding one is a table entry in `core/assets.ts` with the decimals and domain read from the contract.
+  - **A piped stdin no longer hangs the CLI.** `spawn(cli, args, { stdio: 'pipe' })` — the ordinary way an agent runs a subprocess — opens stdin and never writes to it, and the read blocked forever: `rh-x402 probe <url>` never returned. The wait for the first byte is now bounded (500 ms, `X402_STDIN_WAIT_MS`), unbounded after an explicit `-`, and never applied once data has started, so a slow producer is not truncated.
+  - **`HTTPS_PROXY` and `HTTP_PROXY` are honoured**, through a CONNECT tunnel built on Node's own `http`/`tls` — no dependency, and no `--use-env-proxy`, which needs Node 22. `NO_PROXY` is respected and loopback always bypasses, so a local OWS daemon is never asked for through a proxy.
+  - **`rh-x402 skill` prints the agent-facing `SKILL.md`**, and `--help` now carries worked examples and the exit-code table.
+  - **Ethereum mainnet is readable but not payable.** It is in the chain table for `wallet balance`; a 402 quoting it is refused, as is a policy that would allow signing there.
+  - **CI now signs for real on merge.** A job installs the optional peers, creates an OWS wallet, drives `call` through a mock 402, and checks the signature recovers to the wallet address — the unit suite stubs `fetch` and fakes the signer, so nothing in it would catch a signature a facilitator rejects.
+
+- 7c9eea1: Add `rh-x402 wallet balance`, reading native and token balances from the chain.
+
+  - **`wallet balance` works on every backend**, because it reads the chain over JSON-RPC instead of asking the signer. `@open-wallet-standard/core` exports no balance function and the `local` keystore has nothing to ask, so this was a per-backend capability that usually answered "cannot" — which is why funding checks had to be done by hand with `curl` and an `eth_call`.
+  - Reports the **native currency and every known token** on the chain: `--chain base`, `--chain ethereum`, `--chain base-sepolia`, repeatable. `--address` reads any address. Override an endpoint with `rpc.<chain>`; the built-in ones are public and rate-limited.
+  - **Ethereum mainnet is now a known chain**, with USDC at `0xA0b8…eB48`. Its EIP-712 domain was read from the contract (`name()` "USD Coin", `version()` "2", `decimals()` 6) rather than copied from a doc, because a wrong domain produces a signature no facilitator will settle.
+  - **`canPayX402` is a function of the token balance, never of ETH.** An x402 payment is an EIP-3009 authorization the facilitator submits, so the payer needs USDC and no gas at all. `wallet balance` exits `46` on a zero token balance and never on a zero gas balance. Conflating the two is how "insufficient funds for gas" gets read as "x402 needs ETH".
+  - **A configured proxy that Node is ignoring is now named.** Node's `fetch` does not read `HTTPS_PROXY` unless started with `--use-env-proxy`, so on a proxied machine every request failed with a bare 403 or connection error that said nothing about the proxy. Network errors now say which proxy is set and how to enable it.
+
 ## 0.1.2
 
 ### Patch Changes

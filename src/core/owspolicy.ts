@@ -58,6 +58,18 @@ export function buildX402Policy(input: PolicyInput): OwsPolicy {
         `unknown chain "${name}": known chains are ${CHAINS.map((c) => c.network).join(', ')}`,
       );
     }
+    if (!chain.x402) {
+      // A policy that allows signing on a chain the engine refuses to pay on
+      // grants strictly more than this CLI can use, which is the wrong
+      // direction for an allowlist.
+      throw new X402Error(
+        ExitCode.GENERIC,
+        `${chain.network} is not a chain this CLI pays on, so a policy should not ` +
+          `allow it. Payable chains: ${CHAINS.filter((c) => c.x402)
+            .map((c) => c.network)
+            .join(', ')}.`,
+      );
+    }
     return chain;
   });
   if (chains.length === 0) {

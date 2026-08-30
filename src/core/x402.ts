@@ -1,5 +1,5 @@
 import { X402Error, ExitCode } from './errors.js';
-import { CHAINS, caip2, findAsset, findChain, formatUnits, parseUnits } from './assets.js';
+import { ASSETS, CHAINS, caip2, findAsset, findChain, formatUnits, parseUnits } from './assets.js';
 
 export interface PaymentOption {
   scheme: string;
@@ -66,6 +66,20 @@ function normalizeOption(input: unknown, index: number): PaymentOption {
     );
   }
 
+  // Readable is not the same as payable. Ethereum mainnet is in the chain table
+  // so `wallet balance` can see funds there; settling an x402 payment on it
+  // would cost a multiple of the payment in gas, for no benefit over Base.
+  if (!chain.x402) {
+    throw new X402Error(
+      ExitCode.INVALID_402,
+      `${chain.network} is not a chain this CLI pays on. x402 settles on ` +
+        `${CHAINS.filter((c) => c.x402)
+          .map((c) => c.network)
+          .join(', ')}; ${chain.network} is readable by \`wallet balance\` only.`,
+      { network: chain.network, payable: CHAINS.filter((c) => c.x402).map((c) => c.network) },
+    );
+  }
+
   const payTo = pick(input, A_PAYTO);
   if (typeof payTo !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(payTo)) {
     throw new X402Error(ExitCode.INVALID_402, `missing or malformed payTo in 402 payload`);
@@ -74,17 +88,49 @@ function normalizeOption(input: unknown, index: number): PaymentOption {
   const extra = isObj(input.extra) ? input.extra : {};
   const assetRaw = pick(input, A_ASSET);
   const known = findAsset(typeof assetRaw === 'string' ? assetRaw : undefined, chain.chainId);
-  const assetAddress =
-    typeof assetRaw === 'string' && assetRaw.startsWith('0x') ? assetRaw : known?.address;
-  if (!assetAddress) {
+  if (assetRaw === undefined || assetRaw === '') {
     throw new X402Error(ExitCode.INVALID_402, `missing asset address in 402 payload`, {
       asset: assetRaw ?? null,
     });
   }
+
+  // The asset must be one this CLI knows on this chain. Two reasons, and the
+  // second is the one that costs money:
+  //
+  //   - An unknown contract has no trustworthy decimals and no trustworthy
+  //     EIP-712 domain, so the only source for both is the counterparty.
+  //   - `--max` is compared in atomic units, scaled by those decimals. A
+  //     provider that quotes a real 6-decimal token while declaring 18 gets a
+  //     cap 10^12 times too large, and `--max 0.05` waves through a demand for
+  //     fifty billion. The gate reads as if it held.
+  //
+  // So an unfamiliar token is refused rather than priced on the seller's word.
+  // Adding one is a table entry in `core/assets.ts` with the decimals and the
+  // EIP-712 domain read from the contract.
+  if (!known) {
+    const onChain = ASSETS.filter((a) => a.chainId === chain.chainId);
+    throw new X402Error(
+      ExitCode.INVALID_402,
+      `asset ${String(assetRaw)} is not a token this CLI knows on ${chain.network}. ` +
+        `Known there: ${onChain.map((a) => `${a.symbol} (${a.address})`).join(', ') || 'none'}. ` +
+        `Pricing an unknown token means trusting the provider's own decimals, which is what --max is meant to check.`,
+      { asset: assetRaw ?? null, network: chain.network, known: onChain.map((a) => a.symbol) },
+    );
+  }
+
+  const assetAddr = known.address;
+  // Decimals come from the table, never the payload. A payload that disagrees
+  // is either a provider bug or an attempt to rescale the gate; both are worth
+  // failing on rather than guessing which.
   const decimalsRaw = pick({ ...input, ...extra }, ['decimals', 'assetDecimals']);
-  const decimals = Number(decimalsRaw ?? known?.decimals ?? 6);
-  if (!Number.isInteger(decimals) || decimals < 0 || decimals > 36) {
-    throw new X402Error(ExitCode.INVALID_402, `implausible asset decimals: ${String(decimalsRaw)}`);
+  const decimals = known.decimals;
+  if (decimalsRaw !== undefined && Number(decimalsRaw) !== decimals) {
+    throw new X402Error(
+      ExitCode.INVALID_402,
+      `402 declares ${String(decimalsRaw)} decimals for ${known.symbol}, which has ${decimals}. ` +
+        `Refusing rather than pricing the call on the declared value.`,
+      { asset: assetAddr, declared: decimalsRaw, actual: decimals },
+    );
   }
 
   const amountRaw = pick(input, A_AMOUNT);
@@ -114,8 +160,8 @@ function normalizeOption(input: unknown, index: number): PaymentOption {
     network: typeof rawNetwork === 'string' ? rawNetwork : chain.network,
     chainId: chain.chainId,
     chain: caip2(chain.chainId),
-    asset: assetAddress,
-    assetSymbol: known?.symbol ?? (typeof assetRaw === 'string' ? assetRaw : 'unknown'),
+    asset: assetAddr,
+    assetSymbol: known.symbol,
     decimals,
     amountAtomic,
     amount: formatUnits(amountAtomic, decimals),
@@ -123,10 +169,9 @@ function normalizeOption(input: unknown, index: number): PaymentOption {
     resource: typeof input.resource === 'string' ? input.resource : undefined,
     description: typeof input.description === 'string' ? input.description : undefined,
     maxTimeoutSeconds: Number.isFinite(timeout) && timeout > 0 ? Math.floor(timeout) : 60,
-    eip712: {
-      name: String(extra.name ?? known?.eip712.name ?? 'USD Coin'),
-      version: String(extra.version ?? known?.eip712.version ?? '2'),
-    },
+    // From the table too. `extra` is the provider describing a contract it does
+    // not own; the table's values were read from the contract itself.
+    eip712: { name: known.eip712.name, version: known.eip712.version },
     raw: input,
   };
 }

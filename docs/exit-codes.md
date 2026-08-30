@@ -41,7 +41,7 @@ Prefer `errorCode` over the status: the status is lossy by design.
 
 Two of these need care:
 
-**Exit 47 covers two different situations, and they need opposite responses.** The backend being unreachable or unauthenticated is transient — retry once, then treat the wallet layer as down. The backend being _incapable_ is permanent: `the local backend cannot report balances`, or `needs the optional peer dependency ethers`. Retrying that forever gets you nowhere. Branch on the message, or ask `rh-x402 signer check` up front, which reports the capabilities a backend declares before any of it matters.
+**Exit 47 covers two different situations, and they need opposite responses.** The backend being unreachable or unauthenticated is transient — retry once, then treat the wallet layer as down. The backend being _incapable_ is permanent: `needs the optional peer dependency ethers`, or a backend that cannot sign typed data at all. Retrying that forever gets you nowhere. Branch on the message, or ask `rh-x402 signer check` up front, which reports the capabilities a backend declares before any of it matters.
 
 **Exit 50 is the one that costs money.** It means the authorization was handed to the provider and the response was lost. The authorization is cached, so re-running the identical command is safe and is the correct response — it either gets the paid response the first attempt missed or fails cleanly. Adding `--no-cache` after a 50 is how you pay twice.
 

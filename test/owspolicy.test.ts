@@ -63,11 +63,21 @@ describe('building an x402 policy', () => {
   });
 
   it('refuses an unknown chain rather than registering a policy that denies everything', () => {
-    expect(() => buildX402Policy({ id: 'p', name: 'n', chains: ['ethereum'], now })).toThrow(
-      /unknown chain "ethereum"/,
+    // Not `ethereum` — that is a known chain now. Something genuinely absent.
+    expect(() => buildX402Policy({ id: 'p', name: 'n', chains: ['polygon'], now })).toThrow(
+      /unknown chain "polygon"/,
     );
     expect(() => buildX402Policy({ id: 'p', name: 'n', chains: [], now })).toThrow(
       /at least one chain/,
+    );
+  });
+
+  it('refuses a chain the CLI does not pay on, however well known it is', () => {
+    // Ethereum is in the chain table so `wallet balance` can read it. Letting a
+    // policy allow signing there would grant more than the engine can use, and
+    // an allowlist that is wider than the thing it guards is not a control.
+    expect(() => buildX402Policy({ id: 'p', name: 'n', chains: ['ethereum'], now })).toThrow(
+      /ethereum is not a chain this CLI pays on/,
     );
   });
 

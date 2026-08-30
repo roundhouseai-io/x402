@@ -5,14 +5,52 @@ export interface ChainInfo {
   network: string;
   chainId: number;
   aliases: string[];
+  /** Native currency symbol, for balance reporting. */
+  nativeSymbol: string;
+  /**
+   * Whether an x402 payment may be settled on this chain.
+   *
+   * A chain can be readable without being payable. Ethereum mainnet is here so
+   * `wallet balance` can see funds held there, but x402 does not need it — Base
+   * is where the payments happen, and settling on mainnet would cost a
+   * multiple of the payment in gas for no benefit. A 402 quoting a chain with
+   * this false is refused, with the reason said out loud.
+   */
+  x402: boolean;
+  /**
+   * A public JSON-RPC endpoint, used only for reading balances.
+   *
+   * Override with `rpc.<network>`. Nothing in the payment path calls an RPC —
+   * an x402 payment is a signed authorization the facilitator submits — so a
+   * missing or rate-limited endpoint costs you `wallet balance`, nothing else.
+   */
+  rpcUrl: string;
 }
 
 export const CHAINS: ChainInfo[] = [
-  { network: 'base', chainId: 8453, aliases: ['base', 'base-mainnet', 'eip155:8453', '8453'] },
+  {
+    network: 'base',
+    chainId: 8453,
+    aliases: ['base', 'base-mainnet', 'eip155:8453', '8453'],
+    nativeSymbol: 'ETH',
+    rpcUrl: 'https://mainnet.base.org',
+    x402: true,
+  },
+  {
+    network: 'ethereum',
+    chainId: 1,
+    aliases: ['ethereum', 'mainnet', 'eth', 'eip155:1', '1'],
+    nativeSymbol: 'ETH',
+    rpcUrl: 'https://ethereum-rpc.publicnode.com',
+    x402: false,
+  },
   {
     network: 'base-sepolia',
     chainId: 84532,
     aliases: ['base-sepolia', 'basesepolia', 'eip155:84532', '84532'],
+    nativeSymbol: 'ETH',
+    rpcUrl: 'https://sepolia.base.org',
+    x402: true,
   },
 ];
 
@@ -39,6 +77,15 @@ export const ASSETS: AssetInfo[] = [
     address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
     decimals: 6,
     chainId: 8453,
+    eip712: { name: 'USD Coin', version: '2' },
+  },
+  {
+    symbol: 'usdc',
+    address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
+    decimals: 6,
+    chainId: 1,
+    // Read from the contract, not copied from a doc: name() "USD Coin",
+    // version() "2", decimals() 6, and DOMAIN_SEPARATOR() present.
     eip712: { name: 'USD Coin', version: '2' },
   },
   {

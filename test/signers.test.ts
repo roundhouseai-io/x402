@@ -3,6 +3,9 @@ import { mkdtempSync, rmSync, writeFileSync, chmodSync, statSync } from 'node:fs
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_CONFIG, mergeDeep } from '../src/core/config.js';
+import { isInstalled } from './optional.js';
+
+const OWS_CORE_PACKAGE = '@open-wallet-standard/core';
 import { ExitCode, X402Error } from '../src/core/errors.js';
 import {
   resolveSigner,
@@ -476,18 +479,21 @@ describe('ows-core backend', () => {
     );
   });
 
-  it('reports the absent optional peer dependency as exit 47, naming the package', async () => {
-    // The real loader, with the package genuinely not installed.
-    try {
-      await new OwsCoreSigner('agent').signTypedData(typedData);
-      throw new Error('should have thrown');
-    } catch (err) {
-      // SAFETY: the assertion above proves this path threw; the two reads below
-      // fail the test if it was not an X402Error, which is the assertion.
-      expect((err as X402Error).code).toBe(ExitCode.OWS_UNREACHABLE);
-      expect((err as Error).message).toContain('@open-wallet-standard/core');
-    }
-  });
+  it.skipIf(isInstalled(OWS_CORE_PACKAGE))(
+    'reports the absent optional peer dependency as exit 47, naming the package',
+    async () => {
+      // The real loader, with the package genuinely not installed.
+      try {
+        await new OwsCoreSigner('agent').signTypedData(typedData);
+        throw new Error('should have thrown');
+      } catch (err) {
+        // SAFETY: the assertion above proves this path threw; the two reads
+        // below fail the test if it was not an X402Error, which is the assertion.
+        expect((err as X402Error).code).toBe(ExitCode.OWS_UNREACHABLE);
+        expect((err as Error).message).toContain(OWS_CORE_PACKAGE);
+      }
+    },
+  );
 
   it('resolves through the backend registry', async () => {
     const config = mergeDeep(DEFAULT_CONFIG, {

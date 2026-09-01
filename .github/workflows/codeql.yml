@@ -43,10 +43,10 @@ jobs:
           fi
 
       - if: steps.probe.outputs.enabled == 'true'
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@v4
         with:
           languages: javascript-typescript
           queries: security-extended
 
       - if: steps.probe.outputs.enabled == 'true'
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@v4

@@ -331,6 +331,48 @@ describe('MCP server', () => {
     ).toBeUndefined();
   });
 
+  it('tells an agent when the index capped the offer list', async () => {
+    // The same field the CLI prints, on the surface an agent actually reads.
+    // Without it an MCP client sees five offers and no sign that the index has
+    // 137, and reports the cheapest of five as the market rate.
+    fetchMock.mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          capability: { slug: 'web-search', name: 'Web search', unit: 'per search' },
+          price: { min: 0.001, median: 0.01, spot: 0.016, spot_basis: 'calls' },
+          stats: { offers: 137, providers: 75, live: 133 },
+          truncated: false,
+          offers: [
+            {
+              resource: 'https://provider.example/search',
+              network: 'eip155:8453',
+              pay_to: PAY_TO,
+              price_usdc: 0.001,
+              is_live: true,
+            },
+          ],
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      ),
+    );
+
+    const res = (await dispatch(deps(), {
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'tools/call',
+      params: { name: 'x402_discover', arguments: { capability: 'web-search' } },
+    })) as { result: { content: { text: string }[] } };
+    const body = JSON.parse(res.result.content[0]!.text) as {
+      count: number;
+      truncated: boolean;
+      stats: { offers: number };
+    };
+
+    expect(body.count).toBe(1);
+    expect(body.stats.offers).toBe(137);
+    expect(body.truncated).toBe(true);
+  });
+
   it('runs x402_call through the engine', async () => {
     fetchMock.mockResolvedValueOnce(
       new Response(JSON.stringify({ lei: 'X' }), {

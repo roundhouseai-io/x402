@@ -28,14 +28,17 @@ Three layers, later wins:
     "redactKeys": [],
     "sink": {
       "enabled": false,
-      "url": "https://www.roundhouse.studio/api/v0/ingest/x402",
+      "url": "https://api.roundhouseai.io/v0/telemetry",
       "token": "env:ROUNDHOUSE_INGEST_TOKEN",
       "batchSize": 50,
       "batchIntervalMs": 10000
     }
   },
   "defaults": { "chain": "base", "timeout": 30 },
-  "discover": { "indexUrl": "https://www.roundhouse.studio/api/v0" },
+  "discover": {
+    "indexUrl": "https://api.roundhouseai.io/v0",
+    "unifiedUrl": "https://api.roundhouseai.io/v0/unified"
+  },
   "facilitator": { "url": null, "token": null },
   "pins": { "lei": "https://provider.example/v1/lei" },
   "serve": { "host": "127.0.0.1", "port": 8403 }
@@ -66,7 +69,8 @@ Three layers, later wins:
 | `telemetry.sink`                         | Remote ingest. Off by default; failures never fail a call.                                                                         |
 | `defaults.chain`                         | Preferred chain, and the first tiebreak on multi-option 402s                                                                       |
 | `defaults.timeout`                       | Total per-request timeout in seconds                                                                                               |
-| `discover.indexUrl`                      | Roundhouse index base URL. Queried as `<indexUrl>/endpoints?q=<capability>`.                                                       |
+| `discover.indexUrl`                      | Roundhouse read API base. Queried as `<indexUrl>/endpoints?q=<capability>&limit=50`.                                               |
+| `discover.unifiedUrl`                    | Capability documents, which carry the market stats `indexUrl` does not. Queried as `<unifiedUrl>/<slug>`.                          |
 | `facilitator.url`                        | Settlement confirmation source for `rh-x402 verify`                                                                                |
 | `pins`                                   | Capability → fixed provider URL, when determinism beats price                                                                      |
 | `rpc.<chain>`                            | JSON-RPC endpoint for `wallet balance`, overriding the built-in public one. Read-only; the payment path never calls an RPC.        |
@@ -86,13 +90,20 @@ A proxy that refuses `CONNECT` is reported as such, with its status, rather than
 
 ```bash
 # 1. The capability document — offers plus market-wide pricing. Registered slugs only.
-curl -sL 'https://www.roundhouse.studio/unified.json?capability=web-search'
+curl -sL 'https://api.roundhouseai.io/v0/unified/web-search'
 
-# 2. Fallback keyword search, for anything unified.json answers `unknown_capability` for.
-curl -sL 'https://www.roundhouse.studio/api/v0/endpoints?q=lei'
+# 2. Fallback keyword search, for anything the first surface answers 404 for.
+curl -sL 'https://api.roundhouseai.io/v0/endpoints?q=lei&limit=50'
+
+# The registered slugs the first surface knows.
+curl -sL 'https://api.roundhouseai.io/v0/unified'
 ```
 
-`unified.json` is asked first because it is the only surface that reports the market, not just the list. When it does not know the slug the keyword search answers instead, and `stats` comes back `null`.
+The capability document is asked first because it is the only surface that reports the market, not just the list. When it does not know the slug it answers `404` with a plain-text body, the keyword search answers instead, and `stats` comes back `null`.
+
+**Neither surface returns the whole market.** The capability document is capped at 50 offers while its `stats` describe every offer there is, and the keyword search is capped by the `limit` above. `discover` reports this as `truncated: true` — derived from the counts, because the document's own `truncated` flag reads `false` even when it has plainly capped the list. When it is true, the cheapest offer shown is the cheapest that came back, not the cheapest that exists; `stats.min` is the market's real floor.
+
+`discover.unifiedUrl` may still point at the retired `.../unified.json` single-document surface: a value ending in `.json` is queried as `?capability=<slug>` and its `stats.price` block is read, so an old config degrades to nothing rather than to a stats-less market.
 
 Each entry in the returned `offers` (or `endpoints`) array is mapped onto a provider:
 

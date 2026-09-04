@@ -13,7 +13,7 @@
 npx @roundhouseai/x402 discover web-search
 ```
 
-It is a Roundhouse client out of the box. `discover.indexUrl` ships pointing at `https://www.roundhouse.studio/api/v0` and `discover.unifiedUrl` at `/unified.json`, so that one line reads the live Unified Services layer and prints every provider of a capability with the market around them — min, median, spot, spread — before you spend anything.
+It is a Roundhouse client out of the box. `discover.indexUrl` ships pointing at `https://api.roundhouseai.io/v0` and `discover.unifiedUrl` at `/v0/unified`, so that one line reads the live Unified Services layer and prints every provider of a capability with the market around them — min, median, spot, spread — before you spend anything. The index caps a capability at 50 offers, so the listing says `truncated` when what you are looking at is not the whole market.
 
 Then pay for one:
 

@@ -29,6 +29,11 @@ export async function discoverCommand(parsed: ParsedArgs): Promise<number> {
       );
     }
     if (providers.length === 0) process.stdout.write(`no providers for ${capability}\n`);
+    if (market.truncated) {
+      // Said before the list, not after: "cheapest first" over a capped list is
+      // cheapest of what came back, and the stats line above describes more.
+      process.stdout.write(`showing part of the offer list — the index capped it\n`);
+    }
     for (const p of providers) {
       const price = p.price ?? '?';
       const rate = p.successRate === undefined ? '' : ` ${(p.successRate * 100).toFixed(0)}% ok`;
@@ -49,6 +54,9 @@ export async function discoverCommand(parsed: ParsedArgs): Promise<number> {
       filteredByAllowlist: all.length - allowed.length,
       // Capability-wide pricing, so a caller can judge an offer against the market.
       stats: stats ?? null,
+      // The index capped the offer list, so `providers` is not the whole market
+      // and the cheapest here is not necessarily the cheapest that exists.
+      truncated: market.truncated ?? false,
       indexSurface: market.from,
       providers,
     });

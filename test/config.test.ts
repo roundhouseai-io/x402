@@ -75,15 +75,11 @@ describe('config precedence', () => {
 
   it('writes config.json 0600 and round-trips dotted keys', () => {
     writeRawConfig(
-      setPath(
-        readRawConfig(),
-        'telemetry.sink.url',
-        'https://www.roundhouse.studio/api/v0/ingest/x402',
-      ),
+      setPath(readRawConfig(), 'telemetry.sink.url', 'https://api.roundhouseai.io/v0/telemetry'),
     );
     expect(statSync(paths.config()).mode & 0o777).toBe(0o600);
     expect(getPath(readRawConfig(), 'telemetry.sink.url')).toBe(
-      'https://www.roundhouse.studio/api/v0/ingest/x402',
+      'https://api.roundhouseai.io/v0/telemetry',
     );
   });
 });

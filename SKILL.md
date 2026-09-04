@@ -140,9 +140,12 @@ curl -s -H "Authorization: Bearer $X402_TOKEN" \
     "spot": "0.0164",
     "spotBasis": "calls",
     "offers": 122,
+    "priced": 122,
+    "unpriced": 0,
     "providers": 68,
     "live": 121
   },
+  "truncated": true,
   "providers": [
     {
       "url": "https://blockrun.ai/api/v1/exa/search",
@@ -164,6 +167,9 @@ curl -s -H "Authorization: Bearer $X402_TOKEN" \
 - `spread` — `max / min`. A wide spread means the cheapest offer is not automatically the sane one; read the list.
 - `payers30d` — distinct wallets that paid this endpoint. Corroboration, and harder to fake than call count.
 - `live` — `false` means the index could not reach it last probe. `discover` still lists it, marked `[down]`; resolution never routes to it.
+- `unpriced` — offers the index could not price. The quantiles describe the priced ones only, so a large `unpriced` means they cover less of the market than `offers` suggests.
+
+**`truncated: true` means `providers` is not the whole market.** The index caps a capability at 50 offers while `stats` describe every offer there is, so the cheapest listed is the cheapest that came back, not the cheapest that exists. `stats.min` is the real floor. Do not report the head of a truncated list as the market low, and do not conclude a capability has only the providers shown.
 
 `stats` is `null` when the capability is not a registered slug — the index then answers from a keyword search, which returns offers but no market-wide pricing. Figures are an indexed snapshot: always read the live 402 before paying.
 

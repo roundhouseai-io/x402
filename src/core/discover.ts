@@ -33,8 +33,8 @@ export interface Provider {
 
 /**
  * Capability-wide pricing, so an agent can judge one offer against the market
- * rather than against nothing. Only `unified.json` carries these; a fallback
- * `/endpoints` query leaves them undefined.
+ * rather than against nothing. Only the capability document carries these; a
+ * fallback `/endpoints` keyword search leaves them undefined.
  */
 export interface MarketStats {
   /** Human decimal prices, in the capability's own unit. */
@@ -49,6 +49,13 @@ export interface MarketStats {
   spot?: string;
   spotBasis?: string;
   offers?: number;
+  /**
+   * Offers the index could and could not put a price on. The quantiles above
+   * describe the priced ones only, so a large `unpriced` means the market they
+   * describe is narrower than `offers` suggests.
+   */
+  priced?: number;
+  unpriced?: number;
   providers?: number;
   live?: number;
 }
@@ -63,6 +70,12 @@ export interface Market {
   unit?: string;
   providers: Provider[];
   stats?: MarketStats;
+  /**
+   * True when the index returned only part of the offer list. The API caps a
+   * capability document at 50 offers, so on a busy capability "cheapest first"
+   * is cheapest of what came back — not of the market `stats` describes.
+   */
+  truncated?: boolean;
   /** Which index surface answered. */
   from: 'unified' | 'endpoints';
 }
@@ -147,39 +160,76 @@ const providersFrom = (body: unknown, capability: string): Provider[] => {
     .sort(byLivenessThenPrice);
 };
 
+/**
+ * Pull the market figures out of a capability document.
+ *
+ * Two shapes, because the API moved the block and changed its case: the current
+ * `/v0/unified/<slug>` puts pricing at the top level with `spot_basis`, while
+ * the retired `unified.json` nested it under `stats.price` with `spotBasis`.
+ * Read both — a caller pointing `discover.unifiedUrl` at the old surface should
+ * still get stats rather than a silently empty market.
+ */
 const statsFrom = (body: unknown): MarketStats | undefined => {
-  if (!isObj(body) || !isObj(body.stats)) return undefined;
-  const s = body.stats;
-  const price = isObj(s.price) ? s.price : {};
+  if (!isObj(body)) return undefined;
+  const s = isObj(body.stats) ? body.stats : {};
+  const price = isObj(body.price) ? body.price : isObj(s.price) ? s.price : undefined;
+  if (!price && Object.keys(s).length === 0) return undefined;
+  const p = price ?? {};
   return {
-    min: strOrUndef(price.min),
-    p25: strOrUndef(price.p25),
-    median: strOrUndef(price.median),
-    p75: strOrUndef(price.p75),
-    max: strOrUndef(price.max),
-    spread: numOrUndef(price.spread),
-    spot: strOrUndef(price.spot),
-    spotBasis: strOrUndef(price.spotBasis),
+    min: strOrUndef(p.min),
+    p25: strOrUndef(p.p25),
+    median: strOrUndef(p.median),
+    p75: strOrUndef(p.p75),
+    max: strOrUndef(p.max),
+    spread: numOrUndef(p.spread),
+    spot: strOrUndef(p.spot),
+    spotBasis: strOrUndef(p.spot_basis ?? p.spotBasis),
     offers: numOrUndef(s.offers),
+    priced: numOrUndef(p.priced_offers ?? p.priced),
+    unpriced: numOrUndef(p.unpriced_offers ?? p.unpriced),
     providers: numOrUndef(s.providers),
     live: numOrUndef(s.live),
   };
 };
 
 /**
+ * The capability document's URL.
+ *
+ * The current API takes the slug as a path segment (`/v0/unified/web-search`).
+ * The retired single-document surface took it as a query parameter, and is
+ * recognised by its `.json` suffix so that a config still pointing there keeps
+ * working rather than requesting `unified.json/web-search` and getting a 404.
+ */
+function unifiedUrlFor(base: string, capability: string): string {
+  const slug = encodeURIComponent(capability);
+  return /\.json$/i.test(base)
+    ? `${base}?capability=${slug}`
+    : `${base.replace(/\/+$/, '')}/${slug}`;
+}
+
+/**
+ * How many keyword hits to pull when falling back to `/endpoints`.
+ *
+ * The API defaults to 100 and the results are relevance-ranked, so the tail is
+ * mostly noise — but the caller filters by allowlist and liveness afterwards,
+ * so cutting too close leaves nothing to choose from.
+ */
+const ENDPOINT_SEARCH_LIMIT = 50;
+
+/**
  * Resolve a capability to its offers and market stats.
  *
- * `unified.json` is asked first because it is the only surface that carries
- * capability-wide pricing. It only knows registered capability slugs, so an
- * unknown one falls back to the `/endpoints` keyword search, which returns
- * offers but no stats.
+ * The capability document is asked first because it is the only surface that
+ * carries capability-wide pricing. It only knows registered slugs and answers
+ * 404 for anything else, so an unknown one falls back to the `/endpoints`
+ * keyword search, which returns offers but no stats.
  */
 export async function discoverMarket(
   capability: string,
   config: X402Config,
   timeoutMs = 10_000,
 ): Promise<Market> {
-  const unified = `${config.discover.unifiedUrl}?capability=${encodeURIComponent(capability)}`;
+  const unified = unifiedUrlFor(config.discover.unifiedUrl, capability);
   const res = await request({
     url: unified,
     method: 'GET',
@@ -190,19 +240,29 @@ export async function discoverMarket(
   const known = isObj(body) && Array.isArray(body.offers);
   if (known) {
     const cap = isObj(body.capability) ? body.capability : {};
+    const providers = providersFrom(body, capability);
+    const stats = statsFrom(body);
     return {
       capability: strOrUndef(cap.slug) ?? capability,
       name: strOrUndef(cap.name),
       summary: strOrUndef(cap.summary),
       unit: strOrUndef(cap.unit),
-      providers: providersFrom(body, capability),
-      stats: statsFrom(body),
+      providers,
+      stats,
+      // Not just the document's own flag: `/v0/unified/web-search` returns 50
+      // offers with `stats.offers: 137` and `truncated: false`, so trusting the
+      // flag alone would present a capped list as the whole market. Count the
+      // offers actually in hand against the count the stats describe.
+      truncated:
+        body.truncated === true || (stats?.offers !== undefined && providers.length < stats.offers),
       from: 'unified',
     };
   }
 
   const base = config.discover.indexUrl.replace(/\/+$/, '');
-  const url = `${base}/endpoints?q=${encodeURIComponent(capability)}`;
+  const url =
+    `${base}/endpoints?q=${encodeURIComponent(capability)}` +
+    `&limit=${String(ENDPOINT_SEARCH_LIMIT)}`;
   const fallback = await request({
     url,
     method: 'GET',
@@ -212,9 +272,12 @@ export async function discoverMarket(
   if (fallback.status >= 400) {
     throw new X402Error(ExitCode.GENERIC, `index query failed (HTTP ${fallback.status}) at ${url}`);
   }
+  const providers = providersFrom(parseJsonBody(fallback.body), capability);
   return {
     capability,
-    providers: providersFrom(parseJsonBody(fallback.body), capability),
+    providers,
+    // A full page back means the search hit its cap, so there may be more.
+    truncated: providers.length >= ENDPOINT_SEARCH_LIMIT,
     from: 'endpoints',
   };
 }

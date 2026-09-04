@@ -84,7 +84,7 @@ Off by default. When enabled, records are batched (50 records or 10 seconds, whi
 "telemetry": {
   "payload": "hash",
   "sink": {
-    "url": "https://www.roundhouse.studio/api/v0/ingest/x402",
+    "url": "https://api.roundhouseai.io/v0/telemetry",
     "token": "env:ROUNDHOUSE_INGEST_TOKEN",
     "enabled": true
   }

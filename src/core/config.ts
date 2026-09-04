@@ -104,8 +104,13 @@ export interface X402Config {
     timeout: number;
   };
   discover: {
+    /** Roundhouse read API base. Queried as `<indexUrl>/endpoints?q=<term>`. */
     indexUrl: string;
-    /** Capability documents, which carry the market stats `indexUrl` does not. */
+    /**
+     * Capability documents, which carry the market stats `indexUrl` does not.
+     * Queried as `<unifiedUrl>/<slug>`; a value ending in `.json` is treated as
+     * the retired single-document surface and queried as `?capability=<slug>`.
+     */
     unifiedUrl: string;
   };
   /** Settlement confirmation source for `rh-x402 verify`. */
@@ -145,8 +150,8 @@ export const DEFAULT_CONFIG: X402Config = {
   },
   defaults: { chain: 'base', timeout: 30 },
   discover: {
-    indexUrl: 'https://www.roundhouse.studio/api/v0',
-    unifiedUrl: 'https://www.roundhouse.studio/unified.json',
+    indexUrl: 'https://api.roundhouseai.io/v0',
+    unifiedUrl: 'https://api.roundhouseai.io/v0/unified',
   },
   facilitator: {},
   pins: {},

@@ -215,6 +215,9 @@ async function callTool(
         unit: market.unit ?? null,
         count: providers.length,
         stats: market.stats ?? null,
+        // The index capped the offer list: the cheapest here is not
+        // necessarily the cheapest that exists, and `stats` describes more.
+        truncated: market.truncated ?? false,
         indexSurface: market.from,
         providers,
       };

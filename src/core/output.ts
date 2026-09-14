@@ -1,13 +1,16 @@
 import { writeFileSync } from 'node:fs';
 import { ExitCodeName } from './errors.js';
-import type { CallResult } from './engine.js';
+import type { CallResult, PaymentState } from './engine.js';
 
 export const isTty = (): boolean => process.stdout.isTTY === true;
 
 export interface Envelope {
   ok: boolean;
   status: number | null;
+  /** True once the authorization was submitted and not rejected. */
   paid: boolean;
+  /** none | signed | submitted | settled. The detail behind `paid`. */
+  paymentState: PaymentState;
   amount: string;
   asset?: string;
   receiptId: string;
@@ -28,6 +31,7 @@ export function toEnvelope(result: CallResult): Envelope {
     ok: result.ok,
     status: result.status,
     paid: result.paid,
+    paymentState: result.paymentState,
     amount: result.amount,
     receiptId: result.receiptId,
   };
@@ -98,7 +102,12 @@ export function emitCallResult(result: CallResult, opts: EmitOptions = {}): void
   }
 
   // Human form.
-  const paid = result.paid ? `paid ${result.amount} ${result.asset ?? ''}`.trim() : 'free';
+  const paid = result.paid
+    ? `paid ${result.amount} ${result.asset ?? ''}`.trim() +
+      (result.paymentState === 'settled' ? ' (settled)' : '')
+    : result.paymentState === 'signed'
+      ? 'signed, not paid'
+      : 'free';
   const cache = result.cacheHit ? ' (cached authorization)' : '';
   const head = result.ok ? 'ok' : `failed (${ExitCodeName[result.errorCode ?? 1] ?? 'error'})`;
   process.stdout.write(`${head}  ${result.status ?? '-'}  ${paid}${cache}  ${result.url}\n`);

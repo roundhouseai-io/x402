@@ -80,6 +80,7 @@ Both return the same envelope:
   "ok": true,
   "status": 200,
   "paid": true,
+  "paymentState": "settled",
   "amount": "0.002",
   "asset": "usdc",
   "receiptId": "01J8ZK3M9Q…",
@@ -87,7 +88,20 @@ Both return the same envelope:
 }
 ```
 
-The response body you want is `body`. `paid` tells you whether money moved; `amount` is what it cost; `receiptId` is what you quote if you need to verify settlement later (`rh-x402 verify <receiptId>`).
+The response body you want is `body`. `amount` is what it cost; `receiptId` is what you quote if you need to verify settlement later (`rh-x402 verify <receiptId>`).
+
+`paid` and `paymentState` together say what happened to your money:
+
+| `paymentState` | `paid`  | What it means                                                                          |
+| -------------- | ------- | -------------------------------------------------------------------------------------- |
+| `none`         | `false` | Nothing was signed. The wallet is untouched; a retry is free.                          |
+| `signed`       | `false` | An authorization was signed and the provider rejected it. Nothing settled.             |
+| `submitted`    | `true`  | The authorization reached the provider and was accepted. Assume the money moved.       |
+| `settled`      | `true`  | A settlement receipt confirms the transfer. `rh-x402 verify` can show the transaction. |
+
+Most providers return no settlement receipt, so `submitted` is the normal
+success state — it is not a warning. `signed` is the one to act on: the call
+failed and the wallet was not charged, so read `error` before retrying.
 
 **Passing data.** `--data.<path> <value>` builds nested JSON: dots for objects, `[n]` for arrays.
 
@@ -107,6 +121,12 @@ Numbers, `true`/`false` and `null` are coerced; anything else is a string. Force
 - `--dry-run` reports the price and stops before signing. Use it when you are unsure.
 - Repeat the _same_ command after a network failure: the signed authorization is cached and reused, so a retry does not pay twice. On the endpoint, send the same `Idempotency-Key`.
 - `--budget 0.50` caps everything this process spends.
+
+**Protocol versions.** x402 v1 and v2 are both spoken, and the version is taken
+from the provider's own 402 — v1 signs into `X-PAYMENT`, v2 into
+`PAYMENT-SIGNATURE`. A provider quoting a version this build does not know fails
+with exit `40` _before_ anything is signed, so an unknown version never costs
+money.
 
 ## 3. discover — who sells this cheapest?
 

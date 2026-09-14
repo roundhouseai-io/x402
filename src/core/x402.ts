@@ -28,7 +28,37 @@ export interface PaymentRequired {
   x402Version: number;
   error: string | undefined;
   options: PaymentOption[];
+  /**
+   * The v2 top-level `resource` object, echoed back in the payment payload.
+   * Absent on v1, which carries the resource per option.
+   */
+  resource: Json | undefined;
+  /**
+   * The v2 `extensions` map. The client must echo back at least what it was
+   * sent (spec 5.1.2), so it is carried here rather than dropped.
+   */
+  extensions: Json | undefined;
   raw: unknown;
+}
+
+/**
+ * Protocol versions this build can construct a payment for.
+ *
+ * v1 sends the payload in `X-PAYMENT`; v2 sends a differently shaped payload in
+ * `PAYMENT-SIGNATURE`. A version outside this list is refused *before* signing:
+ * an authorization this client cannot address correctly is money at risk for a
+ * call that cannot succeed.
+ */
+export const SUPPORTED_X402_VERSIONS: readonly number[] = [1, 2];
+
+export function assertSupportedVersion(version: number): void {
+  if (SUPPORTED_X402_VERSIONS.includes(version)) return;
+  throw new X402Error(
+    ExitCode.INVALID_402,
+    `this client does not support x402 v${String(version)} (it speaks v${SUPPORTED_X402_VERSIONS.join(', v')}). ` +
+      'Nothing was signed.',
+    { x402Version: version, supported: SUPPORTED_X402_VERSIONS },
+  );
 }
 
 type Json = Record<string, unknown>;
@@ -49,7 +79,21 @@ const A_NETWORK = ['network', 'chain', 'chainId', 'networkId'];
 const A_ASSET = ['asset', 'token', 'tokenAddress', 'currency', 'contract'];
 const A_SCHEME = ['scheme', 'type'];
 
-function normalizeOption(input: unknown, index: number): PaymentOption {
+/**
+ * The resource URL a 402 refers to.
+ *
+ * v1 carries it per option as a string; v2 moved it to a top-level
+ * `resource: { url, description, mimeType }` object. `pay` gates on it, so
+ * reading both spellings is the difference between the domain allowlist
+ * applying to a v2 quote and being silently skipped.
+ */
+function resourceUrlOf(value: unknown): string | undefined {
+  if (typeof value === 'string' && value !== '') return value;
+  if (isObj(value) && typeof value.url === 'string' && value.url !== '') return value.url;
+  return undefined;
+}
+
+function normalizeOption(input: unknown, index: number, resource?: unknown): PaymentOption {
   if (!isObj(input)) {
     throw new X402Error(ExitCode.INVALID_402, `payment option ${index} is not an object`);
   }
@@ -166,7 +210,7 @@ function normalizeOption(input: unknown, index: number): PaymentOption {
     amountAtomic,
     amount: formatUnits(amountAtomic, decimals),
     payTo,
-    resource: typeof input.resource === 'string' ? input.resource : undefined,
+    resource: resourceUrlOf(input.resource) ?? resourceUrlOf(resource),
     description: typeof input.description === 'string' ? input.description : undefined,
     maxTimeoutSeconds: Number.isFinite(timeout) && timeout > 0 ? Math.floor(timeout) : 60,
     // From the table too. `extra` is the provider describing a contract it does
@@ -217,6 +261,53 @@ export function requirementsFromHeaders(headers: Record<string, string>): unknow
 }
 
 /**
+ * Decode whatever an agent had to hand into a 402 payload.
+ *
+ * `probe` reads the requirements out of a base64 `PAYMENT-REQUIRED` header, so
+ * that is the form an agent copies — and until now `pay` took only JSON, which
+ * meant piping the value through `base64 -d` by hand before every call. All
+ * four forms are accepted here:
+ *
+ *   - a JSON object or array
+ *   - a bare base64 `PaymentRequired` document
+ *   - a whole header line, `PAYMENT-REQUIRED: <base64>`
+ *   - any of the above with the line breaks a copy-paste leaves behind
+ */
+export function decodeQuote(input: string): unknown {
+  const text = input.trim();
+  if (text === '') {
+    throw new X402Error(ExitCode.INVALID_402, 'empty 402 payload');
+  }
+
+  const withoutHeader = text.replace(/^\s*(?:x-)?payment-required\s*:\s*/i, '').trim();
+
+  if (withoutHeader.startsWith('{') || withoutHeader.startsWith('[')) {
+    try {
+      return JSON.parse(withoutHeader);
+    } catch (err) {
+      throw new X402Error(ExitCode.INVALID_402, `not JSON: ${(err as Error).message}`);
+    }
+  }
+
+  const compact = withoutHeader.replace(/\s+/g, '');
+  if (/^[A-Za-z0-9+/_=-]+$/.test(compact)) {
+    try {
+      return JSON.parse(Buffer.from(compact, 'base64').toString('utf8'));
+    } catch {
+      throw new X402Error(
+        ExitCode.INVALID_402,
+        'not a 402 payload: base64 that does not decode to JSON',
+      );
+    }
+  }
+
+  throw new X402Error(
+    ExitCode.INVALID_402,
+    'not a 402 payload: expected JSON or a base64 PAYMENT-REQUIRED value',
+  );
+}
+
+/**
  * Parse an x402 402 body. Accepts the canonical `{x402Version, accepts:[...]}`
  * envelope, a bare requirements object, or a bare array of options — the three
  * shapes live providers actually emit today.
@@ -225,12 +316,17 @@ export function parsePaymentRequired(body: unknown): PaymentRequired {
   let candidates: unknown[];
   let version = 1;
   let error: string | undefined;
+  let resource: Json | undefined;
+  let extensions: Json | undefined;
 
   if (Array.isArray(body)) {
     candidates = body;
   } else if (isObj(body)) {
     version = Number(body.x402Version ?? body.version ?? 1);
     error = typeof body.error === 'string' ? body.error : undefined;
+    if (isObj(body.resource)) resource = body.resource;
+    else if (typeof body.resource === 'string') resource = { url: body.resource };
+    if (isObj(body.extensions)) extensions = body.extensions;
     const accepts = pick(body, ['accepts', 'paymentRequirements', 'options', 'requirements']);
     if (Array.isArray(accepts)) candidates = accepts;
     else if (isObj(accepts)) candidates = [accepts];
@@ -247,7 +343,7 @@ export function parsePaymentRequired(body: unknown): PaymentRequired {
   const problems: string[] = [];
   for (const [i, c] of candidates.entries()) {
     try {
-      options.push(normalizeOption(c, i));
+      options.push(normalizeOption(c, i, resource));
     } catch (err) {
       problems.push((err as Error).message);
     }
@@ -258,7 +354,14 @@ export function parsePaymentRequired(body: unknown): PaymentRequired {
     });
   }
 
-  return { x402Version: Number.isFinite(version) ? version : 1, error, options, raw: body };
+  return {
+    x402Version: Number.isFinite(version) ? version : 1,
+    error,
+    options,
+    resource,
+    extensions,
+    raw: body,
+  };
 }
 
 export interface SelectOptions {

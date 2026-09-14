@@ -20,7 +20,18 @@ export interface LedgerRecord {
     bytes: number;
   };
   payment: {
+    /**
+     * Whether the wallet should be assumed to have spent. True from `submitted`
+     * onwards; `spentToday` and the daily cap count these records.
+     */
     paid: boolean;
+    /**
+     * How far the payment got: none | signed | submitted | settled.
+     * Optional because records written before this field existed have none.
+     */
+    state?: 'none' | 'signed' | 'submitted' | 'settled';
+    /** x402 protocol version the payment was constructed for. */
+    x402Version?: number;
     amount: string;
     asset?: string;
     chain?: string;

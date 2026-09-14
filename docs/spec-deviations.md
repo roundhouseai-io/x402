@@ -77,3 +77,21 @@ The scope is `@roundhouseai`, matching the `roundhouseai-io` GitHub org.
 **Implementation:** `--mcp` serves stdio.
 
 **Why:** SSE is deprecated in the MCP transport spec in favour of streamable HTTP, and §12.5 already proposes deferring MCP to v1.1. Adding a second transport before the first is exercised is scope with no caller.
+
+## 10. The envelope carries `paymentState`, and `paid` means submitted-or-settled
+
+**Spec:** §8 defines the envelope with `paid: boolean` and no finer detail.
+
+**Implementation:** the envelope also carries `paymentState`: `none`, `signed`, `submitted` or `settled`. `paid` is `submitted || settled`.
+
+**Why:** `paid: true` was set the moment an authorization was signed, so a call the provider then rejected reported `paid: true` with a ledger amount of `0` — an agent reading it could not tell "money moved and the response was lost" from "nothing moved at all". The four states say which, and the exit code stays the thing to branch on.
+
+`paid` is deliberately not reserved for `settled`. Most providers return no settlement receipt at all, and `limits.dailyCap` counts `paid` ledger records: a settled-only `paid` would leave real spend out of the ledger and quietly stop the cap binding. `settled` is the stronger claim where the provider makes it; `rh-x402 verify` confirms the rest.
+
+## 11. x402 v2 is spoken alongside v1
+
+**Spec:** §4-5 describe the v1 loop: sign an EIP-3009 authorization, retry with `X-PAYMENT`, read `X-PAYMENT-RESPONSE`.
+
+**Implementation:** the protocol version is taken from the provider's own 402 and decides both the payload shape and the header. v1 is unchanged. v2 sends the [spec 5.2](https://github.com/coinbase/x402/blob/main/specs/x402-specification-v2.md) payload — the chosen requirements echoed under `accepted`, alongside `resource` and `extensions` — base64 in `PAYMENT-SIGNATURE`, and reads settlement from `PAYMENT-RESPONSE`. A version this build does not know fails with exit `40` before anything is signed.
+
+**Why:** every provider on the current Roundhouse index quotes v2, and they reject a v1 envelope outright ("X-PAYMENT/v1 is unsupported"). The parser already read v2 requirements out of the `PAYMENT-REQUIRED` header; only the payment construction was still v1, so `probe` reported `x402Version: 2` while `call` signed v1 and paid nobody.

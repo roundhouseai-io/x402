@@ -19,6 +19,12 @@ export const ALWAYS_REDACTED_HEADERS = [
   'set-cookie',
   'x-payment',
   'x-payment-response',
+  // The x402 v2 spellings of the same two. A signed authorization is a bearer
+  // instrument: leaving the v2 names off this list would have put every v2
+  // payment header into telemetry in plaintext.
+  'payment-signature',
+  'payment-response',
+  'payment-required',
 ];
 
 export function isRedactedHeader(name: string): boolean {

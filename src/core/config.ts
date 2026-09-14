@@ -159,6 +159,37 @@ export const DEFAULT_CONFIG: X402Config = {
   serve: { host: '127.0.0.1', port: 8403 },
 };
 
+/**
+ * Config values that are money amounts, and must be strings.
+ *
+ * `config set limits.maxPerCall 0.05` coerces its argument, so the cap landed
+ * in `config.json` as the JSON *number* `0.05` while `limits.dailyCap "5.00"`
+ * stayed a string. Reading the number back threw `value.trim is not a function`
+ * from `parseUnits` and every `pay`/`call` without an explicit `--max` failed
+ * with exit 1 — a configured spend cap that could not be used. Amounts are
+ * normalised to strings on write and again on read, so a file written by an
+ * older build behaves too.
+ */
+export const AMOUNT_KEYS: readonly string[] = ['limits.maxPerCall', 'limits.dailyCap'];
+
+/** Coerce a value destined for `key` into the type that key must hold. */
+export function normalizeConfigValue(key: string, value: unknown): unknown {
+  if (AMOUNT_KEYS.includes(key) && typeof value === 'number') return String(value);
+  return value;
+}
+
+/** Coerce every amount in a loaded config to a string, in place of the caller. */
+export function normalizeAmounts<T>(config: T): T {
+  const limits = (config as { limits?: Record<string, unknown> }).limits;
+  if (!limits) return config;
+  const fixed: Record<string, unknown> = { ...limits };
+  for (const key of AMOUNT_KEYS) {
+    const leaf = key.split('.')[1]!;
+    if (typeof fixed[leaf] === 'number') fixed[leaf] = String(fixed[leaf]);
+  }
+  return { ...config, limits: fixed } as T;
+}
+
 export type Json = Record<string, unknown>;
 
 function isPlainObject(v: unknown): v is Json {
@@ -250,7 +281,11 @@ export function loadConfig(opts: LoadOptions = {}): LoadedConfig {
     sources.push('flags');
   }
 
-  return { config: resolveEnv(merged), sources, origins: originsOf(layers) };
+  return {
+    config: normalizeAmounts(resolveEnv(merged)),
+    sources,
+    origins: originsOf(layers),
+  };
 }
 
 /** The raw (unresolved) user config file, for `config get|set|list`. */

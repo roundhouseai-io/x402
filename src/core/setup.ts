@@ -245,7 +245,14 @@ async function setupOws(opts: SetupOptions): Promise<SetupResult> {
   let passphrase = fromEnv ?? '';
   if (!fromEnv) {
     if (interactive()) {
-      passphrase = await secretTwice('Vault passphrase (empty for none): ', 'Confirm passphrase: ');
+      // Name the escape hatch in the prompt: this is the one question `wallet
+      // create` cannot take as a flag (it would land in argv and shell
+      // history), so a caller driving the command from a script needs to know
+      // the variable exists before it stops to ask.
+      passphrase = await secretTwice(
+        'Vault passphrase (empty for none; set OWS_VAULT_PASS to skip this prompt): ',
+        'Confirm passphrase: ',
+      );
     }
     if (!passphrase) {
       process.stderr.write(

@@ -22,9 +22,9 @@ a machine with both the short name would be a coin toss.
 
 usage
   rh-x402 <url> [flags]                  sugar for: rh-x402 call <url>
-  rh-x402 call <url|x402:capability>     request, pay if a 402 is quoted, return the response
-  rh-x402 probe <url>                    fetch payment requirements only; never pays
-  rh-x402 pay <402-json|@file|->         build a signed X-PAYMENT header; no HTTP
+  rh-x402 call <url|x402:capability|@402>  request, pay if a 402 is quoted, return the response
+  rh-x402 probe <url|@402>               fetch payment requirements only; never pays
+  rh-x402 pay <402-json|base64|@file|->  sign a payment header (x402 v1 or v2); no HTTP
   rh-x402 verify <receiptId|@file>       confirm settlement of a prior payment
   rh-x402 wallet create                  guided setup: pick a wallet, configure it
   rh-x402 wallet policy                  put an OWS policy in front of this wallet
@@ -113,9 +113,10 @@ examples
     --data.query "What is the LEI of Roundhouse AI Ltd.?" --max 0.02
   rh-x402 call x402:web-search --data.query "..." --max 0.02
 
-  # sign without making the request
+  # sign without making the request (JSON body or a base64 PAYMENT-REQUIRED value)
   curl -sS -o 402.json https://api.example.com/v1/thing
   rh-x402 pay @402.json
+  curl -sSD - -o /dev/null https://api.example.com/v1/thing | grep -i ^payment-required | rh-x402 pay -
 
   # afterwards
   rh-x402 history --since 24h

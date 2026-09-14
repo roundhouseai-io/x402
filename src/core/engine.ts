@@ -2,6 +2,7 @@ import { X402Error, ExitCode, exitCodeOf, messageOf } from './errors.js';
 import { request, parseJsonBody, type HttpResponse } from './http.js';
 import { toQueryParams, topLevelKeys } from './data.js';
 import {
+  assertSupportedVersion,
   parsePaymentRequired,
   requirementsFromHeaders,
   selectOption,
@@ -12,7 +13,8 @@ import {
   buildAuthorization,
   buildPaymentPayload,
   encodePaymentHeader,
-  decodeSettlement,
+  paymentHeaderName,
+  settlementFromHeaders,
   type SettlementResponse,
   type TypedData,
 } from './eip3009.js';
@@ -52,6 +54,32 @@ export interface CallOptions {
   rawBody?: string | undefined;
 }
 
+/**
+ * How far a payment actually got.
+ *
+ * `paid: true` on a call the provider then rejected is the report an agent
+ * cannot act on: it cannot tell "money moved and the response was lost" from
+ * "nothing moved". These four states say which.
+ *
+ * - `none`      nothing was signed.
+ * - `signed`    an authorization exists but no settlement can follow it: the
+ *               provider rejected it, so nothing moved.
+ * - `submitted` the authorization reached the provider and was not rejected.
+ *               Money has very likely moved; a provider that returns no
+ *               settlement receipt never lets the client do better than this.
+ * - `settled`   a settlement receipt confirms the transfer.
+ *
+ * `paid` stays `submitted || settled`. It is deliberately *not* reserved for
+ * `settled`: the ledger's daily cap counts `paid` records, and most providers
+ * return no settlement header at all, so a settled-only `paid` would under-count
+ * real spend and quietly disarm the cap.
+ */
+export type PaymentState = 'none' | 'signed' | 'submitted' | 'settled';
+
+/** Whether a state means the wallet should be assumed to have spent. */
+export const isSpent = (state: PaymentState): boolean =>
+  state === 'submitted' || state === 'settled';
+
 export interface Receipt {
   id: string;
   ts: string;
@@ -74,12 +102,18 @@ export interface Receipt {
   cacheHit: boolean;
   settlement?: SettlementResponse | undefined;
   status: number | null;
+  /** Protocol version the payment was constructed for. */
+  x402Version: number;
+  state: PaymentState;
 }
 
 export interface CallResult {
   ok: boolean;
   status: number | null;
+  /** True once the authorization left this process and was not rejected. */
   paid: boolean;
+  /** The honest detail behind `paid`. See {@link PaymentState}. */
+  paymentState: PaymentState;
   amount: string;
   asset?: string | undefined;
   receiptId: string;
@@ -170,6 +204,47 @@ export function prepareRequest(
   }
 
   return { url, method, headers, body };
+}
+
+/**
+ * Why the provider rejected a payment, in its own words.
+ *
+ * The client's own "provider rejected the payment authorization" is the least
+ * useful sentence available: the provider usually says something actionable
+ * ("Upgrade to x402 v2", "authorization expired") in the settlement receipt,
+ * in a fresh 402's `error`, or in the body. Pass it through rather than
+ * flattening it, capped so a large error page cannot flood the ledger.
+ */
+const REJECTION_BODY_LIMIT = 300;
+
+export function providerRejection(
+  res: HttpResponse,
+  settlement: SettlementResponse | undefined,
+): string {
+  const reasons: string[] = [];
+  if (settlement?.errorReason) reasons.push(settlement.errorReason);
+
+  // A v2 provider re-states the requirements on the second 402, and puts the
+  // reason the first payment failed in their `error` field.
+  try {
+    const fresh = requirementsFromHeaders(res.headers);
+    const err = (fresh as { error?: unknown } | undefined)?.error;
+    if (typeof err === 'string' && err !== '') reasons.push(err);
+  } catch {
+    // A malformed header is not worth failing the error message over.
+  }
+
+  const body = parseJsonBody(res.body) as { error?: unknown; message?: unknown } | undefined;
+  for (const value of [body?.error, body?.message]) {
+    if (typeof value === 'string' && value !== '') reasons.push(value);
+  }
+  if (reasons.length === 0 && res.body.trim() !== '') {
+    reasons.push(res.body.trim().slice(0, REJECTION_BODY_LIMIT));
+  }
+
+  const unique = [...new Set(reasons.map((r) => r.slice(0, REJECTION_BODY_LIMIT)))];
+  if (unique.length === 0) return 'provider rejected the payment authorization';
+  return `provider rejected the payment authorization: ${unique.join(' | ')}`;
 }
 
 export class Engine {
@@ -302,6 +377,7 @@ export class Engine {
         ok: record.exitCode === ExitCode.OK,
         status: first.status,
         paid: false,
+        paymentState: 'none',
         amount: '0',
         receiptId: id,
         body: body ?? first.body,
@@ -328,6 +404,9 @@ export class Engine {
         chains: opts.chains ?? [this.config.defaults.chain],
         preferChain: this.config.defaults.chain,
       });
+      // Before the gates, and well before signing: an authorization this build
+      // cannot address correctly is money at risk on a call that cannot succeed.
+      assertSupportedVersion(requirements.x402Version);
     } catch (err) {
       record.exitCode = exitCodeOf(err);
       record.error = messageOf(err);
@@ -368,6 +447,7 @@ export class Engine {
         ok: true,
         status: 402,
         paid: false,
+        paymentState: 'none',
         amount: option.amount,
         asset: option.assetSymbol,
         receiptId: id,
@@ -385,7 +465,7 @@ export class Engine {
     let auth: AuthCacheEntry & { cacheHit?: boolean };
     const signStarted = this.now();
     try {
-      auth = await this.authorize(option, prepared, opts);
+      auth = await this.authorize(option, prepared, opts, requirements);
     } catch (err) {
       record.payment.paid = false;
       record.payment.amount = '0';
@@ -397,7 +477,10 @@ export class Engine {
       return { ...this.errorResult(record, err), requirements, selected: option };
     }
 
-    record.payment.paid = true;
+    // Signed, not yet sent: nothing has moved and nothing can until the retry.
+    record.payment.state = 'signed';
+    record.payment.paid = false;
+    record.payment.x402Version = auth.x402Version;
     record.payment.authHash = tagged(auth.signature);
     record.payment.cacheHit = auth.cacheHit === true;
     record.wallet = auth.wallet;
@@ -405,7 +488,9 @@ export class Engine {
     const paymentLatencyMs = this.now() - signStarted;
 
     // 6. Paid retry.
-    const paidHeaders = { ...prepared.headers, 'x-payment': auth.header };
+    // v1 sends `X-PAYMENT`; v2 sends `PAYMENT-SIGNATURE`. Providers on the
+    // current index reject the wrong one outright.
+    const paidHeaders = { ...prepared.headers, [auth.headerName]: auth.header };
     let second: HttpResponse;
     try {
       second = await request({ ...prepared, headers: paidHeaders, timeoutMs });
@@ -414,14 +499,19 @@ export class Engine {
       // keep the cache entry so a re-run reuses it instead of paying twice.
       record.exitCode = ExitCode.PAID_NO_RESPONSE;
       record.error = messageOf(err);
+      // The authorization left this process; assume it may have settled.
+      record.payment.state = 'submitted';
+      record.payment.paid = true;
+      record.payment.amount = option.amount;
       record.response.paymentLatencyMs = paymentLatencyMs;
       record.response.latencyMs = this.now() - startedAt;
       this.commit(record);
-      const receipt = this.receipt(id, auth, option, null, undefined);
+      const receipt = this.receipt(id, auth, option, null, undefined, 'submitted');
       return {
         ok: false,
         status: null,
         paid: true,
+        paymentState: 'submitted',
         amount: option.amount,
         asset: option.assetSymbol,
         receiptId: id,
@@ -438,32 +528,41 @@ export class Engine {
       };
     }
 
-    const settlement = decodeSettlement(second.headers['x-payment-response']);
+    const settlement = settlementFromHeaders(second.headers);
     record.payment.settlement = settlement;
     this.recordResponse(record, second, level);
     record.response.paymentLatencyMs = paymentLatencyMs;
     record.response.latencyMs = this.now() - startedAt;
 
     if (second.status === 402) {
-      // Provider rejected the authorization. Do not keep the cache entry: the
-      // next attempt must sign afresh.
+      // Provider rejected the authorization: it was signed, but nothing settled
+      // against it, so the wallet is untouched — `signed`, not `paid`.
+      //
+      // The cache entry is deliberately kept. A rejected authorization is still
+      // a live EIP-3009 signature until its `validBefore`, and the provider
+      // holds it; signing a fresh one with a new nonce is the only way two
+      // transfers can happen. Reusing the entry on a retry keeps the worst case
+      // at one. See docs/idempotency.md.
+      const rejectedSettled = settlement?.success === true;
+      const state: PaymentState = rejectedSettled ? 'settled' : 'signed';
+      record.payment.state = state;
+      record.payment.paid = isSpent(state);
+      record.payment.amount = isSpent(state) ? option.amount : '0';
       record.exitCode = ExitCode.INVALID_402;
-      record.error =
-        settlement?.errorReason ??
-        (parseJsonBody(second.body) as { error?: string } | undefined)?.error ??
-        'provider rejected the payment authorization';
+      record.error = providerRejection(second, settlement);
       this.commit(record);
       return {
         ok: false,
         status: 402,
-        paid: true,
-        amount: option.amount,
+        paid: isSpent(state),
+        paymentState: state,
+        amount: isSpent(state) ? option.amount : '0',
         asset: option.assetSymbol,
         receiptId: id,
         url: prepared.url,
         requirements,
         selected: option,
-        receipt: this.receipt(id, auth, option, 402, settlement),
+        receipt: this.receipt(id, auth, option, 402, settlement, state),
         record,
         errorCode: ExitCode.INVALID_402,
         error: record.error,
@@ -471,6 +570,12 @@ export class Engine {
     }
 
     const httpOk = second.status >= 200 && second.status < 400;
+    // A settlement receipt is the only proof the transfer happened; without one
+    // the honest answer is that the authorization was submitted and accepted.
+    const state: PaymentState = settlement?.success === true ? 'settled' : 'submitted';
+    record.payment.state = state;
+    record.payment.paid = true;
+    record.payment.amount = option.amount;
     record.exitCode = httpOk ? ExitCode.OK : ExitCode.PAID_NO_RESPONSE;
     if (!httpOk) record.error = `paid, but upstream returned HTTP ${second.status}`;
     this.deps.budget?.record(option.amountAtomic);
@@ -481,6 +586,7 @@ export class Engine {
       ok: httpOk,
       status: second.status,
       paid: true,
+      paymentState: state,
       amount: option.amount,
       asset: option.assetSymbol,
       receiptId: id,
@@ -490,7 +596,7 @@ export class Engine {
       url: prepared.url,
       requirements,
       selected: option,
-      receipt: this.receipt(id, auth, option, second.status, settlement),
+      receipt: this.receipt(id, auth, option, second.status, settlement, state),
       provider: resolved.provider,
       capability: resolved.capability,
       cacheHit: record.payment.cacheHit,
@@ -526,6 +632,7 @@ export class Engine {
     option: PaymentOption,
     prepared: PreparedRequest,
     opts: CallOptions,
+    requirements: PaymentRequired,
   ): Promise<AuthCacheEntry & { cacheHit?: boolean }> {
     const signer = await this.deps.signer({ backend: opts.signer, wallet: opts.wallet });
     const queueKey = `${signer.backend}:${signer.wallet}`;
@@ -543,6 +650,10 @@ export class Engine {
         chain: option.chain,
         wallet: signer.wallet,
         backend: signer.backend,
+        // A v1 header cannot be replayed against a v2 provider (different
+        // payload shape, different header), so the version is part of the
+        // request identity rather than something a cache hit can paper over.
+        x402Version: requirements.x402Version,
       });
 
       if (!opts.noCache) {
@@ -558,7 +669,11 @@ export class Engine {
         now: Math.floor(this.now() / 1000),
       });
       const signature = await signer.signTypedData(built.typedData);
-      const payload = buildPaymentPayload(option, built.typedData, signature);
+      const payload = buildPaymentPayload(option, built.typedData, signature, {
+        x402Version: requirements.x402Version,
+        resource: requirements.resource,
+        extensions: requirements.extensions,
+      });
       const entry: AuthCacheEntry = {
         key,
         url: prepared.url,
@@ -575,6 +690,8 @@ export class Engine {
         validBefore: built.validBefore,
         signature,
         typedData: built.typedData,
+        x402Version: requirements.x402Version,
+        headerName: paymentHeaderName(requirements.x402Version),
         header: encodePaymentHeader(payload),
         createdAt: new Date(this.now()).toISOString(),
       };
@@ -617,6 +734,7 @@ export class Engine {
     option: PaymentOption,
     status: number | null,
     settlement: SettlementResponse | undefined,
+    state: PaymentState,
   ): Receipt {
     return {
       id,
@@ -640,6 +758,8 @@ export class Engine {
       cacheHit: auth.cacheHit === true,
       settlement,
       status,
+      x402Version: auth.x402Version,
+      state,
     };
   }
 
@@ -678,7 +798,7 @@ export class Engine {
         ...(headerSummary ?? {}),
         bytes: summary.bytes,
       },
-      payment: { paid: false, amount: '0' },
+      payment: { paid: false, amount: '0', state: 'none' },
       response: { status: null, bytes: 0, latencyMs: 0 },
       exitCode: ExitCode.OK,
       agent: args.agent,
@@ -712,6 +832,7 @@ export class Engine {
       ok: false,
       status: record.response.status,
       paid: record.payment.paid,
+      paymentState: record.payment.state ?? 'none',
       amount: record.payment.amount,
       asset: record.payment.asset,
       receiptId: record.id,

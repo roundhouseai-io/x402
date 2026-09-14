@@ -117,16 +117,26 @@ export function formatUnits(atomic: bigint, decimals: number): string {
   return `${negative ? '-' : ''}${whole}${frac ? `.${frac}` : ''}`;
 }
 
-/** Parse a decimal string into atomic units. Throws on more precision than the asset has. */
-export function parseUnits(value: string, decimals: number): bigint {
-  const trimmed = value.trim();
+/**
+ * Parse a decimal amount into atomic units. Throws on more precision than the
+ * asset has.
+ *
+ * Numbers are accepted as well as strings, because JSON has no string type for
+ * money and `config set limits.maxPerCall 0.05` writes a JSON number: reading
+ * it back used to crash with `value.trim is not a function`, turning a
+ * configured spend cap into an unusable one. Anything non-decimal — including
+ * the `1e-7` a very small number stringifies to — is still refused rather than
+ * guessed at.
+ */
+export function parseUnits(value: string | number, decimals: number): bigint {
+  const trimmed = String(value).trim();
   if (!/^-?\d*(\.\d*)?$/.test(trimmed) || trimmed === '' || trimmed === '.') {
-    throw new Error(`not a decimal amount: ${value}`);
+    throw new Error(`not a decimal amount: ${String(value)}`);
   }
   const negative = trimmed.startsWith('-');
   const [whole = '0', frac = ''] = (negative ? trimmed.slice(1) : trimmed).split('.');
   if (frac.length > decimals) {
-    throw new Error(`amount ${value} has more than ${decimals} decimal places`);
+    throw new Error(`amount ${String(value)} has more than ${decimals} decimal places`);
   }
   const atomic =
     BigInt(whole || '0') * 10n ** BigInt(decimals) + BigInt(frac.padEnd(decimals, '0') || '0');

@@ -7,10 +7,12 @@ Double payment is the most likely agent failure mode: a request is signed, the p
 When a call needs payment, the engine computes a cache key from the **request identity**:
 
 ```
-sha256(METHOD | url | sha256(body) | payTo | amountAtomic | asset | chain | wallet)
+sha256(METHOD | url | sha256(body) | payTo | amountAtomic | asset | chain | backend | wallet | x402Version)
 ```
 
-If a live entry exists, its signature and `X-PAYMENT` header are reused and no signing happens. Otherwise the engine signs once and writes the entry to `~/.x402/authcache/<key>.json` (0600, in a 0700 directory) containing the signature, the typed data, the nonce, the encoded header and the authorization's `validBefore`.
+`x402Version` is part of the identity because a v1 payload and a v2 payload are different documents travelling in different headers (`X-PAYMENT` vs `PAYMENT-SIGNATURE`): reusing one for the other guarantees a rejection.
+
+If a live entry exists, its signature and payment header are reused and no signing happens. Otherwise the engine signs once and writes the entry to `~/.x402/authcache/<key>.json` (0600, in a 0700 directory) containing the signature, the typed data, the nonce, the encoded header and the authorization's `validBefore`.
 
 Entries expire at their own `validBefore` — the EIP-3009 authorization is worthless afterwards. Expired entries are dropped on read and pruned opportunistically on every write.
 
@@ -23,19 +25,22 @@ The spec (§5.1) lists `validBefore` in the key. It cannot be there: `validBefor
 ## What invalidates an entry
 
 - **Time.** Past `validBefore`, it is gone.
-- **Any change to the request.** A different URL, method, body, price, asset, chain or wallet is a different key — as it should be; those are different payments.
+- **Any change to the request.** A different URL, method, body, price, asset, chain, wallet or protocol version is a different key — as it should be; those are different payments.
 - **`--no-cache`.** Forces a fresh signature and does not write one. Use it when you _want_ to pay again.
-- **A provider rejecting the authorization** (a second 402 after paying). The call fails with exit `40`; do not paper over it by reusing the entry.
+
+### What does not invalidate an entry: a rejected authorization
+
+A second 402 after paying fails the call with exit `40` and `paymentState: "signed"` — nothing settled, the wallet is untouched — and the entry is kept on purpose. A rejected authorization is still a live EIP-3009 signature until its `validBefore`, and the provider is holding it; signing a fresh one with a new nonce is the only way two transfers can happen. Reusing the entry keeps the worst case at one. Read the reason the provider gave (it is passed through verbatim in `error`) rather than retrying blindly.
 
 ## Retry rules
 
-| Situation                                            | Do this                                                               |
-| ---------------------------------------------------- | --------------------------------------------------------------------- |
-| Network error before the 402 was parsed (exit 1)     | Retry freely; nothing was signed                                      |
-| Gate refusal (43, 44, 45, 46)                        | Do not retry; nothing was signed                                      |
-| OWS refusal (42, 47)                                 | Do not retry blindly; nothing was signed                              |
-| Paid retry timed out or died (exit 50)               | Re-run the **identical** command. The cached authorization is reused. |
-| Provider rejected the payment (exit 40 after paying) | Investigate. A second attempt signs afresh and may pay again.         |
+| Situation                                         | Do this                                                                                           |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| Network error before the 402 was parsed (exit 1)  | Retry freely; nothing was signed                                                                  |
+| Gate refusal (43, 44, 45, 46)                     | Do not retry; nothing was signed                                                                  |
+| OWS refusal (42, 47)                              | Do not retry blindly; nothing was signed                                                          |
+| Paid retry timed out or died (exit 50)            | Re-run the **identical** command. The cached authorization is reused.                             |
+| Provider rejected the payment (exit 40, `signed`) | Nothing settled. Investigate the reason the provider gave; a retry reuses the same authorization. |
 
 Never add `--no-cache` to "clear a stuck state" after a 50. That is the double-payment path.
 

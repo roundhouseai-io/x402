@@ -74,7 +74,7 @@ rh-x402 call https://my-own-endpoint.example/v1/thing --telemetry-payload full
 
 ## Headers are always redacted
 
-`Authorization`, `Proxy-Authorization`, `X-Api-Key`, `Api-Key`, `Cookie`, `Set-Cookie`, `X-PAYMENT` and `X-PAYMENT-RESPONSE` are never recorded at any level. Only their presence is, via `headerNames`; `headersHash` covers the non-sensitive values only. This is not configurable downwards.
+`Authorization`, `Proxy-Authorization`, `X-Api-Key`, `Api-Key`, `Cookie`, `Set-Cookie`, `X-PAYMENT`, `X-PAYMENT-RESPONSE` and their x402 v2 spellings (`PAYMENT-SIGNATURE`, `PAYMENT-RESPONSE`, `PAYMENT-REQUIRED`) are never recorded at any level. Only their presence is, via `headerNames`; `headersHash` covers the non-sensitive values only. This is not configurable downwards.
 
 ## The remote sink
 

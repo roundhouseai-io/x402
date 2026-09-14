@@ -1,5 +1,17 @@
 import { describe, it, expect } from 'vitest';
-import { parsePaymentRequired, requirementsFromHeaders, selectOption } from '../src/core/x402.js';
+import {
+  assertSupportedVersion,
+  decodeQuote,
+  parsePaymentRequired,
+  requirementsFromHeaders,
+  selectOption,
+} from '../src/core/x402.js';
+import {
+  buildAuthorization,
+  buildPaymentPayload,
+  paymentHeaderName,
+  settlementFromHeaders,
+} from '../src/core/eip3009.js';
 import { formatUnits, parseUnits } from '../src/core/assets.js';
 import { X402Error, ExitCode } from '../src/core/errors.js';
 
@@ -257,5 +269,105 @@ describe('what a 402 is allowed to tell the CLI about the token', () => {
     const bare = { ...canonical.accepts[0] } as Record<string, unknown>;
     delete bare.asset;
     expect(() => parsePaymentRequired(bare)).toThrow(/missing asset address/);
+  });
+});
+
+describe('x402 versions', () => {
+  const V2 = {
+    x402Version: 2,
+    resource: { url: 'https://api.example.com/v1/lei', mimeType: 'application/json' },
+    accepts: [
+      {
+        scheme: 'exact',
+        network: 'eip155:8453',
+        amount: '1000',
+        asset: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+        payTo: '0xe9030014F5DAe217d0A152f02A043567b16c1aBf',
+        maxTimeoutSeconds: 300,
+        extra: { name: 'USD Coin', version: '2' },
+      },
+    ],
+    extensions: { bazaar: { info: {} } },
+  };
+
+  it('accepts v1 and v2 and refuses anything else, by exit code', () => {
+    expect(() => assertSupportedVersion(1)).not.toThrow();
+    expect(() => assertSupportedVersion(2)).not.toThrow();
+    try {
+      assertSupportedVersion(3);
+      expect.unreachable('v3 must be refused');
+    } catch (err) {
+      expect((err as X402Error).code).toBe(ExitCode.INVALID_402);
+      expect((err as X402Error).message).toContain('Nothing was signed');
+    }
+  });
+
+  it('names the header each version travels in', () => {
+    expect(paymentHeaderName(1)).toBe('x-payment');
+    expect(paymentHeaderName(2)).toBe('payment-signature');
+  });
+
+  it('carries the v2 resource down to the option, so the domain gate applies', () => {
+    const required = parsePaymentRequired(V2);
+    expect(required.resource).toMatchObject({ url: 'https://api.example.com/v1/lei' });
+    expect(required.extensions).toMatchObject({ bazaar: { info: {} } });
+    expect(required.options[0]?.resource).toBe('https://api.example.com/v1/lei');
+  });
+
+  it('builds the payload shape each version requires', () => {
+    const option = parsePaymentRequired(V2).options[0]!;
+    const built = buildAuthorization({ option, from: '0x' + '11'.repeat(20), now: 1_700_000_000 });
+
+    const v1 = buildPaymentPayload(option, built.typedData, '0xsig', { x402Version: 1 });
+    expect(v1).toMatchObject({ x402Version: 1, scheme: 'exact', network: 'eip155:8453' });
+
+    const v2 = buildPaymentPayload(option, built.typedData, '0xsig', {
+      x402Version: 2,
+      resource: { url: 'https://api.example.com/v1/lei' },
+      extensions: { bazaar: { info: {} } },
+    });
+    // The provider's own requirements object is echoed back verbatim: the
+    // facilitator matches the authorization against what it issued.
+    expect(v2).toMatchObject({
+      x402Version: 2,
+      accepted: V2.accepts[0],
+      resource: { url: 'https://api.example.com/v1/lei' },
+      extensions: { bazaar: { info: {} } },
+    });
+    expect(v2.payload.authorization.value).toBe('1000');
+  });
+
+  it('reads a settlement receipt under either header name', () => {
+    const receipt = Buffer.from(JSON.stringify({ success: true, transaction: '0x1' })).toString(
+      'base64',
+    );
+    expect(settlementFromHeaders({ 'payment-response': receipt })).toMatchObject({ success: true });
+    expect(settlementFromHeaders({ 'x-payment-response': receipt })).toMatchObject({
+      success: true,
+    });
+    expect(settlementFromHeaders({})).toBeUndefined();
+  });
+});
+
+describe('decodeQuote', () => {
+  const V2 = { x402Version: 2, accepts: [] };
+  const b64 = Buffer.from(JSON.stringify(V2), 'utf8').toString('base64');
+
+  it('takes JSON, base64, a whole header line, and wrapped copy-paste', () => {
+    expect(decodeQuote(JSON.stringify(V2))).toEqual(V2);
+    expect(decodeQuote(b64)).toEqual(V2);
+    expect(decodeQuote(`PAYMENT-REQUIRED: ${b64}`)).toEqual(V2);
+    expect(decodeQuote(`${b64.slice(0, 8)}\n${b64.slice(8)}\n`)).toEqual(V2);
+  });
+
+  it('refuses anything else as exit 40, rather than guessing', () => {
+    for (const input of ['', '   ', 'hello world', '{not json}']) {
+      try {
+        decodeQuote(input);
+        expect.unreachable(`should have refused: ${input}`);
+      } catch (err) {
+        expect((err as X402Error).code).toBe(ExitCode.INVALID_402);
+      }
+    }
   });
 });

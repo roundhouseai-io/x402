@@ -84,10 +84,22 @@ describe('header redaction', () => {
     expect(JSON.stringify(summary)).not.toContain('base64payload');
   });
 
+  it('redacts the x402 v2 payment headers too', () => {
+    const summary = summarizeHeaders({
+      'PAYMENT-SIGNATURE': 'base64payload',
+      'X-Api-Version': '2',
+    });
+    expect(summary.headerNames).toEqual(['payment-signature', 'x-api-version']);
+    expect(JSON.stringify(summary)).not.toContain('base64payload');
+  });
+
   it('knows the always-redacted set', () => {
     expect(isRedactedHeader('Cookie')).toBe(true);
     expect(isRedactedHeader('x-api-key')).toBe(true);
     expect(isRedactedHeader('accept')).toBe(false);
+    // A signed authorization is a bearer instrument under either spelling.
+    expect(isRedactedHeader('PAYMENT-SIGNATURE')).toBe(true);
+    expect(isRedactedHeader('payment-response')).toBe(true);
   });
 });
 

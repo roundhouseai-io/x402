@@ -7,6 +7,7 @@ import {
   setPath,
   unsetPath,
   assertKnownConfigKey,
+  normalizeConfigValue,
 } from '../core/config.js';
 import { paths } from '../core/paths.js';
 import { writeJson, isTty } from '../core/output.js';
@@ -57,8 +58,10 @@ export function configCommand(parsed: ParsedArgs): number {
     // `wallet.backend` and every later command quietly used the default.
     assertKnownConfigKey(key);
     // `env:NAME` stays a literal in the file and is resolved at read time, so
-    // secrets never land in config.json.
-    const value = raw.startsWith('env:') ? raw : coerce(raw);
+    // secrets never land in config.json. Everything else is coerced to its JSON
+    // type and then normalised, so a money amount is stored as a string rather
+    // than a number `parseUnits` cannot read.
+    const value = raw.startsWith('env:') ? raw : normalizeConfigValue(key, coerce(raw));
     const current = readRawConfig();
     writeRawConfig(setPath(current, key, value));
     if (isTty()) process.stdout.write(`${key} = ${JSON.stringify(value)}\n`);

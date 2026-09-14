@@ -9,8 +9,8 @@ export interface GateInput {
   allowPayTo?: string[];
   /** Hostname allowlist. Empty means allow-all. Entries may be `*.example.com`. */
   allowDomains?: string[];
-  /** Per-call cap, human decimal string. */
-  maxPerCall?: string | undefined;
+  /** Per-call cap, human decimal. A JSON number from config is accepted too. */
+  maxPerCall?: string | number | undefined;
   /** Remaining session budget in atomic units of the option asset. */
   remainingBudgetAtomic?: bigint | undefined;
   /** Remaining daily cap in atomic units. */
@@ -59,7 +59,7 @@ export function runGates(input: GateInput): void {
     if (option.amountAtomic > cap) {
       throw new X402Error(
         ExitCode.OVER_MAX,
-        `quoted ${option.amount} ${option.assetSymbol} exceeds max ${input.maxPerCall}`,
+        `quoted ${option.amount} ${option.assetSymbol} exceeds max ${String(input.maxPerCall)}`,
       );
     }
   }

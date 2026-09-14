@@ -21,7 +21,7 @@ Then pay for one:
 npx @roundhouseai/x402 https://blockrun.ai/api/v1/exa/answer --data.query "What is the LEI of Roundhouse AI Ltd.?"
 ```
 
-A real, live endpoint — $0.011 USDC on Base. With a wallet configured, that line does: POST with a JSON body → receives 402 → checks the price against your limits → signs an EIP-3009 authorization → retries with `X-PAYMENT` → prints the JSON body → writes a ledger entry.
+A real, live endpoint — $0.011 USDC on Base. With a wallet configured, that line does: POST with a JSON body → receives 402 → checks the price against your limits → signs an EIP-3009 authorization → retries with the payment header the quoted x402 version uses (`X-PAYMENT` for v1, `PAYMENT-SIGNATURE` for v2) → prints the JSON body → writes a ledger entry.
 
 > **One command, and why.** A global install puts **`rh-x402`** on your `PATH`, and nothing else. The unscoped `x402` package on npm is a different project that ships its own `x402` binary, so on a machine with both installed that short name would be a coin toss — this package no longer claims it. For the same reason the zero-install form is `npx @roundhouseai/x402`, never `npx x402`.
 
@@ -233,7 +233,7 @@ rh-x402 verify 01J8ZK…               # confirm settlement of one receipt
 
 ## What actually gets signed
 
-**This CLI never sends a transaction.** It signs one thing — an **EIP-3009 `TransferWithAuthorization`**, as EIP-712 typed data — and hands it to the provider in an `X-PAYMENT` header. The provider's facilitator submits it on-chain and pays the gas. That is why the payer needs USDC and no ETH, and why there is no nonce management, no gas estimation and no broadcast anywhere in this tool.
+**This CLI never sends a transaction.** It signs one thing — an **EIP-3009 `TransferWithAuthorization`**, as EIP-712 typed data — and hands it to the provider in a payment header. The provider's facilitator submits it on-chain and pays the gas. That is why the payer needs USDC and no ETH, and why there is no nonce management, no gas estimation and no broadcast anywhere in this tool.
 
 The payload is exactly this, and nothing else reaches your signer:
 
@@ -258,17 +258,19 @@ curl -sS -o 402.json https://api.example.com/v1/thing   # the provider's own 402
 rh-x402 pay @402.json
 ```
 
-`pay` wants the **provider's 402 body**, not `probe`'s output — `probe` prints this CLI's envelope, which normalises the options and drops fields `pay` needs. `@file`, a literal JSON argument and `-` for stdin all work.
+`pay` wants the **provider's own 402**, not `probe`'s output — `probe` prints this CLI's envelope, which normalises the options and drops fields `pay` needs. The 402 may be its JSON body, the base64 value of a `PAYMENT-REQUIRED` header, or a whole header line; `@file`, a literal argument and `-` for stdin all work.
 
 ```json
 { "ok": true,
-  "header": "eyJ4NDAyVmVyc2lvbiI6MSwic2NoZW1lIjoiZXhhY3Qi…",
-  "payload": { "scheme": "exact", "network": "base",
+  "headerName": "PAYMENT-SIGNATURE",
+  "header": "eyJ4NDAyVmVyc2lvbiI6Miwi…",
+  "payload": { "x402Version": 2,
+               "accepted": { "scheme": "exact", "network": "eip155:8453", … },
                "payload": { "signature": "0x67b9b0bf…1b", "authorization": { … } } },
   "receipt": { "id": "01M13M…", "backend": "ows-core", "from": "0x2D43…" } }
 ```
 
-Send `header` as `X-PAYMENT` on your own request and the provider can settle it. The payment is authorised at that point, not settled — settlement is the facilitator's on-chain submission, which `rh-x402 verify <receiptId>` confirms.
+Send `header` under the name in `headerName` on your own request and the provider can settle it. That name follows the quote's protocol version — `X-PAYMENT` for x402 v1, `PAYMENT-SIGNATURE` for v2 — and so does the payload shape. The payment is authorised at that point, not settled: settlement is the facilitator's on-chain submission, which `rh-x402 verify <receiptId>` confirms.
 
 ### Where the signature comes from
 
@@ -295,9 +297,14 @@ rh-x402 probe https://api.example.com/v1/lei
 
 ```bash
 rh-x402 call https://api.example.com/v1/lei --data.query "Roundhouse AI Ltd." --max 0.01
-# {"ok":true,"status":200,"paid":true,"amount":"0.002","asset":"usdc",
-#  "receiptId":"01J8ZK…","body":{"lei":"213800…"}}
+# {"ok":true,"status":200,"paid":true,"paymentState":"settled","amount":"0.002",
+#  "asset":"usdc","receiptId":"01J8ZK…","body":{"lei":"213800…"}}
 ```
+
+`paymentState` is the honest detail behind `paid`: `none` (nothing signed),
+`signed` (signed, then rejected by the provider — nothing settled), `submitted`
+(the provider accepted it; assume the money moved) or `settled` (a settlement
+receipt confirms it). Only `signed` and `none` mean the wallet is untouched.
 
 **Who sells this cheapest?** `discover` asks the Roundhouse index, and reports the whole market — not just a list — so an agent can tell a fair price from a gouging one before it spends.
 
@@ -313,23 +320,23 @@ rh-x402 call x402:web-search --data.query "..."   # resolve, then call the cheap
 
 ## Commands
 
-| Command                                         | Purpose                                                        |
-| ----------------------------------------------- | -------------------------------------------------------------- |
-| `rh-x402 call <url>`                            | Full request + pay + retry loop (the default command)          |
-| `rh-x402 probe <url>`                           | Fetch 402 payment requirements only. Never pays.               |
-| `rh-x402 pay <402-json>`                        | Build a signed `X-PAYMENT` header from a 402 payload. No HTTP. |
-| `rh-x402 verify <receipt>`                      | Confirm settlement of a prior payment                          |
-| `rh-x402 discover <capability>`                 | Providers for a capability, with the market around them        |
-| `rh-x402 history [query]`                       | Query the local ledger                                         |
-| `rh-x402 wallet create`                         | Guided setup: pick how the key is held, configure it           |
-| `rh-x402 wallet policy`                         | Register an OWS policy and mint the API key that carries it    |
-| `rh-x402 wallet balance [usdc]`                 | Native and token balances, read from the chain over RPC        |
-| `rh-x402 wallet <list\|address>`                | Wallet queries against the signer backend                      |
-| `rh-x402 wallet forget <name>`                  | Hide a wallet from this CLI. Never deletes it.                 |
-| `rh-x402 signer <list\|check>`                  | Inspect signer backends and their capabilities                 |
-| `rh-x402 signer keystore <list\|add\|generate>` | Manage the local development keystore                          |
-| `rh-x402 serve`                                 | Run the unified local endpoint (HTTP, plus MCP with `--mcp`)   |
-| `rh-x402 config <get\|set\|unset\|list>`        | Manage `~/.x402/config.json`                                   |
+| Command                                         | Purpose                                                            |
+| ----------------------------------------------- | ------------------------------------------------------------------ |
+| `rh-x402 call <url>`                            | Full request + pay + retry loop (the default command)              |
+| `rh-x402 probe <url>`                           | Fetch 402 payment requirements only. Never pays.                   |
+| `rh-x402 pay <402-json\|base64>`                | Sign a payment header (x402 v1 or v2) from a 402 payload. No HTTP. |
+| `rh-x402 verify <receipt>`                      | Confirm settlement of a prior payment                              |
+| `rh-x402 discover <capability>`                 | Providers for a capability, with the market around them            |
+| `rh-x402 history [query]`                       | Query the local ledger                                             |
+| `rh-x402 wallet create`                         | Guided setup: pick how the key is held, configure it               |
+| `rh-x402 wallet policy`                         | Register an OWS policy and mint the API key that carries it        |
+| `rh-x402 wallet balance [usdc]`                 | Native and token balances, read from the chain over RPC            |
+| `rh-x402 wallet <list\|address>`                | Wallet queries against the signer backend                          |
+| `rh-x402 wallet forget <name>`                  | Hide a wallet from this CLI. Never deletes it.                     |
+| `rh-x402 signer <list\|check>`                  | Inspect signer backends and their capabilities                     |
+| `rh-x402 signer keystore <list\|add\|generate>` | Manage the local development keystore                              |
+| `rh-x402 serve`                                 | Run the unified local endpoint (HTTP, plus MCP with `--mcp`)       |
+| `rh-x402 config <get\|set\|unset\|list>`        | Manage `~/.x402/config.json`                                       |
 
 `rh-x402 <url>` is sugar for `rh-x402 call <url>`.
 

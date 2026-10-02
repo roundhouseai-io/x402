@@ -1,7 +1,13 @@
 import { X402Error, ExitCode } from '../core/errors.js';
-import { discoverMarket, filterByAllowlist, capabilityOf } from '../core/discover.js';
+import {
+  discoverMarket,
+  filterByAllowlist,
+  capabilityOf,
+  applyCounterpartyPolicy,
+  DEFAULT_SPOT_FACTOR,
+} from '../core/discover.js';
 import { writeJson, isTty } from '../core/output.js';
-import { num, str, type ParsedArgs } from '../core/args.js';
+import { bool, num, str, type ParsedArgs } from '../core/args.js';
 import { buildContext } from './context.js';
 
 /** Query the Roundhouse index for providers of a capability, price-sorted. */
@@ -15,7 +21,22 @@ export async function discoverCommand(parsed: ParsedArgs): Promise<number> {
   const all = market.providers;
   const allowed = filterByAllowlist(all, ctx.config);
   const limit = num(parsed.flags, 'limit');
-  const providers = limit ? allowed.slice(0, limit) : allowed;
+
+  // `--policy` splits the allowed offers into those a default buyer would pay
+  // and those it would not, and says why for each. Nothing is dropped silently.
+  const factorText = str(parsed.flags, 'spot-factor');
+  const factor = factorText === undefined ? DEFAULT_SPOT_FACTOR : Number(factorText);
+  if (!Number.isFinite(factor) || factor <= 0) {
+    throw new X402Error(
+      ExitCode.GENERIC,
+      `--spot-factor must be a positive number, got ${factorText}`,
+    );
+  }
+  const policy = bool(parsed.flags, 'policy')
+    ? applyCounterpartyPolicy(allowed, market.stats, factor)
+    : undefined;
+  const passing = policy ? policy.accepted : allowed;
+  const providers = limit ? passing.slice(0, limit) : passing;
   const pinned = ctx.config.pins[capability];
 
   const { stats } = market;
@@ -43,6 +64,17 @@ export async function discoverCommand(parsed: ParsedArgs): Promise<number> {
     if (allowed.length !== all.length) {
       process.stdout.write(`${all.length - allowed.length} provider(s) hidden by allowlist\n`);
     }
+    if (policy) {
+      if (policy.priceRule === 'skipped') {
+        process.stdout.write('price rule skipped: the index reported no going rate\n');
+      }
+      if (policy.rejected.length > 0) {
+        process.stdout.write(`\nexcluded by --policy (${policy.rejected.length}):\n`);
+        for (const r of policy.rejected) {
+          process.stdout.write(`  ${r.provider.url}\n    ${r.reasons.join('; ')}\n`);
+        }
+      }
+    }
   } else {
     writeJson({
       ok: true,
@@ -58,6 +90,21 @@ export async function discoverCommand(parsed: ParsedArgs): Promise<number> {
       // and the cheapest here is not necessarily the cheapest that exists.
       truncated: market.truncated ?? false,
       indexSurface: market.from,
+      ...(policy
+        ? {
+            policy: {
+              applied: true,
+              rules: {
+                live: true,
+                minPayers30d: 1,
+                maxPriceVsSpot: policy.factor,
+              },
+              spot: policy.spot,
+              priceRule: policy.priceRule,
+              rejected: policy.rejected.map((r) => ({ ...r.provider, reasons: r.reasons })),
+            },
+          }
+        : {}),
       providers,
     });
   }

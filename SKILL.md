@@ -193,6 +193,8 @@ curl -s -H "Authorization: Bearer $X402_TOKEN" \
 
 `stats` is `null` when the capability is not a registered slug — the index then answers from a keyword search, which returns offers but no market-wide pricing. Figures are an indexed snapshot: always read the live 402 before paying.
 
+**The default rule: `--policy`.** `rh-x402 discover <capability> --policy` splits the offers into those a careful buyer would pay and those it would not, and says why for each. An offer passes only if it is live, has had at least one paying wallet in the last 30 days (`payers30d > 0`) and costs no more than 1.5 times `spot` (change the factor with `--spot-factor`). An offer whose liveness or payer count is unknown fails: no evidence that anyone has paid it is exactly what the rule is there to catch. The passing list is `providers`; the rest are under `policy.rejected`, each with its `reasons`. If the index reports no `spot`, the price rule is skipped and `policy.priceRule` says `skipped`. Use this unless a human told you which provider to use.
+
 A capability URI (`x402:web-search`) can be used anywhere a URL can. It resolves through configured pins first, then the index, picking the cheapest allowed provider the index reports as live. The provider actually used appears in the response envelope, so prefer capabilities over hard-coded vendor URLs.
 
 ## Where am I? — `status`
@@ -207,18 +209,31 @@ Read-only; never pays, signs or prompts. Run it first when you are resuming. `ne
 
 The CLI exits with these; the endpoint returns the same number as `errorCode` (and MCP as `errorCode` inside the tool result). Branch on the number, not the message.
 
-| Code | Meaning                                                       | What to do                                                                                                                                                                                           |
-| ---- | ------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0    | Success (paid or free)                                        | Use `body`                                                                                                                                                                                           |
-| 1    | Generic / network error                                       | Safe to retry; nothing was paid                                                                                                                                                                      |
-| 40   | Invalid 402 payload, or one this CLI will not price           | Do not retry; report the endpoint. Also covers a 402 naming a token contract this CLI does not know, one declaring decimals the token does not have, and one quoting a chain x402 does not settle on |
-| 42   | Denied by OWS policy                                          | Do not retry; a human must widen the wallet policy. The message names what was refused — usually a token contract or chain outside the policy                                                        |
-| 43   | Denied by payTo/domain allowlist                              | Do not retry; provider is not approved                                                                                                                                                               |
-| 44   | Price exceeds your `--max`                                    | Re-`probe`; raise `--max` only if a human authorised it                                                                                                                                              |
-| 45   | Session budget or daily cap exhausted                         | Stop spending; report it                                                                                                                                                                             |
-| 46   | Insufficient wallet balance                                   | Stop; the wallet needs funding                                                                                                                                                                       |
-| 47   | Signer backend unreachable **or unable to do what was asked** | Read the message. Unreachable/auth: retry once, then report the wallet layer as down. Incapable (`cannot report balances`, `needs the optional peer dependency ethers`): never retryable.            |
-| 50   | Payment sent, but no valid response                           | **Money may have moved.** Re-run the identical command (it reuses the cached authorization). Never add `--no-cache` here.                                                                            |
+| Code | Name                   | Meaning                                                                            | What to do next                                                                                                          |
+| ---- | ---------------------- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| 0    | `ok`                   | Success, paid or free                                                              | Use the body.                                                                                                            |
+| 1    | `error`                | Generic, network or usage error. Nothing was paid.                                 | Read the message. A network error is safe to retry.                                                                      |
+| 40   | `invalid_402`          | The endpoint answered a 402 this CLI cannot use, or rejected a valid authorization | Do not retry. Report the endpoint.                                                                                       |
+| 42   | `policy_denied`        | The wallet policy refused to sign                                                  | Stop. A human must widen the wallet policy.                                                                              |
+| 43   | `allowlist_denied`     | An allowlist excluded this domain or payee                                         | Stop. The provider is not approved.                                                                                      |
+| 44   | `over_max`             | The quoted price is above --max or limits.maxPerCall                               | Probe for the live price. Raise --max only if a human allowed it.                                                        |
+| 45   | `budget_exhausted`     | --budget for this process or limits.dailyCap is spent                              | Stop spending and report it.                                                                                             |
+| 46   | `insufficient_balance` | The wallet cannot cover the quoted price                                           | Stop. Fund the wallet, then run `wallet balance --wait`.                                                                 |
+| 47   | `ows_unavailable`      | The signer is unreachable, rejected its credential, or cannot sign typed data      | Read the message. If it names a missing package, install it. Otherwise retry once, then report the wallet layer as down. |
+| 48   | `wait_timeout`         | `wallet balance --wait` timed out before the balance arrived                       | Check the address and chain with the human, then wait again or report it.                                                |
+| 50   | `paid_no_response`     | The payment was sent and no valid response came back. Money may have moved.        | Re-run the identical command. Never add --no-cache.                                                                      |
+
+## Waiting for funds
+
+```bash
+rh-x402 wallet balance --wait --min 1.00 --timeout 30m
+```
+
+Polls the chain until the wallet holds at least `--min` USDC (default `1.00`) or `--timeout` passes (default `30m`; a bare number is seconds). Exit `0` when it is met, `48` when time ran out. A failed RPC read does not end the wait; the last error is reported only if the wait times out. A progress line goes to stderr at most once a minute. Without `--wait`, `--min` checks once and exits `46` if the balance is short.
+
+## The Roundhouse API key
+
+`rh-x402 config set auth.apiKey env:ROUNDHOUSE_API_KEY` stores a reference; the key itself stays in the environment. The CLI sends it as `Authorization: Bearer` to `roundhouseai.io` hosts over https, and nowhere else. It never replaces an `Authorization` header you pass yourself. `config get`, `config list` and `status` show `[redacted]` or `set`, never the value. To store a literal, pipe it in (`… auth.apiKey -`) rather than putting it on the command line.
 
 ## Do and do not
 

@@ -37,6 +37,9 @@ export const MIN_NODE = [20, 10, 0] as const;
 /** The wallet balance setup waits for, and `fund` is judged against. */
 export const DEFAULT_MIN_BALANCE = '1.00';
 
+/** How long the funding step waits for a balance before giving up. */
+export const DEFAULT_FUND_TIMEOUT = '30m';
+
 /** The API environment variable a Roundhouse key is read from by convention. */
 export const API_KEY_ENV = 'ROUNDHOUSE_API_KEY';
 

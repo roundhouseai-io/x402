@@ -122,6 +122,19 @@ Read from the chain over JSON-RPC, so it gives the same answer for every backend
 
 Nothing in the payment path calls an RPC, so a rate-limited endpoint costs you this command and nothing else.
 
+## Where am I?
+
+```bash
+rh-x402 status            # a table
+rh-x402 status --json     # one JSON object
+```
+
+Read-only: it never pays, never signs and never prompts. It reports the CLI and Node versions, the signer (how the key is held, its address, whether it can sign typed data, whether an OWS policy is in force), the USDC balance read from the chain, both spend caps, whether an API key is set (never the key), telemetry, today's spend, and `next`.
+
+`next` is one of `install`, `create-wallet`, `set-caps`, `fund`, `first-payment`, `store-key` or `ready`. It is the first step that is not done, and the names are the section headings of [roundhouseai.io/skill.md](https://roundhouseai.io/skill.md). The command exits `0` only when `next` is `ready`, so a script can gate on it. A config that will not parse, a signer that is down and an RPC that will not answer are reported as fields, not as a crash.
+
+`--min-balance <usdc>` sets the balance `fund` is judged against (default `1.00`). Once a payment is on the local ledger the wallet counts as funded whatever it holds now, so spending below the floor never sends a finished setup back to `fund`.
+
 ## Zero to paid: the whole thing
 
 Every command, in order, from an empty machine to a receipt. Nine steps, three of which are optional.
@@ -328,6 +341,7 @@ rh-x402 call x402:web-search --data.query "..."   # resolve, then call the cheap
 | `rh-x402 verify <receipt>`                      | Confirm settlement of a prior payment                              |
 | `rh-x402 discover <capability>`                 | Providers for a capability, with the market around them            |
 | `rh-x402 history [query]`                       | Query the local ledger                                             |
+| `rh-x402 status`                                | Where setup stands and which step is next. Never pays.             |
 | `rh-x402 wallet create`                         | Guided setup: pick how the key is held, configure it               |
 | `rh-x402 wallet policy`                         | Register an OWS policy and mint the API key that carries it        |
 | `rh-x402 wallet balance [usdc]`                 | Native and token balances, read from the chain over RPC            |

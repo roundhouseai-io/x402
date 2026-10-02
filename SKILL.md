@@ -195,6 +195,14 @@ curl -s -H "Authorization: Bearer $X402_TOKEN" \
 
 A capability URI (`x402:web-search`) can be used anywhere a URL can. It resolves through configured pins first, then the index, picking the cheapest allowed provider the index reports as live. The provider actually used appears in the response envelope, so prefer capabilities over hard-coded vendor URLs.
 
+## Where am I? — `status`
+
+```bash
+rh-x402 status --json
+```
+
+Read-only; never pays, signs or prompts. Run it first when you are resuming. `next` is the first step not yet done: `install`, `create-wallet`, `set-caps`, `fund`, `first-payment`, `store-key` or `ready`. Exit `0` means `ready`; anything else exits `1` with the report still on stdout. `auth.apiKey` is `set` or `unset`, never the key.
+
 ## Exit codes
 
 The CLI exits with these; the endpoint returns the same number as `errorCode` (and MCP as `errorCode` inside the tool result). Branch on the number, not the message.

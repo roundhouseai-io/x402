@@ -310,6 +310,7 @@ function finishOws(
   const configured: Record<string, ConfigValue> = {
     'wallet.backend': 'ows-core',
     'wallet.default': name,
+    'wallet.path': 'ows',
   };
   if (opts.vaultPath) configured['wallet.backends.ows-core.vaultPath'] = opts.vaultPath;
   // Written whenever the vault has a passphrase at all, not only when one is
@@ -416,6 +417,7 @@ async function setupKeystore(
   const configured: Record<string, string> = {
     'wallet.backend': 'local',
     'wallet.default': name,
+    'wallet.path': path,
   };
   if (opts.keystore) configured['wallet.backends.local.keystore'] = opts.keystore;
   if (fromEnv) configured['wallet.backends.local.passphrase'] = 'env:X402_KEYSTORE_PASS';

@@ -25,6 +25,7 @@ import { signerCommand } from './commands/signer.js';
 import { serveCommand } from './commands/serve.js';
 import { skillCommand } from './commands/skill.js';
 import { statusCommand } from './commands/status.js';
+import { setupCommand } from './commands/setup.js';
 
 const HELP = `rh-x402 ${VERSION} — one command for the whole x402 payment loop
 
@@ -60,6 +61,24 @@ usage
   rh-x402 help exit-codes [--markdown|--json]   every exit code and what to do next
   rh-x402 skill                          print SKILL.md, the agent-facing contract
   rh-x402 status [--json]                where setup stands and which step is next; never pays
+  rh-x402 setup [--yes] [--json] [--dry-run]
+                                         nothing to a stored API key; idempotent, resumable
+
+setup (every answer has a flag, so it runs with no terminal)
+  --path <ows|import|generate>        how the key is held; never defaulted, even with --yes
+  --max-per-call <usdc>               limits.maxPerCall (default with --yes: 0.05)
+  --daily-cap <usdc>                  limits.dailyCap (default with --yes: 5.00)
+  --telemetry <on|off>                send call outcomes to the index (default with --yes: off)
+  --org-key env:NAME                  use an organization key instead of paying for a test key
+  --min-balance <usdc>                balance to wait for (default 1.00)
+  --fund-timeout <duration>           how long to wait for it (default 30m)
+  --yes                               accept defaults for everything not given, and consent to
+                                      installing the OWS bindings and taking the policy
+  --dry-run                           run every check and prompt; no wallet, config write or payment
+  --print-key                         show the minted API key once (never printed otherwise)
+  --key-env NAME                      keep the minted key in the environment, not in config
+  --repay                             pay for a new test key when a payment settled and no key was kept
+  --json                              one JSON object per step
 
 wallet setup
   --path <ows|import|generate>        how the key is held; prompts when omitted
@@ -171,6 +190,8 @@ async function run(parsed: ParsedArgs): Promise<number> {
       return skillCommand(parsed);
     case 'status':
       return statusCommand(parsed);
+    case 'setup':
+      return setupCommand(parsed);
     case 'version':
       process.stdout.write(`${VERSION}\n`);
       return ExitCode.OK;

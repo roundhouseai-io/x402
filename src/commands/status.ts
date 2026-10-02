@@ -15,6 +15,7 @@ export function statusRows(s: Status): [string, string][] {
     ['signer.address', s.signer.address ?? 'null'],
     ['signer.typedData', String(s.signer.typedData)],
     ['signer.policy', s.signer.policy],
+    ['signer.policyKey', s.signer.policyKey],
     ['balance.usdc', s.balance.usdc ?? 'null'],
     ['balance.chain', s.balance.chain],
     ['limits.maxPerCall', s.limits.maxPerCall],

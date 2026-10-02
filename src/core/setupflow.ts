@@ -2,7 +2,7 @@ import { ExitCode, ExitCodeName, exitCodeOf, messageOf } from './errors.js';
 import { parseUnits, formatUnits } from './assets.js';
 import type { Json } from './config.js';
 import { getPath } from './config.js';
-import { API_KEY_ENV, type Status } from './status.js';
+import { API_KEY_ENV, MIN_NODE, nodeMeetsMinimum, type Status } from './status.js';
 import type { SetupOptions, SetupResult } from './setup.js';
 import type { WaitResult } from './fundwait.js';
 
@@ -96,6 +96,8 @@ export interface FlowDeps {
   /** A person is at the terminal and can be asked. */
   interactive: boolean;
   env: NodeJS.ProcessEnv;
+  /** `process.versions.node`, injectable so the too-old case is testable. */
+  nodeVersion: string;
   /** Read-only report, re-run after every step that changes the machine. */
   status(minBalance: string): Promise<Status>;
   readRawConfig(): Json;
@@ -231,6 +233,13 @@ export async function runSetupFlow(flags: SetupFlags, deps: FlowDeps): Promise<n
 }
 
 function environmentStep(deps: FlowDeps): void {
+  if (!nodeMeetsMinimum(deps.nodeVersion)) {
+    throw fail(
+      'environment',
+      ExitCode.GENERIC,
+      `Node ${deps.nodeVersion} is older than the ${MIN_NODE.join('.')} this CLI needs. Ask the operator to upgrade Node.`,
+    );
+  }
   const writable = deps.globalInstallWritable();
   const notes: string[] = [];
   if (writable === false) {
@@ -242,8 +251,8 @@ function environmentStep(deps: FlowDeps): void {
   deps.emit({
     step: 'environment',
     result: 'done',
-    message: `Node ${process.versions.node}${notes.length > 0 ? `. ${notes.join(' ')}` : ''}`,
-    node: process.versions.node,
+    message: `Node ${deps.nodeVersion}${notes.length > 0 ? `. ${notes.join(' ')}` : ''}`,
+    node: deps.nodeVersion,
     globalInstallWritable: writable ?? null,
   });
 }
@@ -833,6 +842,21 @@ async function storeKeyStep(
   // 2. An organization key the operator already holds, by reference.
   if (decisions.orgKey) {
     const name = decisions.orgKey.slice(4);
+    // Already stored, and resolving: a second run changes nothing and asks
+    // Roundhouse nothing.
+    if (
+      status.auth.apiKey === 'set' &&
+      getPath(deps.readRawConfig(), 'auth.apiKey') === decisions.orgKey
+    ) {
+      deps.emit({
+        step: 'store-key',
+        result: 'skipped',
+        message: `auth.apiKey already points at ${name}`,
+        source: 'env',
+        env: name,
+      });
+      return;
+    }
     if (!flags.dryRun) deps.writeConfig({ 'auth.apiKey': decisions.orgKey });
     const value = deps.env[name];
     if (!value) {

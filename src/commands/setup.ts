@@ -99,6 +99,7 @@ export function realDeps(json: boolean): FlowDeps {
   return {
     interactive: interactive(),
     env: process.env,
+    nodeVersion: process.versions.node,
     status: (minBalance) => collectStatus({ minBalance }),
     readRawConfig: () => readRawConfig(),
     writeConfig: (entries) => {

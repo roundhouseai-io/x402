@@ -49,6 +49,7 @@ class World {
   /** One-shot faults, consumed when they fire. */
   fault: { at: string; error?: Error; result?: Partial<TestCall> } | undefined;
   interactive = false;
+  nodeVersion = '22.1.0';
   answers: { select?: string; ask?: string[]; confirm?: boolean[] } = {};
   keyRecognised: 'recognised' | 'rejected' | 'unknown' = 'recognised';
 
@@ -101,6 +102,7 @@ class World {
         return world.interactive;
       },
       env: world.env,
+      nodeVersion: world.nodeVersion,
       status: (minBalance) =>
         collectStatus({
           minBalance,
@@ -608,6 +610,19 @@ describe('an existing organization key', () => {
     expect(world.result('store-key')?.verified).toBe('recognised');
   });
 
+  it('on a second run stores nothing and asks Roundhouse nothing', async () => {
+    const world = new World();
+    world.env.MY_ORG_KEY = 'rh_live_org';
+    await run(world, { orgKey: 'env:MY_ORG_KEY' });
+    const writes = world.writes;
+    world.keyRecognised = 'rejected';
+    world.reset();
+
+    expect(await run(world, { orgKey: 'env:MY_ORG_KEY' })).toBe(ExitCode.OK);
+    expect(world.writes).toBe(writes);
+    expect(world.result('store-key')?.result).toBe('skipped');
+  });
+
   it('refuses the key itself on the command line', async () => {
     const world = new World();
     expect(await run(world, { orgKey: 'rh_live_secret' })).toBe(ExitCode.GENERIC);
@@ -678,6 +693,16 @@ describe('--dry-run', () => {
 });
 
 describe('the environment step', () => {
+  it('stops on a Node that is too old, before touching anything', async () => {
+    const world = new World();
+    world.nodeVersion = '18.19.0';
+    expect(await run(world)).toBe(ExitCode.GENERIC);
+    expect(world.events.at(-1)).toMatchObject({ step: 'environment', result: 'failed' });
+    expect(String(world.events.at(-1)?.message)).toContain('older than the 20.10.0');
+    expect(world.writes).toBe(0);
+    expect(world.walletsCreated).toBe(0);
+  });
+
   it('notes an unwritable global npm directory and never suggests sudo', async () => {
     const world = new World();
     const deps = world.deps();

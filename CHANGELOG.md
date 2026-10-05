@@ -1,5 +1,11 @@
 # @roundhouseai/x402
 
+## 0.5.0
+
+### Minor Changes
+
+- f872697: Add `rh-x402 status`: a read-only report of where setup stands (CLI and Node version, signer, USDC balance, caps, API key set or unset, telemetry, today's spend) and `next`, the first step not yet done. `--json` prints one object, and the exit code is `0` only when `next` is `ready`. `wallet create` now records `wallet.path` so the custody choice is reported rather than inferred.
+
 ## 0.4.0
 
 ### Minor Changes

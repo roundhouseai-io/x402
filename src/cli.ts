@@ -1,6 +1,17 @@
 #!/usr/bin/env node
+import { realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { parseArgs, bool, type ParsedArgs } from './core/args.js';
-import { ExitCode, ExitCodeName, exitCodeOf, messageOf, X402Error } from './core/errors.js';
+import {
+  ExitCode,
+  ExitCodeName,
+  EXIT_CODE_TABLE,
+  exitCodeOf,
+  exitCodesMarkdown,
+  exitCodesText,
+  messageOf,
+  X402Error,
+} from './core/errors.js';
 import { writeErr, writeJson, isTty } from './core/output.js';
 import { VERSION } from './version.js';
 import { callCommand, probeCommand } from './commands/call.js';
@@ -31,9 +42,13 @@ usage
   rh-x402 wallet policy                  put an OWS policy in front of this wallet
   rh-x402 wallet forget <name>           hide a wallet here; never deletes it
   rh-x402 wallet balance [usdc]          native + token balances, read from the chain
+  rh-x402 wallet balance --wait --min <usdc> [--timeout 30m]
+                                         poll until funded; exits 48 on timeout
   rh-x402 wallet <list|address|forget>   wallet queries against the signer backend
   rh-x402 history [urlSubstring]         query the local ledger
-  rh-x402 discover <capability>          providers for a capability, cheapest first
+  rh-x402 discover <capability> [--policy]
+                                         providers for a capability, cheapest first;
+                                         --policy keeps live, paid-by-someone, near-spot offers
   rh-x402 serve [--mcp]                  run the unified local endpoint
   rh-x402 serve token <create|list|revoke>
   rh-x402 signer <list|check>            inspect signer backends and capabilities
@@ -41,6 +56,8 @@ usage
                                           exec protocol: docs/exec-signer.md)
   rh-x402 signer keystore <list|add|generate>  manage the local development keystore
   rh-x402 config <get|set|unset|list>    manage ~/.x402/config.json
+                                         (auth.apiKey: Roundhouse key, never echoed)
+  rh-x402 help exit-codes [--markdown|--json]   every exit code and what to do next
   rh-x402 skill                          print SKILL.md, the agent-facing contract
   rh-x402 status [--json]                where setup stands and which step is next; never pays
 
@@ -87,8 +104,8 @@ payment
       --telemetry-payload <level>     none | hash | full (default hash)
 
 exit codes
-  0 ok   1 error   40 invalid 402   42 signer policy   43 allowlist   44 over --max
-  45 budget/daily cap   46 balance   47 signer unavailable   50 paid, no valid response
+  ${EXIT_CODE_TABLE.map((r) => `${r.code} ${r.name}`).join(' · ')}
+  what to do after each: rh-x402 help exit-codes
 
 start here
   rh-x402 discover web-search            works with no config: the Roundhouse index
@@ -126,11 +143,6 @@ examples
 
   # the full agent contract, straight from the installed package
   rh-x402 skill
-
-exit codes
-  0 ok · 40 invalid 402 · 42 policy denied · 43 not allowlisted · 44 over --max
-  45 over budget · 46 insufficient balance · 47 signer unavailable · 50 paid, no response
-  Full table: rh-x402 skill, or docs/exit-codes.md
 `;
 
 async function run(parsed: ParsedArgs): Promise<number> {
@@ -164,6 +176,7 @@ async function run(parsed: ParsedArgs): Promise<number> {
       return ExitCode.OK;
     case 'help':
     case undefined:
+      if (parsed.positionals[0] === 'exit-codes') return helpExitCodes(parsed);
       process.stdout.write(HELP);
       return parsed.positionals.length === 0 && parsed.command === undefined
         ? ExitCode.GENERIC
@@ -171,6 +184,19 @@ async function run(parsed: ParsedArgs): Promise<number> {
     default:
       throw new X402Error(ExitCode.GENERIC, `unknown command: ${parsed.command}`);
   }
+}
+
+/**
+ * The exit-code table, from the one place it is written.
+ *
+ * Text for a terminal or a pipe, `--markdown` for the docs that copy it,
+ * `--json` for a caller that branches on it programmatically.
+ */
+function helpExitCodes(parsed: ParsedArgs): number {
+  if (bool(parsed.flags, 'json')) writeJson({ ok: true, codes: EXIT_CODE_TABLE });
+  else if (bool(parsed.flags, 'markdown')) process.stdout.write(`${exitCodesMarkdown()}\n`);
+  else process.stdout.write(`${exitCodesText()}\n`);
+  return ExitCode.OK;
 }
 
 export async function main(argv = process.argv.slice(2)): Promise<number> {
@@ -214,9 +240,25 @@ function reportError(err: unknown): number {
   return code;
 }
 
-const invokedDirectly =
-  process.argv[1] !== undefined &&
-  (import.meta.url.endsWith('/cli.js') || import.meta.url.endsWith('/cli.ts'));
+/**
+ * Whether this file is the program being run, as opposed to a module another
+ * file imported. The old test, "my own URL ends in cli.js", was true in both
+ * cases, so merely importing `main` (from a test, say) ran the CLI with no
+ * arguments, printed the help and set the process exit code to 1. Comparing the
+ * real paths survives the symlink an npm bin is, and falls back to the old
+ * check if either path cannot be resolved.
+ */
+function isEntryPoint(): boolean {
+  const entry = process.argv[1];
+  if (entry === undefined) return false;
+  try {
+    return realpathSync(entry) === realpathSync(fileURLToPath(import.meta.url));
+  } catch {
+    return import.meta.url.endsWith('/cli.js') || import.meta.url.endsWith('/cli.ts');
+  }
+}
+
+const invokedDirectly = isEntryPoint();
 
 if (invokedDirectly) {
   main().then(

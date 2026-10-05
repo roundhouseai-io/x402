@@ -43,6 +43,8 @@ npm i -g @roundhouseai/x402      # then: rh-x402 <url>
 npx @roundhouseai/x402 <url>     # or zero-install
 ```
 
+**`EACCES` on `npm i -g`?** The global npm directory is not yours. Do not use `sudo`: this tool handles a hot wallet. Run it without installing (`npx @roundhouseai/x402 <command>`), install into a project (`npm i @roundhouseai/x402`, then `npx rh-x402`), or give npm a prefix you own (`npm config set prefix ~/.npm-global`, then put `~/.npm-global/bin` on `PATH`). The guided wallet setup checks this before it runs `npm i -g` and says the same.
+
 Node 20.10+ is required. Then create a wallet — one command, and it asks the questions:
 
 ```bash
@@ -118,9 +120,26 @@ base (0x2D43136FfBbbe0ED5CBaaB2E8B2b8c968059114C)
 
 Read from the chain over JSON-RPC, so it gives the same answer for every backend — `ows-core` exports no balance function and the `local` keystore has nothing to ask, which used to make this a per-backend capability that mostly answered "cannot". Base, Ethereum and Base Sepolia ship with public endpoints; override one with `rh-x402 config set rpc.base <url>`.
 
+### Waiting for funds
+
+```bash
+rh-x402 wallet balance --wait --min 1.00 --timeout 30m
+```
+
+Polls the chain until the wallet holds `--min` USDC (default `1.00`) or `--timeout` passes (default `30m`; a bare number is seconds). Exit `0` when it is met, `48` when time ran out. A failed RPC read does not end the wait. A progress line goes to stderr at most once a minute. `--min` without `--wait` checks once and exits `46` if the balance is short. Both watch one chain.
+
 **That last line matters.** An x402 payment is an EIP-3009 authorization the facilitator submits, so the payer needs USDC and **no ETH at all**. A zero ETH balance does not stop an x402 call — it only stops a direct on-chain transfer, which is a different thing. `wallet balance` exits `46` when the token balance is zero, and never on the gas balance.
 
 Nothing in the payment path calls an RPC, so a rate-limited endpoint costs you this command and nothing else.
+
+## The Roundhouse API key
+
+```bash
+rh-x402 config set auth.apiKey env:ROUNDHOUSE_API_KEY    # a reference; the key stays in the environment
+printf %s "$KEY" | rh-x402 config set auth.apiKey -      # or a literal, from stdin
+```
+
+`auth.apiKey` is sent as `Authorization: Bearer` to `roundhouseai.io` hosts over https and to nothing else, and never replaces an `Authorization` header you pass with `-H`. `config get`, `config list` and `status` show `[redacted]` or `set`, never the value. A literal lands in `~/.x402/config.json`, which is `0600`; prefer the `env:` form where an operator can export it.
 
 ## Where am I?
 

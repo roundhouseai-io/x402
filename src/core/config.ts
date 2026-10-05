@@ -64,6 +64,13 @@ export interface X402Config {
     /** Wallet name or id within the active backend. */
     default?: string;
     /**
+     * How the key is held: `ows`, `import` or `generate`. Written by
+     * `wallet create` so `status` can report a custody decision rather than
+     * infer it; the backend alone cannot tell an imported keystore key from a
+     * generated one.
+     */
+    path?: 'ows' | 'import' | 'generate';
+    /**
      * Wallets to hide from this CLI. They are untouched in the backend.
      *
      * This exists so "remove this wallet from my tooling" never has to mean
@@ -339,6 +346,7 @@ export const CONFIG_KEYS: readonly string[] = [
   'wallet',
   'wallet.backend',
   'wallet.default',
+  'wallet.path',
   'wallet.hidden',
   'wallet.backends',
   'limits',

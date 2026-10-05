@@ -71,7 +71,23 @@ export const FLAGS: Record<string, { kind: FlagKind; alias?: string }> = {
   'no-policy': { kind: 'boolean' },
   install: { kind: 'boolean' },
   'install-global': { kind: 'boolean' },
+
+  // status / setup
+  'min-balance': { kind: 'string' },
 };
+
+/**
+ * Flags whose kind differs by command.
+ *
+ * `--json` takes a value on `call` (`--json '{"q":1}'`, `@file`, `-`), but on
+ * `status` and `setup` it is a switch meaning "print JSON". One name, two jobs:
+ * the flag table is flat, so without this `rh-x402 status --json` would either
+ * swallow the next argument or fail with "needs a value".
+ */
+const COMMAND_FLAG_KINDS = new Map<string, Map<string, { kind: FlagKind }>>([
+  ['status', new Map([['json', { kind: 'boolean' }]])],
+  ['setup', new Map([['json', { kind: 'boolean' }]])],
+]);
 
 const ALIASES: Record<string, string> = Object.fromEntries(
   Object.entries(FLAGS)
@@ -101,6 +117,7 @@ export const COMMANDS = [
   'signer',
   'config',
   'skill',
+  'status',
   'help',
   'version',
 ] as const;
@@ -110,6 +127,10 @@ export function parseArgs(argv: string[]): ParsedArgs {
   const dataFlags: DataFlag[] = [];
   const positionals: string[] = [];
   let sawTerminator = false;
+  // The command is argv[0] when it is one. Flags can only be read per command
+  // for the few that change meaning, so a command given after a flag keeps the
+  // global table.
+  const kinds = COMMAND_FLAG_KINDS.get(argv[0] ?? '');
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i]!;
@@ -148,7 +169,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
       if (!isLong) name = ALIASES[name] ?? name;
 
       let negated = false;
-      let spec = FLAGS[name];
+      let spec = kinds?.get(name) ?? FLAGS[name];
       if (!spec && name.startsWith('no-')) {
         const positive = name.slice(3);
         if (FLAGS[positive]?.kind === 'boolean') {

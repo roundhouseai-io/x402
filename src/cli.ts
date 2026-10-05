@@ -13,6 +13,7 @@ import { configCommand } from './commands/config.js';
 import { signerCommand } from './commands/signer.js';
 import { serveCommand } from './commands/serve.js';
 import { skillCommand } from './commands/skill.js';
+import { statusCommand } from './commands/status.js';
 
 const HELP = `rh-x402 ${VERSION} — one command for the whole x402 payment loop
 
@@ -41,6 +42,7 @@ usage
   rh-x402 signer keystore <list|add|generate>  manage the local development keystore
   rh-x402 config <get|set|unset|list>    manage ~/.x402/config.json
   rh-x402 skill                          print SKILL.md, the agent-facing contract
+  rh-x402 status [--json]                where setup stands and which step is next; never pays
 
 wallet setup
   --path <ows|import|generate>        how the key is held; prompts when omitted
@@ -155,6 +157,8 @@ async function run(parsed: ParsedArgs): Promise<number> {
       return configCommand(parsed);
     case 'skill':
       return skillCommand(parsed);
+    case 'status':
+      return statusCommand(parsed);
     case 'version':
       process.stdout.write(`${VERSION}\n`);
       return ExitCode.OK;

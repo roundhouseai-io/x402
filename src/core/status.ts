@@ -57,6 +57,12 @@ export interface Status {
     typedData: boolean;
     /** `n/a` where the backend has no policy layer to speak of. */
     policy: 'active' | 'none' | 'n/a';
+    /**
+     * Whether the OWS policy key a policy-only wallet signs with is available in
+     * this shell. `missing` means the wallet will refuse to sign: the key is shown
+     * once at creation and lives in the environment, not in config.
+     */
+    policyKey: 'set' | 'missing' | 'n/a';
     error?: string;
   };
   balance: { usdc: string | null; chain: string; error?: string };
@@ -67,7 +73,7 @@ export interface Status {
     source?: 'env' | 'config';
   };
   telemetry: { enabled: boolean };
-  spend: { today: string; calls: { today: number } };
+  spend: { today: string; calls: { today: number; total: number } };
   next: Step;
   /** Things that will bite later, none of which change `next`. */
   warnings: string[];
@@ -139,9 +145,18 @@ function pathOf(config: X402Config): SignerPath {
   return 'other';
 }
 
-/** Whether a settled call to the Roundhouse key endpoint is on the local ledger. */
+/**
+ * Whether a completed call to the Roundhouse key endpoint is on the local ledger.
+ *
+ * Completed means exit 0. A call that paid and got no valid response is exit 50
+ * and its cached authorization makes a re-run safe and productive: it either
+ * returns the key the first attempt missed or fails cleanly. Counting it as done
+ * would send the next run to `store-key` with no key to store.
+ */
 function paidTestCall(records: LedgerRecord[]): boolean {
-  return records.some((r) => r.payment.paid && /\/test\/x402\/?$/.test(r.url.split('?')[0] ?? ''));
+  return records.some(
+    (r) => r.payment.paid && r.exitCode === 0 && /\/test\/x402\/?$/.test(r.url.split('?')[0] ?? ''),
+  );
 }
 
 export interface StepFacts {
@@ -221,7 +236,10 @@ export async function collectStatus(opts: StatusOptions = {}): Promise<Status> {
   const everPaid = records.some((r) => r.payment.paid);
   const funded = balance.atomic !== null && balance.atomic >= minAtomic;
 
-  const signerReady = signer.address !== null && signer.typedData;
+  // A wallet that holds its key behind a policy and has no policy key in this
+  // shell cannot sign, however healthy its address looks.
+  const signerReady =
+    signer.address !== null && signer.typedData && signer.report.policyKey !== 'missing';
   const facts: StepFacts = {
     nodeOk,
     signerReady,
@@ -248,7 +266,10 @@ export async function collectStatus(opts: StatusOptions = {}): Promise<Status> {
       ...(apiKeySet ? { source: keyRef ? ('env' as const) : ('config' as const) } : {}),
     },
     telemetry: { enabled: effective.telemetry.sink.enabled === true },
-    spend: { today: today.amount, calls: { today: today.calls } },
+    spend: {
+      today: today.amount,
+      calls: { today: today.calls, total: records.filter((r) => r.payment.paid).length },
+    },
     next: nextStep(facts),
     warnings,
     config: { ok: configError === undefined, ...(configError ? { error: configError } : {}) },
@@ -283,6 +304,7 @@ async function readSigner(
         address: null,
         typedData: false,
         policy: 'n/a',
+        policyKey: 'n/a',
         error: 'no wallet is configured (wallet.default is unset)',
       },
       address: null,
@@ -303,6 +325,7 @@ async function readSigner(
         address: null,
         typedData: false,
         policy: policyOf(config, false),
+        policyKey: 'n/a',
         error: messageOf(err),
       },
       address: null,
@@ -323,6 +346,7 @@ async function readSigner(
         address: null,
         typedData: false,
         policy: policyOf(config, false),
+        policyKey: 'n/a',
         error: messageOf(err),
       },
       address: null,
@@ -340,7 +364,8 @@ async function readSigner(
 
   const owsBacked = backend === 'ows' || backend === 'ows-core';
   const core = config.wallet.backends['ows-core'];
-  if (owsBacked && core?.requireApiKey === true && !core.apiKey) {
+  const policyKeyMissing = owsBacked && core?.requireApiKey === true && !core.apiKey;
+  if (policyKeyMissing) {
     warnings.push(
       'this wallet signs only with an OWS policy key and OWS_X402_KEY is not set in this ' +
         'shell. Export it, or mint a new one with `rh-x402 wallet policy`.',
@@ -353,6 +378,7 @@ async function readSigner(
       address,
       typedData,
       policy: policyOf(config, policyActive),
+      policyKey: policyKeyMissing ? 'missing' : core?.apiKey ? 'set' : 'n/a',
       ...(error ? { error } : {}),
     },
     address,

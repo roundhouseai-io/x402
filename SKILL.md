@@ -205,6 +205,16 @@ rh-x402 status --json
 
 Read-only; never pays, signs or prompts. Run it first when you are resuming. `next` is the first step not yet done: `install`, `create-wallet`, `set-caps`, `fund`, `first-payment`, `store-key` or `ready`. Exit `0` means `ready`; anything else exits `1` with the report still on stdout. `auth.apiKey` is `set` or `unset`, never the key.
 
+## Setting up — `setup`
+
+```bash
+rh-x402 setup --path ows --max-per-call 0.05 --daily-cap 5 --telemetry off --yes --json
+```
+
+From nothing to a stored API key. Idempotent: run it again and it skips what is done. Resumable: kill it and the next run starts at the step that did not finish. Steps, in order, named as `status`'s `next`: `environment`, `state`, `decisions`, `create-wallet`, `set-caps`, `fund`, `first-payment`, `store-key`, `summary`. With `--json` each step is one JSON object with `step`, `result` (`done`, `skipped`, `planned`, `failed`) and `message`. A failure exits with the step's own exit code and names the step.
+
+The operator decides, not you: where the key is held (`--path`, never defaulted), both caps, telemetry, and whether an organization key exists (`--org-key env:NAME`). It stops at `fund` until someone sends USDC to the printed address on Base. It never prints the API key unless `--print-key`. The OWS policy key is shown once: export it as `OWS_X402_KEY` in every shell that pays. `--dry-run` makes no wallet, no config write and no payment.
+
 ## Exit codes
 
 The CLI exits with these; the endpoint returns the same number as `errorCode` (and MCP as `errorCode` inside the tool result). Branch on the number, not the message.

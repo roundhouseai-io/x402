@@ -74,6 +74,14 @@ export const FLAGS: Record<string, { kind: FlagKind; alias?: string }> = {
 
   // status / setup
   'min-balance': { kind: 'string' },
+  'daily-cap': { kind: 'string' },
+  telemetry: { kind: 'string' },
+  'org-key': { kind: 'string' },
+  'key-env': { kind: 'string' },
+  'fund-timeout': { kind: 'string' },
+  yes: { kind: 'boolean', alias: 'y' },
+  'print-key': { kind: 'boolean' },
+  repay: { kind: 'boolean' },
 
   // wallet balance --wait
   wait: { kind: 'boolean' },
@@ -131,6 +139,7 @@ export const COMMANDS = [
   'config',
   'skill',
   'status',
+  'setup',
   'help',
   'version',
 ] as const;

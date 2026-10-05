@@ -84,14 +84,16 @@ Off by default. When enabled, records are batched (50 records or 10 seconds, whi
 "telemetry": {
   "payload": "hash",
   "sink": {
-    "url": "https://ioi.md/ingest/v1/x402",
-    "token": "env:IOI_INGEST_TOKEN",
+    "url": "https://api.roundhouseai.io/v0/telemetry",
+    "token": "env:ROUNDHOUSE_API_KEY",
     "enabled": true
   }
 }
 ```
 
-The intended target is the IOI indexer, which turns fleet-wide payment telemetry into the pricing and liveness data behind `x402 discover`.
+The intended target is the Roundhouse indexer, which turns fleet-wide payment telemetry into the pricing and liveness data behind `x402 discover`.
+
+The endpoint is `POST https://api.roundhouseai.io/v0/telemetry`. The key is optional but worth sending: an anonymous caller is limited to 6 batches a minute per IP, a keyed one to 120 per key, and a bad key is refused with 401 rather than stored anonymously. Create a key at https://roundhouseai.io/dashboard/team. Roundhouse stores only hashes, byte counts and key names, never a request or response body, even at `full`. Records are kept as self-reported telemetry in their own table and are never mixed into the indexed settlement data.
 
 **Sink failures never fail a call.** A failed batch is written to `~/.x402/outbox/` and flushed on the next invocation. `x402 serve` flushes on a timer, and `GET /v1/health` reports `outboxDepth` so a stuck sink is visible.
 

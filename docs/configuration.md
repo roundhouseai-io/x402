@@ -28,14 +28,14 @@ Three layers, later wins:
     "redactKeys": [],
     "sink": {
       "enabled": false,
-      "url": "https://ioi.md/ingest/v1/x402",
-      "token": "env:IOI_INGEST_TOKEN",
+      "url": "https://api.roundhouseai.io/v0/telemetry",
+      "token": "env:ROUNDHOUSE_API_KEY",
       "batchSize": 50,
       "batchIntervalMs": 10000
     }
   },
   "defaults": { "chain": "base", "timeout": 30 },
-  "discover": { "indexUrl": "https://ioi.md/api/v1" },
+  "discover": { "indexUrl": "https://api.roundhouseai.io/v0" },
   "facilitator": { "url": null, "token": null },
   "pins": { "lei": "https://provider.example/v1/lei" },
   "serve": { "host": "127.0.0.1", "port": 8403 }
@@ -60,7 +60,7 @@ Three layers, later wins:
 | `telemetry.sink`                   | Remote ingest. Off by default; failures never fail a call.                                                                         |
 | `defaults.chain`                   | Preferred chain, and the first tiebreak on multi-option 402s                                                                       |
 | `defaults.timeout`                 | Total per-request timeout in seconds                                                                                               |
-| `discover.indexUrl`                | IOI index base URL                                                                                                                 |
+| `discover.indexUrl`                | Roundhouse index base URL                                                                                                          |
 | `facilitator.url`                  | Settlement confirmation source for `x402 verify`                                                                                   |
 | `pins`                             | Capability → fixed provider URL, when determinism beats price                                                                      |
 | `serve.host` / `serve.port`        | Defaults for `x402 serve`                                                                                                          |

@@ -63,7 +63,7 @@ x402 call https://api.example.com/v1/lei --data.query "Amplify Limited" --max 0.
 #  "receiptId":"01J8ZK…","body":{"lei":"213800…"}}
 ```
 
-**Who sells this cheapest?** `discover` asks the IOI index.
+**Who sells this cheapest?** `discover` asks the Roundhouse index.
 
 ```bash
 x402 discover lei
@@ -200,7 +200,7 @@ x402 history --sum
 x402 history --by payTo --sum
 ```
 
-An optional remote sink batches records to the IOI indexer; sink failures never fail a call, and records queue in `~/.x402/outbox/` for the next invocation. See [`docs/telemetry.md`](docs/telemetry.md).
+An optional remote sink batches records to the Roundhouse indexer; sink failures never fail a call, and records queue in `~/.x402/outbox/` for the next invocation. See [`docs/telemetry.md`](docs/telemetry.md).
 
 ## The unified endpoint
 

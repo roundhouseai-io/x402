@@ -61,7 +61,7 @@ export const TOOLS = [
   },
   {
     name: 'x402_discover',
-    description: 'List providers of a capability from the IOI index, cheapest first.',
+    description: 'List providers of a capability from the Roundhouse index, cheapest first.',
     inputSchema: {
       type: 'object',
       properties: { capability: { type: 'string' } },

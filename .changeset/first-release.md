@@ -13,3 +13,4 @@ First release. One command for the whole x402 payment loop.
 - `serve` exposes the same engine over HTTP with hashed caller tokens, per-token daily and per-call budgets, capability scoping and `Idempotency-Key` replay; `serve --mcp` exposes it as four MCP tools.
 - `x402 signer list|check` inspects backends and their capabilities; `x402 signer keystore add|list` manages the development keystore.
 - Stable exit codes (0, 1, 40, 42–47, 50) surfaced identically on the CLI, HTTP and MCP surfaces.
+- The remote telemetry sink and `discover` default to Roundhouse: the sink is `https://api.roundhouseai.io/v0/telemetry` (an API key is optional) and the index base is `https://api.roundhouseai.io/v0`. No `ioi.md` host is used anywhere.

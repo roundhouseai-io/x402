@@ -4,7 +4,7 @@ import { writeJson, isTty } from '../core/output.js';
 import { num, str, type ParsedArgs } from '../core/args.js';
 import { buildContext } from './context.js';
 
-/** Query the IOI index for providers of a capability, price-sorted. */
+/** Query the Roundhouse index for providers of a capability, price-sorted. */
 export async function discoverCommand(parsed: ParsedArgs): Promise<number> {
   const ctx = buildContext(parsed);
   const raw = parsed.positionals[0] ?? str(parsed.flags, 'capability');

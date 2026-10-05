@@ -23,7 +23,7 @@ src/
     authcache.ts         signed-authorization cache (the double-payment defence)
     config.ts            config layering, env: indirection, dotted get/set
     data.ts              dot-path flags, --json, stdin, coercion, query flattening
-    discover.ts          IOI index queries, capability (x402:<cap>) resolution
+    discover.ts          Roundhouse index queries, capability (x402:<cap>) resolution
     eip3009.ts           TransferWithAuthorization typed data, X-PAYMENT encoding
     engine.ts            the payment loop; shared by the CLI and `serve`
     errors.ts            ExitCode table + X402Error (the stability contract)

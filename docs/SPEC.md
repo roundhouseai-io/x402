@@ -18,7 +18,7 @@ Design goals, in priority order:
 1. **One command for the whole flow.** `npx x402 <url>` should work with zero config beyond a wallet.
 2. **Wallet-agnostic, no raw private keys.** Signing goes through a pluggable signer backend. OWS is the reference backend, not a dependency: any wallet that can produce an EIP-712 signature can plug in. Keys never appear in argv, env vars, or logs. This is a deliberate contrast with Coinbase's `awal`, which is x402-capable but ties the agent to Coinbase custody.
 3. **Agents are the primary user.** Machine-readable output, stable exit codes, idempotent retries, and predictable failure modes matter more than pretty output.
-4. **Every transaction is observable.** Local ledger always. Remote telemetry sink (IOI indexer) optional.
+4. **Every transaction is observable.** Local ledger always. Remote telemetry sink (Roundhouse indexer) optional.
 
 Non-goals for v1: non-Base chains, non-USDC assets, streaming responses, browser use.
 
@@ -51,7 +51,7 @@ With a default wallet configured (section 7), that one line does: GET with query
 | `x402 verify <receipt>`                | Confirm settlement of a prior payment                                                             |
 | `x402 wallet <list\|balance\|address>` | Passthrough to OWS                                                                                |
 | `x402 history [query]`                 | Query the local ledger                                                                            |
-| `x402 discover <capability>`           | Query the IOI index for providers by capability, price-sorted                                     |
+| `x402 discover <capability>`           | Query the Roundhouse index for providers by capability, price-sorted                              |
 | `x402 serve`                           | Run the unified endpoint: a local HTTP gateway and MCP server wrapping the full flow (section 10) |
 | `x402 config <get\|set\|list>`         | Manage `~/.x402/config.json`                                                                      |
 
@@ -232,14 +232,14 @@ Auth-like request headers (`Authorization`, `X-Api-Key`, `Cookie`, `X-PAYMENT`) 
 
 ### 6.3 Remote sink
 
-Off by default. When configured, ledger records are batched (max 50 records or 10s) and POSTed to the sink, itself authenticated via a static bearer token from config. Intended target: the IOI indexer ingest endpoint, which turns fleet-wide payment telemetry into pricing and liveness data for `x402 discover`.
+Off by default. When configured, ledger records are batched (max 50 records or 10s) and POSTed to the sink, itself authenticated via a static bearer token from config. Intended target: the Roundhouse ingest endpoint (`POST /v0/telemetry`), which turns fleet-wide payment telemetry into pricing and liveness data for `x402 discover`.
 
 ```json
 "telemetry": {
   "payload": "hash",
   "sink": {
-    "url": "https://ioi.md/ingest/v1/x402",
-    "token": "env:IOI_INGEST_TOKEN",
+    "url": "https://api.roundhouseai.io/v0/telemetry",
+    "token": "env:ROUNDHOUSE_API_KEY",
     "enabled": true
   }
 }
@@ -371,7 +371,7 @@ Response is the same JSON envelope as the CLI (section 8): `ok`, `status`, `paid
 { "url": "x402:lei", "data": { "query": "Amplify Limited" } }
 ```
 
-Resolution: query the IOI index for live providers of that capability, filter by allowlist, pick the cheapest, call it. The resolved provider and its price appear in the response envelope and the ledger record. `pin` in config maps a capability to a fixed provider when determinism matters more than price:
+Resolution: query the Roundhouse index for live providers of that capability, filter by allowlist, pick the cheapest, call it. The resolved provider and its price appear in the response envelope and the ledger record. `pin` in config maps a capability to a fixed provider when determinism matters more than price:
 
 ```json
 "pins": { "lei": "https://mcpfax-utility.bowling-anthony.workers.dev/v1/lei" }
@@ -407,7 +407,7 @@ Ship a `SKILL.md` with the package documenting exactly three flows: `probe` (wha
 ## 12. Open questions (blocking v1)
 
 1. **Does OWS expose EIP-712 typed-data signing?** The published core types show `signMessage` with `utf8`/`hex` encodings only. EIP-3009 requires typed-data signing. The signer abstraction (5.3) means this no longer blocks the CLI itself (the `local` backend can ship first), but OWS as the flagship backend needs it; raise upstream early.
-2. **402 payload variance.** How strictly do live providers follow the x402 spec? `probe` should be run against the current IOI index to size the compatibility shim needed in the 402 parser.
+2. **402 payload variance.** How strictly do live providers follow the x402 spec? `probe` should be run against the current Roundhouse index to size the compatibility shim needed in the 402 parser.
 3. **Receipt verification.** Facilitator settlement confirmation vs direct on-chain lookup for `verify`. Facilitator is simpler; on-chain is trustless. Proposal: facilitator in v1, on-chain in v1.1.
 4. **Multi-option 402s.** When a provider offers several payment options (chains/assets), selection order is: config `defaults.chain`, then cheapest. Confirm this is the right tiebreak.
 5. **Serve scope for v1.** Shipping CLI + serve + MCP together is three surfaces to stabilise at once. Proposal: v1 ships CLI and `serve` HTTP with token budgets; MCP mode and capability pinning land in v1.1 unless an agent fleet needs MCP on day one.

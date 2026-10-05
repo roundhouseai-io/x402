@@ -32,7 +32,7 @@ export function capabilityOf(target: string): string | undefined {
   return m ? m[1] : undefined;
 }
 
-/** Query the IOI index for providers of a capability, cheapest first. */
+/** Query the Roundhouse index for providers of a capability, cheapest first. */
 export async function discover(
   capability: string,
   config: X402Config,

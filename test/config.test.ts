@@ -74,9 +74,13 @@ describe('config precedence', () => {
   });
 
   it('writes config.json 0600 and round-trips dotted keys', () => {
-    writeRawConfig(setPath(readRawConfig(), 'telemetry.sink.url', 'https://ioi.md/ingest/v1/x402'));
+    writeRawConfig(
+      setPath(readRawConfig(), 'telemetry.sink.url', 'https://api.roundhouseai.io/v0/telemetry'),
+    );
     expect(statSync(paths.config()).mode & 0o777).toBe(0o600);
-    expect(getPath(readRawConfig(), 'telemetry.sink.url')).toBe('https://ioi.md/ingest/v1/x402');
+    expect(getPath(readRawConfig(), 'telemetry.sink.url')).toBe(
+      'https://api.roundhouseai.io/v0/telemetry',
+    );
   });
 });
 

@@ -20,7 +20,7 @@ One engine, three surfaces. The CLI, the HTTP endpoint and the MCP server are th
 
 `Engine.call()` is the whole product. In order:
 
-1. **Resolve the target.** `discover.ts` turns `x402:<capability>` into a URL: a config `pins` entry first (determinism), then the IOI index filtered by allowlist, cheapest first. A plain URL passes straight through.
+1. **Resolve the target.** `discover.ts` turns `x402:<capability>` into a URL: a config `pins` entry first (determinism), then the Roundhouse index filtered by allowlist, cheapest first. A plain URL passes straight through.
 2. **Prepare the request.** `data.ts` has already merged dot flags, `--json` and stdin; `prepareRequest` applies the placement rules — query params with bracket notation for GET/HEAD/DELETE, a JSON body for POST/PUT/PATCH — and infers the method.
 3. **Send it unpaid.** Any status other than 402 ends the call: the response is returned and a ledger record written with `amount: "0"`. Free endpoints cost one round trip and no wallet contact.
 4. **Parse the 402.** `x402.ts` normalises the payload into `PaymentOption`s, tolerating the naming drift live providers show (`maxAmountRequired`/`price`/`amount`, `payTo`/`recipient`, `network`/`chainId`), then selects one: configured chain first, then cheapest. A payload it cannot use is exit `40`, not a guess.

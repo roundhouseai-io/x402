@@ -1,11 +1,11 @@
 # The unified endpoint
 
-Not every agent can shell out to a CLI. Browser-based agents, hosted workflows and MCP-native clients need the same capability over plain HTTP or as a tool call. `x402 serve` runs the same engine as a long-lived local service: same wallet, same gates, same ledger, same exit-code taxonomy.
+Not every agent can shell out to a CLI. Browser-based agents, hosted workflows and MCP-native clients need the same capability over plain HTTP or as a tool call. `rh-x402 serve` runs the same engine as a long-lived local service: same wallet, same gates, same ledger, same exit-code taxonomy.
 
 ```bash
-x402 serve                     # HTTP on 127.0.0.1:8403
-x402 serve --port 9000         # elsewhere
-x402 serve --mcp               # MCP server over stdio instead
+rh-x402 serve                     # HTTP on 127.0.0.1:8403
+rh-x402 serve --port 9000         # elsewhere
+rh-x402 serve --mcp               # MCP server over stdio instead
 ```
 
 ## Security posture
@@ -20,11 +20,11 @@ x402 serve --mcp               # MCP server over stdio instead
 ## Caller tokens
 
 ```bash
-x402 serve token create agent-1 --budget-daily 1.00 --max-per-call 0.01
-x402 serve token create scout --capabilities lei,kyb --max-per-call 0.005
-x402 serve token create ops --admin
-x402 serve token list
-x402 serve token revoke agent-1
+rh-x402 serve token create agent-1 --budget-daily 1.00 --max-per-call 0.01
+rh-x402 serve token create scout --capabilities lei,kyb --max-per-call 0.005
+rh-x402 serve token create ops --admin
+rh-x402 serve token list
+rh-x402 serve token revoke agent-1
 ```
 
 | Option               | Effect                                                                                                                   |
@@ -47,11 +47,11 @@ The whole payment loop in one request.
 ```bash
 curl -s -X POST http://127.0.0.1:8403/v1/call \
   -H "Authorization: Bearer $X402_TOKEN" -H 'content-type: application/json' \
-  -H 'Idempotency-Key: lei-amplify-1' \
+  -H 'Idempotency-Key: lei-roundhouse-1' \
   -d '{
         "url": "x402:lei",
         "method": "GET",
-        "data": { "query": "Amplify Limited" },
+        "data": { "query": "Roundhouse AI Ltd." },
         "max": "0.01"
       }'
 ```
@@ -87,7 +87,7 @@ Send an `Idempotency-Key` and a replay within the authorization's validity windo
 ## MCP mode
 
 ```bash
-x402 serve --mcp
+rh-x402 serve --mcp
 ```
 
 Serves MCP over stdio (JSON-RPC 2.0), exposing four tools whose schemas mirror the HTTP bodies:
@@ -104,7 +104,7 @@ Example client configuration:
 ```json
 {
   "mcpServers": {
-    "x402": { "command": "x402", "args": ["serve", "--mcp"] }
+    "x402": { "command": "rh-x402", "args": ["serve", "--mcp"] }
   }
 }
 ```
@@ -120,7 +120,7 @@ There is no daemon mode: run it under whatever supervises your other processes (
 ```ini
 # /etc/systemd/system/x402.service
 [Service]
-ExecStart=/usr/bin/x402 serve
+ExecStart=/usr/bin/rh-x402 serve
 Environment=OWS_API_KEY=…
 Restart=on-failure
 User=x402

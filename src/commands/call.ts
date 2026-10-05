@@ -1,27 +1,75 @@
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { X402Error, ExitCode } from '../core/errors.js';
+import { decodeQuote, parsePaymentRequired } from '../core/x402.js';
 import { buildData } from '../core/data.js';
 import { emitCallResult, writeJson, isTty } from '../core/output.js';
 import { bool, str, list, parseHeaders, type ParsedArgs } from '../core/args.js';
 import { buildContext, callOptionsFrom } from './context.js';
 import { readStdin } from '../core/stdin.js';
 
+/** A target that is a saved 402 quote rather than a URL. */
+const isQuoteTarget = (target: string): boolean => target === '-' || target.startsWith('@');
+
+/**
+ * Resolve a `@file` or `-` target to the URL its 402 quote refers to.
+ *
+ * `pay` has always taken a saved quote; `call` took only a URL, so an agent
+ * holding a quote had to dig the resource URL out of it by hand. The quote is
+ * used for its URL only — the payment is made against a *fresh* 402 from that
+ * URL, which is what x402 v2 requires anyway ("request a fresh unsigned
+ * quote"): a stale price is never signed because an old file said so.
+ */
+function targetFromQuote(target: string, stdin: string | undefined): string {
+  const raw = target === '-' ? stdin : readFileSync(target.slice(1), 'utf8');
+  if (!raw || raw.trim() === '') {
+    throw new X402Error(
+      ExitCode.GENERIC,
+      target === '-' ? 'no 402 quote on stdin' : `empty 402 quote: ${target.slice(1)}`,
+    );
+  }
+
+  const requirements = parsePaymentRequired(decodeQuote(raw));
+  const url =
+    (typeof requirements.resource?.url === 'string' ? requirements.resource.url : undefined) ??
+    requirements.options.find((o) => o.resource !== undefined)?.resource;
+  if (!url || !/^https?:\/\//i.test(url)) {
+    throw new X402Error(
+      ExitCode.GENERIC,
+      'the 402 quote names no resource URL to call. Pass the URL directly, ' +
+        'or use `rh-x402 pay` to sign the quote into a payment header.',
+    );
+  }
+  return url;
+}
+
 export async function callCommand(parsed: ParsedArgs): Promise<number> {
   const target = parsed.positionals[0];
   if (!target)
-    throw new X402Error(ExitCode.GENERIC, 'usage: x402 call <url|x402:capability> [flags]');
+    throw new X402Error(
+      ExitCode.GENERIC,
+      'usage: rh-x402 call <url|x402:capability|@402.json|-> [flags]',
+    );
 
   const ctx = buildContext(parsed);
-  const stdin = await readStdin({ force: str(parsed.flags, 'json') === '-' });
+  const quoteTarget = isQuoteTarget(target);
+  if (quoteTarget && str(parsed.flags, 'json') === '-') {
+    throw new X402Error(
+      ExitCode.GENERIC,
+      'stdin cannot carry both the 402 quote and --json -; pass the quote as @file',
+    );
+  }
+  const stdin = await readStdin({ force: quoteTarget || str(parsed.flags, 'json') === '-' });
+  const url = quoteTarget ? targetFromQuote(target, stdin) : target;
   const { data } = buildData({
     dataFlags: parsed.dataFlags,
     json: str(parsed.flags, 'json'),
-    stdin,
+    // stdin held the quote, not request data.
+    ...(quoteTarget ? {} : { stdin }),
     strings: bool(parsed.flags, 'data-strings'),
   });
 
   const result = await ctx.engine.call({
-    target,
+    target: url,
     data,
     headers: parseHeaders(list(parsed.flags, 'header')),
     payloadLevel: ctx.payloadLevel,
@@ -46,19 +94,22 @@ export async function callCommand(parsed: ParsedArgs): Promise<number> {
 
 export async function probeCommand(parsed: ParsedArgs): Promise<number> {
   const target = parsed.positionals[0];
-  if (!target) throw new X402Error(ExitCode.GENERIC, 'usage: x402 probe <url|x402:capability>');
+  if (!target)
+    throw new X402Error(ExitCode.GENERIC, 'usage: rh-x402 probe <url|x402:capability|@402.json|->');
 
   const ctx = buildContext(parsed);
-  const stdin = await readStdin({ force: str(parsed.flags, 'json') === '-' });
+  const quoteTarget = isQuoteTarget(target);
+  const stdin = await readStdin({ force: quoteTarget || str(parsed.flags, 'json') === '-' });
+  const url = quoteTarget ? targetFromQuote(target, stdin) : target;
   const { data } = buildData({
     dataFlags: parsed.dataFlags,
     json: str(parsed.flags, 'json'),
-    stdin,
+    ...(quoteTarget ? {} : { stdin }),
     strings: bool(parsed.flags, 'data-strings'),
   });
 
   const probe = await ctx.engine.probe({
-    target,
+    target: url,
     data,
     headers: parseHeaders(list(parsed.flags, 'header')),
     ...callOptionsFrom(parsed),

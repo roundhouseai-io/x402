@@ -62,7 +62,7 @@ export async function serveCommand(parsed: ParsedArgs): Promise<number> {
   if (tokens.length === 0) {
     process.stderr.write(
       `x402: no caller tokens exist yet; every request will be rejected. ` +
-        `Mint one: x402 serve token create <name> --budget-daily 1.00 --max-per-call 0.01\n`,
+        `Mint one: rh-x402 serve token create <name> --budget-daily 1.00 --max-per-call 0.01\n`,
     );
   }
 
@@ -93,7 +93,7 @@ function tokenSubcommand(parsed: ParsedArgs): number {
     if (!name) {
       throw new X402Error(
         ExitCode.GENERIC,
-        'usage: x402 serve token create <name> [--budget-daily 1.00] [--max-per-call 0.01] [--capabilities a,b] [--admin]',
+        'usage: rh-x402 serve token create <name> [--budget-daily 1.00] [--max-per-call 0.01] [--capabilities a,b] [--admin]',
       );
     }
     const capabilities = str(parsed.flags, 'capabilities')
@@ -149,12 +149,12 @@ function tokenSubcommand(parsed: ParsedArgs): number {
 
   if (action === 'revoke') {
     const name = parsed.positionals[2];
-    if (!name) throw new X402Error(ExitCode.GENERIC, 'usage: x402 serve token revoke <name>');
+    if (!name) throw new X402Error(ExitCode.GENERIC, 'usage: rh-x402 serve token revoke <name>');
     const revoked = revokeToken(name);
     if (!isTty()) writeJson({ ok: revoked, name });
     else process.stdout.write(revoked ? `revoked ${name}\n` : `no live token named ${name}\n`);
     return revoked ? ExitCode.OK : ExitCode.GENERIC;
   }
 
-  throw new X402Error(ExitCode.GENERIC, 'usage: x402 serve token <create|list|revoke>');
+  throw new X402Error(ExitCode.GENERIC, 'usage: rh-x402 serve token <create|list|revoke>');
 }

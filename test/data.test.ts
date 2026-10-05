@@ -22,7 +22,7 @@ describe('coerce', () => {
     expect(coerce('false')).toBe(false);
     expect(coerce('null')).toBeNull();
     expect(coerce('0.05')).toBe(0.05);
-    expect(coerce('Amplify Limited')).toBe('Amplify Limited');
+    expect(coerce('Roundhouse AI Ltd.')).toBe('Roundhouse AI Ltd.');
   });
 
   it('keeps strings when asked', () => {
@@ -41,8 +41,8 @@ describe('buildData', () => {
   it('builds the spec example', () => {
     const { data } = buildData({
       dataFlags: [
-        { path: 'company.name', value: 'Amplify Limited' },
-        { path: 'company.jurisdiction', value: 'GB' },
+        { path: 'company.name', value: 'Roundhouse AI Ltd.' },
+        { path: 'company.jurisdiction', value: 'SG' },
         { path: 'checks[0]', value: 'sanctions' },
         { path: 'checks[1]', value: 'pep' },
         { path: 'limit', value: '10' },
@@ -50,7 +50,7 @@ describe('buildData', () => {
       ],
     });
     expect(data).toEqual({
-      company: { name: 'Amplify Limited', jurisdiction: 'GB' },
+      company: { name: 'Roundhouse AI Ltd.', jurisdiction: 'SG' },
       checks: ['sanctions', 'pep'],
       limit: 10,
       deep: true,
@@ -80,12 +80,12 @@ describe('toQueryParams', () => {
   it('uses bracket notation for nesting', () => {
     expect(
       toQueryParams({
-        company: { name: 'Amplify Limited' },
+        company: { name: 'Roundhouse AI Ltd.' },
         checks: ['sanctions', 'pep'],
         limit: 10,
       }),
     ).toEqual([
-      ['company[name]', 'Amplify Limited'],
+      ['company[name]', 'Roundhouse AI Ltd.'],
       ['checks[0]', 'sanctions'],
       ['checks[1]', 'pep'],
       ['limit', '10'],

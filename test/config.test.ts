@@ -11,6 +11,7 @@ import {
   writeRawConfig,
   setPath,
   getPath,
+  normalizeConfigValue,
 } from '../src/core/config.js';
 import { authKey, readAuth, writeAuth, pruneAuthCache } from '../src/core/authcache.js';
 import { mapOwsError } from '../src/core/ows.js';
@@ -84,10 +85,29 @@ describe('config precedence', () => {
   });
 });
 
+describe('money amounts in config', () => {
+  it('reads a limit an older build wrote as a JSON number', () => {
+    writeFileSync(
+      join(home, 'config.json'),
+      JSON.stringify({ limits: { maxPerCall: 0.05, dailyCap: '5.00' } }),
+    );
+    const { config } = loadConfig({ cwd });
+    expect(config.limits.maxPerCall).toBe('0.05');
+    expect(config.limits.dailyCap).toBe('5.00');
+  });
+
+  it('stores a newly set limit as a string', () => {
+    expect(normalizeConfigValue('limits.maxPerCall', 0.05)).toBe('0.05');
+    expect(normalizeConfigValue('limits.dailyCap', 5)).toBe('5');
+    // Non-amount keys keep the type they were given.
+    expect(normalizeConfigValue('serve.port', 8403)).toBe(8403);
+  });
+});
+
 describe('authorization cache', () => {
   const key = () =>
     authKey({
-      url: 'https://api.example.com/v1/lei?query=Amplify',
+      url: 'https://api.example.com/v1/lei?query=Roundhouse',
       method: 'GET',
       body: '',
       payTo: '0x1831f336585a6C67B6A954d28f3E07F44C4EEBbd',
@@ -96,12 +116,13 @@ describe('authorization cache', () => {
       chain: 'eip155:8453',
       wallet: 'my-agent',
       backend: 'ows',
+      x402Version: 1,
     });
 
   it('is stable for the same request identity and case-insensitive on addresses', () => {
     expect(key()).toBe(key());
     const upper = authKey({
-      url: 'https://api.example.com/v1/lei?query=Amplify',
+      url: 'https://api.example.com/v1/lei?query=Roundhouse',
       method: 'get',
       body: '',
       payTo: '0x1831F336585A6C67B6A954D28F3E07F44C4EEBBD',
@@ -110,13 +131,32 @@ describe('authorization cache', () => {
       chain: 'eip155:8453',
       wallet: 'my-agent',
       backend: 'ows',
+      x402Version: 1,
     });
     expect(upper).toBe(key());
   });
 
+  it('changes when the protocol version changes', () => {
+    // A v1 payload travels in a different header and has a different shape, so
+    // reusing it against a v2 provider would guarantee a rejection.
+    const v2 = authKey({
+      url: 'https://api.example.com/v1/lei?query=Roundhouse',
+      method: 'GET',
+      body: '',
+      payTo: '0x1831f336585a6C67B6A954d28f3E07F44C4EEBbd',
+      amountAtomic: 2000n,
+      asset: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+      chain: 'eip155:8453',
+      wallet: 'my-agent',
+      backend: 'ows',
+      x402Version: 2,
+    });
+    expect(v2).not.toBe(key());
+  });
+
   it('changes when the amount changes', () => {
     const other = authKey({
-      url: 'https://api.example.com/v1/lei?query=Amplify',
+      url: 'https://api.example.com/v1/lei?query=Roundhouse',
       method: 'GET',
       body: '',
       payTo: '0x1831f336585a6C67B6A954d28f3E07F44C4EEBbd',
@@ -125,6 +165,7 @@ describe('authorization cache', () => {
       chain: 'eip155:8453',
       wallet: 'my-agent',
       backend: 'ows',
+      x402Version: 1,
     });
     expect(other).not.toBe(key());
   });
@@ -146,6 +187,8 @@ describe('authorization cache', () => {
       validBefore: Math.floor(Date.now() / 1000) + 60,
       signature: '0xabc',
       typedData: {} as TypedData,
+      x402Version: 1,
+      headerName: 'x-payment',
       header: 'base64',
       createdAt: new Date().toISOString(),
     };
@@ -229,6 +272,20 @@ describe('gates', () => {
       runGates({ option, url: 'https://api.example.com', remainingBudgetAtomic: 100n });
     } catch (err) {
       expect((err as X402Error).code).toBe(ExitCode.BUDGET_EXHAUSTED);
+    }
+  });
+
+  it('accepts a per-call cap written to config as a JSON number', () => {
+    // `config set limits.maxPerCall 0.05` stores a number; reading it back used
+    // to throw `value.trim is not a function` and fail the call with exit 1.
+    expect(() =>
+      runGates({ option, url: 'https://api.example.com', maxPerCall: 0.05 }),
+    ).not.toThrow();
+    try {
+      runGates({ option, url: 'https://api.example.com', maxPerCall: 0.001 });
+      expect.unreachable('0.002 over a 0.001 cap must be refused');
+    } catch (err) {
+      expect((err as X402Error).code).toBe(ExitCode.OVER_MAX);
     }
   });
 

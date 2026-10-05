@@ -22,11 +22,11 @@ describe('parseArgs', () => {
     const parsed = parseArgs([
       'https://x.test',
       '--data.company.name',
-      'Amplify Limited',
+      'Roundhouse AI Ltd.',
       '--data.checks[0]=sanctions',
     ]);
     expect(parsed.dataFlags).toEqual([
-      { path: 'company.name', value: 'Amplify Limited' },
+      { path: 'company.name', value: 'Roundhouse AI Ltd.' },
       { path: 'checks[0]', value: 'sanctions' },
     ]);
   });

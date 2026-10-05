@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
 import { X402Error, ExitCode, ExitCodeName, exitCodeOf, messageOf } from '../core/errors.js';
 import { toEnvelope, type Envelope } from '../core/output.js';
-import { capabilityOf, discover, filterByAllowlist } from '../core/discover.js';
+import { capabilityOf, discoverMarket, filterByAllowlist } from '../core/discover.js';
 import {
   readRecords,
   queryRecords,
@@ -58,7 +58,8 @@ export function createServeServer(deps: ServeDeps): Server {
       if (!token) {
         sendJson(res, 401, {
           ok: false,
-          error: 'missing or invalid caller token; mint one with `x402 serve token create <name>`',
+          error:
+            'missing or invalid caller token; mint one with `rh-x402 serve token create <name>`',
           errorCode: ExitCode.OWS_UNREACHABLE,
           errorName: ExitCodeName[ExitCode.OWS_UNREACHABLE],
         });
@@ -205,13 +206,20 @@ export function createServeServer(deps: ServeDeps): Server {
     const capability = url.searchParams.get('capability');
     if (!capability)
       throw new X402Error(ExitCode.GENERIC, 'capability query parameter is required');
-    const all = await discover(capability, deps.config);
-    const providers = filterByAllowlist(all, deps.config);
+    const market = await discoverMarket(capability, deps.config);
+    const providers = filterByAllowlist(market.providers, deps.config);
     sendJson(res, 200, {
       ok: true,
       capability,
+      name: market.name ?? null,
+      unit: market.unit ?? null,
       pinned: deps.config.pins[capability] ?? null,
       count: providers.length,
+      stats: market.stats ?? null,
+      // The index capped the offer list: the cheapest here is not
+      // necessarily the cheapest that exists, and `stats` describes more.
+      truncated: market.truncated ?? false,
+      indexSurface: market.from,
       providers,
     });
   }

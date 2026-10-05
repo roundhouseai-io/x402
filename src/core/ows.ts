@@ -72,6 +72,35 @@ export function mapOwsError(status: number, body: unknown, endpoint: string): X4
   return new X402Error(ExitCode.OWS_UNREACHABLE, `OWS error at ${endpoint}: ${text}`);
 }
 
+/**
+ * The hint that saves an hour.
+ *
+ * This backend speaks HTTP to an OWS service. `@open-wallet-standard/core`
+ * ships **no** daemon, so on a machine where only that package is installed
+ * nothing is listening and nothing ever will be — and the honest next step is
+ * not "start the daemon" but "use the backend that needs none". Without this,
+ * a connection refused on loopback reads as a service that failed to start,
+ * and the reasonable response is to go looking for it.
+ */
+export function noDaemonHint(endpoint: string): string {
+  let loopback = false;
+  try {
+    const host = new URL(endpoint).hostname;
+    loopback = host === '127.0.0.1' || host === 'localhost' || host === '::1';
+  } catch {
+    // An unparseable endpoint is its own problem; say nothing extra about it.
+    return '';
+  }
+  if (!loopback) return '';
+  return (
+    '. Nothing is listening there. `@open-wallet-standard/core` ships no daemon, ' +
+    'so if that is what you installed, there is none to start: switch to the ' +
+    'in-process backend with `rh-x402 config set wallet.backend ows-core` ' +
+    '(or `rh-x402 wallet create --path ows`), which talks to the same vault ' +
+    'without a service. This backend is for a separate OWS HTTP service.'
+  );
+}
+
 export class OwsClient {
   readonly endpoint: string;
   private readonly apiKey: string | undefined;
@@ -102,9 +131,11 @@ export class OwsClient {
         timeoutMs: this.timeoutMs,
       });
     } catch (err) {
+      // SAFETY: `.message` off a non-Error is `undefined`, not a throw.
       throw new X402Error(
         ExitCode.OWS_UNREACHABLE,
-        `OWS unreachable at ${this.endpoint}: ${(err as Error).message}`,
+        `OWS unreachable at ${this.endpoint}: ${(err as Error).message}` +
+          noDaemonHint(this.endpoint),
       );
     }
     const parsed = parseJsonBody(res.body);

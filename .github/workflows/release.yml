@@ -1,5 +1,8 @@
 name: Release
 
+# Single step: merging to main publishes. Changesets still decides the version
+# and writes the changelog, but there is no intermediate "Version Packages" PR —
+# the bump is committed straight back to main and published in the same run.
 on:
   push:
     branches: [main]
@@ -14,12 +17,16 @@ permissions:
 
 jobs:
   release:
-    name: version or publish
+    name: version and publish
     runs-on: ubuntu-latest
+    # The release commit this job pushes lands on main and retriggers the
+    # workflow. That run consumes no changesets and exits at the guard below,
+    # so it stops after one hop rather than looping.
+    if: "!startsWith(github.event.head_commit.message, 'chore: release v')"
     permissions:
-      contents: write # create tags and GitHub Releases
-      pull-requests: write # open the Version Packages PR
-      id-token: write # npm provenance
+      contents: write # push the version commit and tag, create the Release
+      # No id-token: npm provenance is off, because it requires a public source
+      # repository and this one is private. See docs/releasing.md.
     steps:
       - uses: actions/checkout@v4
         with:
@@ -33,60 +40,145 @@ jobs:
 
       - run: npm ci
 
-      # Never publish something that does not build or pass its tests.
+      # Nothing to release is the common case: most merges carry no changeset.
+      # Decide that first, so a docs-only merge does no work and pushes nothing.
+      - name: Are there changesets to release?
+        id: pending
+        run: |
+          set -euo pipefail
+          COUNT=$(find .changeset -name '*.md' ! -name 'README.md' -type f | wc -l | tr -d ' ')
+          echo "count=$COUNT" >> "$GITHUB_OUTPUT"
+          echo "$COUNT changeset(s) pending" >> "$GITHUB_STEP_SUMMARY"
+
+      # Never publish something that does not build or pass its tests. These
+      # are ungated: the publish step below is too, so any run of this job can
+      # reach npm and every one of them has to have earned it.
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
 
-      - name: Create a Version Packages PR, or publish
-        id: changesets
-        uses: changesets/action@v1
-        with:
-          version: npx changeset version
-          publish: npx changeset publish
-          title: 'chore: version packages'
-          commit: 'chore: version packages'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-          NPM_CONFIG_PROVENANCE: 'true'
-
-      # changesets/action creates the GitHub Release for the published tag.
-      # Pre-1.0 and pre-release versions are then flagged as pre-releases, so the
-      # "Latest" badge never points at something that has not promised stability.
-      - name: Flag pre-1.0 releases as pre-release
-        if: steps.changesets.outputs.published == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          PUBLISHED: ${{ steps.changesets.outputs.publishedPackages }}
+      - name: Apply the version bump
+        if: steps.pending.outputs.count != '0'
         run: |
           set -euo pipefail
-          VERSION=$(node -e "process.stdout.write(JSON.parse(process.env.PUBLISHED)[0].version)")
-          TAG="v$VERSION"
+          # The changelog generator is the built-in one, which reads only the
+          # changesets and local git history. It contacts no API, so this step
+          # needs no token and no scope — see docs/releasing.md.
+          npx changeset version
+
+      # Read after the bump, and unconditionally: a recovery run has no
+      # changesets left to consume but still needs to know what to publish.
+      - name: Read the version
+        id: version
+        run: |
+          set -euo pipefail
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+
+      # Commit and push before publishing. If the publish then fails, main
+      # carries a version commit with no npm release, which a re-run fixes.
+      # The reverse — published to npm, unrecorded in git — is not recoverable.
+      - name: Commit the bump to main
+        if: steps.pending.outputs.count != '0'
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'chore: release v${{ steps.version.outputs.version }}'
+          git push origin HEAD:main
+
+      # v0.1.0 shipped with its tag pointing at a pre-release commit, because a
+      # tag of that name already existed: `changeset publish` created nothing
+      # and `git push --tags` had nothing to push, silently. Fail loudly here
+      # instead of publishing a version whose tag describes different code.
+      - name: Refuse a tag that already points somewhere else
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          EXISTING=$(git rev-parse -q --verify "refs/tags/$TAG^{commit}" 2>/dev/null || true)
+          if [ -n "$EXISTING" ] && [ "$EXISTING" != "$(git rev-parse HEAD)" ]; then
+            echo "::error::$TAG already exists at $EXISTING but this run is publishing $(git rev-parse HEAD)."
+            echo "::error::Move or delete the tag before releasing; a stale tag makes the release describe different code."
+            exit 1
+          fi
+
+      # Deliberately ungated. `changeset publish` asks npm what exists and
+      # publishes only what is missing, so this is safe to re-run and is the
+      # recovery path when the version landed on main but the publish failed.
+      - name: Publish to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npx changeset publish
+
+      # `changeset publish` tags locally; push what it made.
+      - name: Push the tag
+        run: git push origin --tags
+
+      # Pre-1.0 and pre-release versions are flagged as pre-releases, so the
+      # "Latest" badge never points at something that has not promised stability.
+      - name: Create the GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
           case "$VERSION" in
-            0.*|*-*)
-              echo "marking $TAG as a pre-release"
-              gh release edit "$TAG" --prerelease --latest=false
-              ;;
-            *)
-              echo "$TAG is a stable release"
-              ;;
+            0.*|*-*) FLAGS=(--prerelease --latest=false) ;;
+            *)       FLAGS=(--latest) ;;
           esac
+          # Prefer the changelog Changesets just wrote — it is the curated text.
+          # Fall back to generated notes only if the section cannot be found.
+          if node -e '
+            const fs = require("fs");
+            const v = process.env.VERSION;
+            const lines = fs.readFileSync("CHANGELOG.md", "utf8").split("\n");
+            const start = lines.findIndex((l) => l.trim() === "## " + v);
+            if (start === -1) process.exit(1);
+            let end = lines.length;
+            for (let i = start + 1; i < lines.length; i++) {
+              if (lines[i].startsWith("## ")) { end = i; break; }
+            }
+            const body = lines.slice(start + 1, end).join("\n").trim();
+            if (!body) process.exit(1);
+            fs.writeFileSync("RELEASE_NOTES.md", body + "\n");
+          '; then
+            FLAGS+=(--notes-file RELEASE_NOTES.md)
+          else
+            echo "no CHANGELOG section for $VERSION; using generated notes"
+            FLAGS+=(--generate-notes)
+          fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG already exists"
+          else
+            gh release create "$TAG" --title "$TAG" "${FLAGS[@]}"
+          fi
+          rm -f RELEASE_NOTES.md
 
       - name: Summarise
         if: always()
         env:
-          PUBLISHED: ${{ steps.changesets.outputs.published }}
-          PACKAGES: ${{ steps.changesets.outputs.publishedPackages }}
+          COUNT: ${{ steps.pending.outputs.count }}
+          VERSION: ${{ steps.version.outputs.version }}
+          STATUS: ${{ job.status }}
         run: |
+          # `changeset publish` exits 0 both when it publishes and when the
+          # version is already on npm, so a successful job means the version is
+          # published either way. That, not the changeset count, is the truth to
+          # report: a recovery run consumes no changesets and still publishes.
           {
             echo "### Release"
             echo
-            if [ "${PUBLISHED:-false}" = "true" ]; then
-              echo "Published: \`$PACKAGES\`"
+            if [ "$STATUS" = "success" ]; then
+              echo "\`@roundhouseai/x402@${VERSION}\` is on npm."
               echo
-              echo "Verify with \`npm audit signatures\` — the tarball carries npm provenance."
+              echo "Published without provenance — see docs/releasing.md."
             else
-              echo "Nothing published. If changesets exist, a **Version Packages** PR is open or updated."
+              echo "**Not released.** Local version is \`${VERSION:-unknown}\`, ${COUNT:-0} changeset(s) were pending at the start."
+              echo
+              echo "If a \`chore: release\` commit is on \`main\`, the bump landed and the publish did not: re-run this workflow once the cause is fixed and it will publish that version without needing a changeset."
             fi
           } >> "$GITHUB_STEP_SUMMARY"

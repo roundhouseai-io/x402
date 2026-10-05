@@ -28,6 +28,10 @@ export interface AuthCacheEntry {
   validBefore: number;
   signature: string;
   typedData: TypedData;
+  /** Protocol version the cached payload was built for. */
+  x402Version: number;
+  /** Lowercase header the payload travels in: `x-payment` or `payment-signature`. */
+  headerName: string;
   header: string;
   createdAt: string;
 }
@@ -42,6 +46,8 @@ export interface AuthKeyInput {
   chain: string;
   wallet: string;
   backend: string;
+  /** Protocol version: a v1 payload is not usable against a v2 provider. */
+  x402Version: number;
 }
 
 export function authKey(input: AuthKeyInput): string {
@@ -56,6 +62,7 @@ export function authKey(input: AuthKeyInput): string {
       input.chain,
       input.backend,
       input.wallet,
+      `v${String(input.x402Version)}`,
     ].join('|'),
   );
 }

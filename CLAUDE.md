@@ -37,6 +37,7 @@ src/
     paths.ts             ~/.x402 layout, 0600/0700 file creation
     signer.ts            the SignerBackend interface (spec §5.3)
     signers/index.ts     backend registry, capability gate, x402-signer-* discovery
+    signers/owscore.ts   in-process OWS, via the @open-wallet-standard/core bindings
     signers/local.ts     encrypted-keystore backend (development and CI only)
     signers/exec.ts      external signer protocol, JSON over stdio
     stdin.ts             non-blocking stdin detection
@@ -48,6 +49,7 @@ src/
     mcp.ts               MCP server over stdio (JSON-RPC 2.0, no SDK dependency)
     tokens.ts            caller tokens: hashed at rest, per-token budgets
 test/                    vitest; mirrors src/ concerns, not its file tree
+tools/oxlint/anti-slop/  vendored lint rules, maintained here (docs/linting.md)
 docs/                    spec, architecture, operational docs
 .github/                 issue forms, workflows, labels, CODEOWNERS
 ```
@@ -74,21 +76,25 @@ These are not preferences. Breaking one is a breaking change to the product, and
 5. **State files are 0600, state dirs 0700.** Use `writePrivate`/`appendPrivate`/`ensureDir` from `core/paths.ts`; never raw `writeFileSync` for anything under `~/.x402`.
 6. **The authorization cache is the double-payment defence.** Never sign without first checking it (unless `--no-cache`), and never widen its key so that a retry misses. See [`docs/idempotency.md`](docs/idempotency.md).
 7. **Gate order is fixed:** domain/payTo allowlist → `--max` → session `--budget` → daily cap → the backend's policy layer. First failure aborts, and CLI-side gates never make a network call before failing.
-8. **Zero runtime dependencies.** The CLI ships with none, on purpose: it is a payments tool, and every dependency is supply-chain risk against a hot wallet. Adding one needs an issue and a maintainer's agreement first — Node 20+ built-ins cover HTTP, crypto and JSON-RPC.
+8. **This CLI never destroys a wallet.** `@open-wallet-standard/core` exposes `deleteWallet`, `exportWallet` and `renameWallet`; none is declared on `OwsCoreModule` and none may be referenced from `src/`, which `test/owssafety.test.ts` enforces. A wallet holds money, so "remove it from my tooling" must never mean "destroy it": `wallet forget` writes the name to `wallet.hidden` and leaves the vault alone. `exportWallet` is doubly banned — it would pull a secret out of OWS, which invariant 1 forbids.
+9. **Zero runtime dependencies.** The CLI ships with none, on purpose: it is a payments tool, and every dependency is supply-chain risk against a hot wallet. Adding one needs an issue and a maintainer's agreement first — Node 20+ built-ins cover HTTP, crypto and JSON-RPC.
 
 ## Working here
 
 ```bash
 npm install
 npm run typecheck     # tsc --noEmit over src + test
-npm test              # vitest run (99+ tests, no network)
+npm run lint          # oxlint + vendored anti-slop rules over src + test (needs Node 22)
+npm test              # vitest run (157 tests, no network)
 npm run build         # tsc → dist/
 npm run format:check  # prettier
 node dist/cli.js --help
 npm run dev -- probe https://example.com/v1/thing   # tsx, no build step
 ```
 
-Before pushing, run `npm run typecheck && npm test && npm run format:check`. CI runs exactly that on Node 20 and 22.
+Before pushing, run `npm run typecheck && npm run lint && npm test && npm run format:check`. CI runs the same checks, on Node 20 and 22 — except `lint`, which runs once on Node 22 because its config is TypeScript and Node 20 cannot load it.
+
+`lint` fails only on the rules the codebase already satisfies; the rest report as warnings. Do not demote a rule to make it pass — see [`docs/linting.md`](docs/linting.md).
 
 Tests never touch the network and never touch a real `~/.x402`: they stub `fetch` and point `X402_HOME` at a temp dir. Keep it that way. When a test needs a signer, implement the small `Signer` interface rather than mocking OWS over HTTP.
 
@@ -107,14 +113,14 @@ Tests never touch the network and never touch a real `~/.x402`: they stub `fetch
 - **Branches:** `claude/<topic>` for agent work, `feat/<topic>`, `fix/<topic>` otherwise. `main` is protected; every change lands by PR.
 - **Commits:** imperative subject, no model or tool names in the message.
 - **Issues:** use the forms in `.github/ISSUE_TEMPLATE/`. Labels are declared in `.github/labels.yml` and synced by a workflow — add labels there, not by hand in the UI.
-- **Releases:** [Changesets](https://github.com/changesets/changesets) → npm + a GitHub Release. Every user-visible PR carries a changeset (`npx changeset`). Full process in [`docs/releasing.md`](docs/releasing.md). Do not bump the version in `package.json` by hand and do not publish from a laptop; CI publishes with npm provenance.
+- **Releases:** [Changesets](https://github.com/changesets/changesets) → npm + a GitHub Release. Every user-visible PR carries a changeset (`npx changeset`); **merging it to `main` publishes**, with no approval step in between, so the changeset's bump is a reviewable part of the PR. Full process in [`docs/releasing.md`](docs/releasing.md). Do not bump the version in `package.json` by hand and do not publish from a laptop. CI publishes without npm provenance — it needs a public source repository and this one is private; [`docs/releasing.md`](docs/releasing.md) has the detail.
 - **Security:** never open a public issue for a spend-affecting bug. See `SECURITY.md`.
 
 ## Known open questions
 
-Seven questions block v1 and are tracked as issues; they are listed in [`docs/roadmap.md`](docs/roadmap.md). **OWS must expose EIP-712 typed-data signing** (`signTypedData`): its published core types show `signMessage` with `utf8`/`hex` only, and EIP-3009 cannot be signed with either. `core/ows.ts` calls `POST /v1/wallets/:wallet/sign-typed-data` and maps a 404/405/501 onto a clear exit 47. Since the signer abstraction landed this no longer blocks the tool — `local` and `exec` work today — but it does block OWS as the flagship backend. Two newer questions matter before the interface sets: reviewing prior art (Solana's `pay` describes a similar wallet-backend split) and pinning down the `exec` protocol, drafted in [`docs/exec-signer.md`](docs/exec-signer.md).
+Six questions block v1 and are tracked as issues; they are listed in [`docs/roadmap.md`](docs/roadmap.md). The seventh — **does OWS expose EIP-712 typed-data signing?**, the longest-standing one — is answered: `@open-wallet-standard/core@1.4.2` exports `signTypedData`, verified by signing a real `TransferWithAuthorization` payload with it. That is what the `ows-core` backend is built on. It settles the capability, not the transport: the HTTP daemon's `POST /v1/wallets/:wallet/sign-typed-data` route has still not been exercised against a running OWS, so `core/ows.ts` keeps `declared: false` and maps a 404/405/501 onto a clear exit 47. Two newer questions matter before the interface sets: reviewing prior art (Solana's `pay` describes a similar wallet-backend split) and pinning down the `exec` protocol, drafted in [`docs/exec-signer.md`](docs/exec-signer.md).
 
-Also note `npx x402` cannot resolve to this package: the unscoped `x402` name on npm belongs to another project. The zero-install form is `npx @roundhouseai/x402 <url>`; a global install still gives you the `x402` binary. Do not write docs that promise otherwise.
+Also note a bare `npx x402` cannot resolve to this package: the unscoped `x402` name on npm belongs to another project. The zero-install form is `npx @roundhouseai/x402 <url>`, and the binary a global install puts on `PATH` is **`rh-x402`** — the `x402` bin was dropped for exactly that collision. Do not write docs that promise otherwise.
 
 ## Workflow gotcha worth remembering
 

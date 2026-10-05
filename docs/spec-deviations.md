@@ -2,15 +2,15 @@
 
 Every knowing departure from [`SPEC.md`](SPEC.md), with the reason. If you change behaviour away from the spec, add a row here in the same PR — or change the spec instead.
 
-## 1. `npx x402` is `npx @roundhouseai/x402`
+## 1. `npx x402` is `npx @roundhouseai/x402` — resolved in the spec
 
-**Spec:** §2 promises `npx x402 <url>`.
+**Spec (as authored):** §2 promised `npx x402 <url>`.
 
 **Implementation:** the unscoped `x402` name on npm is already taken by another project, so `npx x402` resolves to that package, not this one. The zero-install form is `npx @roundhouseai/x402 <url>`; the binary is still called `x402`, so a global install gives the short command the spec describes.
 
-The scope is `@roundhouseai`, matching the `roundhouseai-io` GitHub org. The spec's §2 global-install line has been corrected to it, since a package name is a fact rather than a design decision; the `npx x402` line is left as authored because that is the open question.
+The scope is `@roundhouseai`, matching the `roundhouseai-io` GitHub org.
 
-**Status:** tracked as an issue. Options are to acquire the unscoped name, ship a thin unscoped alias package, or amend the spec. Until then, no document should promise `npx x402`.
+**Status:** closed. §2 has been amended to `npx @roundhouseai/x402` throughout, so the spec and the implementation agree and this is no longer a deviation. Per-command examples elsewhere in the docs still use the short `x402 <subcommand>` form, which is what a global install gives you. No document should promise a bare `npx x402`.
 
 ## 2. The authorization cache key omits `validBefore`
 
@@ -42,7 +42,7 @@ The scope is `@roundhouseai`, matching the `roundhouseai-io` GitHub org. The spe
 
 **Spec:** §5.1 describes the cache in terms of the `call` flow.
 
-**Implementation:** `x402 pay` signs fresh every time.
+**Implementation:** `rh-x402 pay` signs fresh every time.
 
 **Why:** a bare 402 payload carries no request identity (no url, method or body), so there is nothing stable to key a cache entry on. Caching on the payload alone would risk returning an authorization for a _different_ request that happened to quote the same price. `pay` is a header-building primitive; callers that need idempotency should use `call`.
 
@@ -58,15 +58,15 @@ The scope is `@roundhouseai`, matching the `roundhouseai-io` GitHub org. The spe
 
 **Spec:** §4 lists stdin as a data mechanism.
 
-**Implementation:** stdin is read when it is a pipe, socket or redirected file, or when a `-` argument explicitly asks for it. A terminal or character device (`/dev/null`, a detached tty in a hosted agent runtime) is never read.
+**Implementation:** stdin is read when it is a pipe, socket or redirected file, or when a `-` argument explicitly asks for it. A terminal or character device (`/dev/null`, a detached tty in a hosted agent runtime) is never read. On a pipe, the wait for the _first_ byte is bounded — 500 ms by default, `X402_STDIN_WAIT_MS` to change it, no bound at all after an explicit `-`. Once any data arrives the read runs to EOF with no deadline.
 
-**Why:** reading a character-device stdin can block forever, which to an agent is indistinguishable from a hung payment. `cat payload.json | x402 call <url> --json -` and `x402 call <url> < payload.json` both work.
+**Why:** reading a character-device stdin can block forever, which to an agent is indistinguishable from a hung payment. The bound closes the same failure one layer up: `spawn(cli, args, { stdio: 'pipe' })` — the ordinary way an agent runs a subprocess — opens stdin and never writes to it, and nothing at the descriptor level tells that pipe apart from a slow one. Bounding only the first byte means a producer that has started is never truncated. `cat payload.json | rh-x402 call <url> --json -` and `rh-x402 call <url> < payload.json` both work.
 
 ## 8. `signer` is an extra command, and the keystore has one too
 
 **Spec:** §3's command table does not list a signer command; §5.3 defines the backends but no way to inspect or populate them.
 
-**Implementation:** `x402 signer list`, `x402 signer check [backend]`, `x402 signer keystore list` and `x402 signer keystore add <name> --key-file <path>`.
+**Implementation:** `rh-x402 signer list`, `rh-x402 signer check [backend]`, `rh-x402 signer keystore list` and `rh-x402 signer keystore add <name> --key-file <path>`.
 
 **Why:** §5.3 rule 2 requires the CLI to fail at _config_ time when a backend cannot sign typed data, which needs a command that resolves a backend and reports its capabilities — `signer check` is that command. And a `local` backend with no way to create a keystore entry is unusable. Keys are read from a file, never from argv, and the passphrase comes from the environment.
 
@@ -77,3 +77,21 @@ The scope is `@roundhouseai`, matching the `roundhouseai-io` GitHub org. The spe
 **Implementation:** `--mcp` serves stdio.
 
 **Why:** SSE is deprecated in the MCP transport spec in favour of streamable HTTP, and §12.5 already proposes deferring MCP to v1.1. Adding a second transport before the first is exercised is scope with no caller.
+
+## 10. The envelope carries `paymentState`, and `paid` means submitted-or-settled
+
+**Spec:** §8 defines the envelope with `paid: boolean` and no finer detail.
+
+**Implementation:** the envelope also carries `paymentState`: `none`, `signed`, `submitted` or `settled`. `paid` is `submitted || settled`.
+
+**Why:** `paid: true` was set the moment an authorization was signed, so a call the provider then rejected reported `paid: true` with a ledger amount of `0` — an agent reading it could not tell "money moved and the response was lost" from "nothing moved at all". The four states say which, and the exit code stays the thing to branch on.
+
+`paid` is deliberately not reserved for `settled`. Most providers return no settlement receipt at all, and `limits.dailyCap` counts `paid` ledger records: a settled-only `paid` would leave real spend out of the ledger and quietly stop the cap binding. `settled` is the stronger claim where the provider makes it; `rh-x402 verify` confirms the rest.
+
+## 11. x402 v2 is spoken alongside v1
+
+**Spec:** §4-5 describe the v1 loop: sign an EIP-3009 authorization, retry with `X-PAYMENT`, read `X-PAYMENT-RESPONSE`.
+
+**Implementation:** the protocol version is taken from the provider's own 402 and decides both the payload shape and the header. v1 is unchanged. v2 sends the [spec 5.2](https://github.com/coinbase/x402/blob/main/specs/x402-specification-v2.md) payload — the chosen requirements echoed under `accepted`, alongside `resource` and `extensions` — base64 in `PAYMENT-SIGNATURE`, and reads settlement from `PAYMENT-RESPONSE`. A version this build does not know fails with exit `40` before anything is signed.
+
+**Why:** every provider on the current Roundhouse index quotes v2, and they reject a v1 envelope outright ("X-PAYMENT/v1 is unsupported"). The parser already read v2 requirements out of the `PAYMENT-REQUIRED` header; only the payment construction was still v1, so `probe` reported `x402Version: 2` while `call` signed v1 and paid nobody.

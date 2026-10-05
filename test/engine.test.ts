@@ -30,6 +30,39 @@ const requirements = (amountAtomic = '2000') => ({
   ],
 });
 
+/**
+ * A live-shaped x402 v2 402: requirements in the `PAYMENT-REQUIRED` header,
+ * CAIP-2 network, atomic `amount`, top-level `resource`, and a stub body.
+ * Copied from https://crypto.apitoll.cloud/v1/crypto/perps.
+ */
+const requirementsV2 = (amountAtomic = '1000') => ({
+  x402Version: 2,
+  error: 'Payment required',
+  resource: {
+    url: 'https://api.example.com/v1/lei',
+    description: 'Legal entity lookup',
+    mimeType: 'application/json',
+  },
+  accepts: [
+    {
+      scheme: 'exact',
+      network: 'eip155:8453',
+      amount: amountAtomic,
+      asset: USDC_BASE,
+      payTo: PAY_TO,
+      maxTimeoutSeconds: 300,
+      extra: { name: 'USD Coin', version: '2' },
+    },
+  ],
+  extensions: { bazaar: { info: { input: { type: 'http' } } } },
+});
+
+type RequirementsV2 = ReturnType<typeof requirementsV2>;
+
+const paymentRequiredHeader = (payload: RequirementsV2) => ({
+  'payment-required': Buffer.from(JSON.stringify(payload), 'utf8').toString('base64'),
+});
+
 function jsonResponse(
   status: number,
   body: unknown,
@@ -103,12 +136,12 @@ describe('prepareRequest', () => {
   it('flattens data to query params for GET', () => {
     const prepared = prepareRequest(
       'https://api.example.com/v1/lei',
-      { query: 'Amplify Limited' },
+      { query: 'Roundhouse AI Ltd.' },
       {
         method: 'GET',
       },
     );
-    expect(prepared.url).toBe('https://api.example.com/v1/lei?query=Amplify+Limited');
+    expect(prepared.url).toBe('https://api.example.com/v1/lei?query=Roundhouse+AI+Ltd.');
     expect(prepared.body).toBeUndefined();
   });
 
@@ -175,7 +208,7 @@ describe('Engine.call', () => {
     const signer = new FakeSigner();
     const result = await makeEngine({}, signer).call({
       target: 'https://api.example.com/v1/lei',
-      data: { query: 'Amplify Limited' },
+      data: { query: 'Roundhouse AI Ltd.' },
       method: 'GET',
     });
 
@@ -187,7 +220,8 @@ describe('Engine.call', () => {
     // The paid retry carried a base64 X-PAYMENT header with our authorization.
     const paidCall = fetchMock.mock.calls[1]![1] as { headers: Record<string, string> };
     const payload = decodePaymentHeader(paidCall.headers['x-payment']!);
-    expect(payload.scheme).toBe('exact');
+    expect(payload.x402Version).toBe(1);
+    expect(payload).toMatchObject({ scheme: 'exact' });
     expect(payload.payload.authorization.to).toBe(PAY_TO);
     expect(payload.payload.authorization.value).toBe('2000');
 
@@ -326,27 +360,149 @@ describe('Engine.call', () => {
     expect(readRecords()[0]!.payment.paid).toBe(false);
   });
 
-  it('treats a second 402 after paying as a rejected authorization', async () => {
+  it('treats a second 402 after paying as signed-but-not-paid', async () => {
     fetchMock
       .mockResolvedValueOnce(jsonResponse(402, requirements()))
       .mockResolvedValueOnce(jsonResponse(402, { error: 'invalid_signature' }));
     const result = await makeEngine().call({ target: 'https://api.example.com/v1/lei' });
     expect(result.errorCode).toBe(ExitCode.INVALID_402);
-    expect(result.paid).toBe(true);
+    // The provider rejected the authorization, so nothing settled: reporting
+    // `paid: true` here is what makes an agent unable to tell a lost response
+    // from an untouched wallet.
+    expect(result.paid).toBe(false);
+    expect(result.paymentState).toBe('signed');
+    expect(result.amount).toBe('0');
     expect(result.error).toContain('invalid_signature');
+
+    const record = readRecords()[0]!;
+    expect(record.payment).toMatchObject({ paid: false, state: 'signed', amount: '0' });
+  });
+
+  it("passes the provider's own rejection message through", async () => {
+    fetchMock.mockResolvedValueOnce(jsonResponse(402, requirements())).mockResolvedValueOnce(
+      jsonResponse(402, {
+        error: 'payment_required',
+        message: 'Upgrade to x402 v2: X-PAYMENT/v1 is unsupported.',
+      }),
+    );
+    const result = await makeEngine().call({ target: 'https://api.example.com/v1/lei' });
+    expect(result.error).toContain('Upgrade to x402 v2');
+  });
+
+  it('pays a v2 provider with a PAYMENT-SIGNATURE header', async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse(402, { error: 'payment_required' }, paymentRequiredHeader(requirementsV2())),
+      )
+      .mockResolvedValueOnce(
+        jsonResponse(
+          200,
+          { lei: 'X' },
+          {
+            'payment-response': Buffer.from(
+              JSON.stringify({
+                success: true,
+                transaction: '0xfeed',
+                network: 'eip155:8453',
+              }),
+              'utf8',
+            ).toString('base64'),
+          },
+        ),
+      );
+
+    const signer = new FakeSigner();
+    const result = await makeEngine({}, signer).call({ target: 'https://api.example.com/v1/lei' });
+
+    expect(result.ok).toBe(true);
+    expect(result.paid).toBe(true);
+    // A settlement receipt came back, so this is the one state that means the
+    // transfer is confirmed.
+    expect(result.paymentState).toBe('settled');
+    expect(result.amount).toBe('0.001');
+
+    const paidCall = fetchMock.mock.calls[1]![1] as { headers: Record<string, string> };
+    // v2 renamed the header; the v1 spelling must not be sent.
+    expect(paidCall.headers['x-payment']).toBeUndefined();
+    const payload = decodePaymentHeader(paidCall.headers['payment-signature']!);
+    expect(payload.x402Version).toBe(2);
+    expect(payload).toMatchObject({
+      accepted: { scheme: 'exact', network: 'eip155:8453', amount: '1000', payTo: PAY_TO },
+      resource: { url: 'https://api.example.com/v1/lei' },
+      extensions: { bazaar: { info: { input: { type: 'http' } } } },
+    });
+    expect(payload.payload.authorization.value).toBe('1000');
+    expect(payload.payload.authorization.to).toBe(PAY_TO);
+  });
+
+  it('reports submitted, not settled, when no settlement receipt comes back', async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse(402, { error: 'payment_required' }, paymentRequiredHeader(requirementsV2())),
+      )
+      .mockResolvedValueOnce(jsonResponse(200, { lei: 'X' }));
+
+    const result = await makeEngine().call({ target: 'https://api.example.com/v1/lei' });
+    expect(result.ok).toBe(true);
+    expect(result.paid).toBe(true);
+    expect(result.paymentState).toBe('submitted');
+    // The daily cap counts this: a provider that sends no receipt must not make
+    // real spend invisible.
+    expect(readRecords()[0]!.payment).toMatchObject({ paid: true, amount: '0.001' });
+  });
+
+  it('refuses an unsupported protocol version before signing', async () => {
+    fetchMock.mockResolvedValueOnce(
+      jsonResponse(
+        402,
+        { error: 'payment_required' },
+        paymentRequiredHeader({ ...requirementsV2(), x402Version: 9 }),
+      ),
+    );
+    const signer = new FakeSigner();
+    const result = await makeEngine({}, signer).call({ target: 'https://api.example.com/v1/lei' });
+
+    expect(result.errorCode).toBe(ExitCode.INVALID_402);
+    expect(result.error).toContain('does not support x402 v9');
+    expect(result.paid).toBe(false);
+    expect(result.paymentState).toBe('none');
+    expect(signer.signed).toHaveLength(0);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not reuse a v1 authorization for a v2 quote', async () => {
+    const signer = new FakeSigner();
+    const engine = makeEngine({}, signer);
+
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(402, requirements('1000')))
+      .mockResolvedValueOnce(jsonResponse(200, { lei: 'X' }));
+    await engine.call({ target: 'https://api.example.com/v1/lei' });
+
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse(402, { error: 'payment_required' }, paymentRequiredHeader(requirementsV2())),
+      )
+      .mockResolvedValueOnce(jsonResponse(200, { lei: 'X' }));
+    const second = await engine.call({ target: 'https://api.example.com/v1/lei' });
+
+    expect(second.cacheHit).toBe(false);
+    expect(signer.signed).toHaveLength(2);
+    const paidCall = fetchMock.mock.calls[3]![1] as { headers: Record<string, string> };
+    expect(decodePaymentHeader(paidCall.headers['payment-signature']!).x402Version).toBe(2);
   });
 
   it('writes the ledger 0600 and hashes payloads by default', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(200, { secret: 'value' }));
     await makeEngine().call({
       target: 'https://api.example.com/v1/lei',
-      data: { query: 'Amplify Limited' },
+      data: { query: 'Roundhouse AI Ltd.' },
       method: 'POST',
     });
     const ledgerFile = join(home, 'ledger.jsonl');
     expect(existsSync(ledgerFile)).toBe(true);
     const line = readFileSync(ledgerFile, 'utf8');
-    expect(line).not.toContain('Amplify Limited');
+    expect(line).not.toContain('Roundhouse AI Ltd.');
     expect(line).toContain('sha256:');
     const record = readRecords()[0]!;
     expect(record.request.dataKeys).toEqual(['query']);
@@ -359,12 +515,12 @@ describe('Engine.call', () => {
       telemetry: { payload: 'full', redactKeys: ['company.name'] } as never,
     }).call({
       target: 'https://api.example.com/v1/lei',
-      data: { query: 'Amplify Limited', company: { name: 'Amplify Limited' } },
+      data: { query: 'Roundhouse AI Ltd.', company: { name: 'Roundhouse AI Ltd.' } },
       method: 'POST',
     });
     const record = readRecords()[0]!;
     expect(record.request.data).toMatchObject({
-      query: 'Amplify Limited',
+      query: 'Roundhouse AI Ltd.',
       company: { name: '[redacted]' },
     });
   });

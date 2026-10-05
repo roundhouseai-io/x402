@@ -2,13 +2,28 @@
  * Library surface. The CLI is the product; this export exists so `serve`,
  * tests, and embedders can drive the same engine.
  */
-export { Engine, prepareRequest, inferMethod } from './core/engine.js';
-export type { CallOptions, CallResult, EngineDeps, Receipt } from './core/engine.js';
+export { Engine, prepareRequest, inferMethod, isSpent, providerRejection } from './core/engine.js';
+export type { CallOptions, CallResult, EngineDeps, PaymentState, Receipt } from './core/engine.js';
 export { ExitCode, ExitCodeName, X402Error } from './core/errors.js';
 export type { ExitCodeValue } from './core/errors.js';
-export { loadConfig, DEFAULT_CONFIG, mergeDeep, resolveEnv } from './core/config.js';
+export {
+  loadConfig,
+  DEFAULT_CONFIG,
+  mergeDeep,
+  resolveEnv,
+  normalizeConfigValue,
+  normalizeAmounts,
+  AMOUNT_KEYS,
+} from './core/config.js';
 export type { X402Config, PayloadLevel } from './core/config.js';
-export { parsePaymentRequired, selectOption } from './core/x402.js';
+export {
+  parsePaymentRequired,
+  requirementsFromHeaders,
+  decodeQuote,
+  selectOption,
+  assertSupportedVersion,
+  SUPPORTED_X402_VERSIONS,
+} from './core/x402.js';
 export type { PaymentOption, PaymentRequired } from './core/x402.js';
 export {
   buildAuthorization,
@@ -16,9 +31,17 @@ export {
   encodePaymentHeader,
   decodePaymentHeader,
   decodeSettlement,
+  settlementFromHeaders,
+  paymentHeaderName,
   TRANSFER_WITH_AUTHORIZATION_TYPES,
 } from './core/eip3009.js';
-export type { TypedData, PaymentPayload } from './core/eip3009.js';
+export type {
+  TypedData,
+  PaymentPayload,
+  PaymentPayloadV1,
+  PaymentPayloadV2,
+  PaymentPayloadContext,
+} from './core/eip3009.js';
 export { OwsClient, OwsSigner, mapOwsError } from './core/ows.js';
 export type { OwsWallet, OwsBalance } from './core/ows.js';
 export type {
@@ -59,8 +82,14 @@ export {
   ALWAYS_REDACTED_HEADERS,
 } from './core/telemetry.js';
 export { buildData, parsePath, coerce, toQueryParams } from './core/data.js';
-export { discover, resolveTarget, capabilityOf, filterByAllowlist } from './core/discover.js';
-export type { Provider } from './core/discover.js';
+export {
+  discover,
+  discoverMarket,
+  resolveTarget,
+  capabilityOf,
+  filterByAllowlist,
+} from './core/discover.js';
+export type { Provider, Market, MarketStats } from './core/discover.js';
 export { formatUnits, parseUnits, findChain, findAsset, CHAINS, ASSETS } from './core/assets.js';
 export { createServeServer, statusForCode } from './serve/http.js';
 export { runMcpStdio, TOOLS as MCP_TOOLS } from './serve/mcp.js';

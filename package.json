@@ -1,6 +1,6 @@
 {
   "name": "@roundhouseai/x402",
-  "version": "0.0.0",
+  "version": "0.5.0",
   "description": "One command for the whole x402 payment loop. Request, 402, sign via OWS, retry, receipt — with spend limits and a local ledger.",
   "keywords": [
     "x402",
@@ -26,7 +26,7 @@
   },
   "type": "module",
   "bin": {
-    "x402": "dist/cli.js"
+    "rh-x402": "dist/cli.js"
   },
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -49,6 +49,8 @@
     "build": "tsc -p tsconfig.build.json",
     "dev": "tsx src/cli.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "oxlint src test",
+    "lint:strict": "oxlint src test --deny-warnings",
     "test": "vitest run",
     "test:watch": "vitest",
     "format": "prettier --write .",
@@ -59,24 +61,28 @@
   "devDependencies": {
     "@changesets/changelog-github": "^0.5.0",
     "@changesets/cli": "^2.27.9",
+    "@oxlint/plugins": "^1.78.0",
     "@types/node": "^22.9.0",
+    "oxlint": "^1.78.0",
     "prettier": "^3.3.3",
     "tsx": "^4.19.2",
     "typescript": "^5.6.3",
     "vitest": "^2.1.4"
   },
-  "optionalDependencies": {},
   "peerDependencies": {
-    "ethers": "^6.13.0"
+    "ethers": "^6.13.0",
+    "@open-wallet-standard/core": "^1.4.2"
   },
   "peerDependenciesMeta": {
     "ethers": {
+      "optional": true
+    },
+    "@open-wallet-standard/core": {
       "optional": true
     }
   },
   "publishConfig": {
     "access": "public",
-    "provenance": true,
     "registry": "https://registry.npmjs.org"
   }
 }

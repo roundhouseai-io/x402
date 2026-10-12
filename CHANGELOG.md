@@ -1,5 +1,35 @@
 # @roundhouseai/x402
 
+## 0.6.0
+
+### Minor Changes
+
+- c051d16: Faster agent setup, and telemetry on by default.
+
+  - `rh-x402 setup --yes` now runs with no other flags. With no `--path` it holds the key in OWS, the custody this tool recommends. Without `--yes` and with no terminal, `--path` is still required.
+  - The remote telemetry sink is on by default, sending to `https://api.roundhouseai.io/v0/telemetry` at the `hash` payload level (URLs, amounts, payees, timings and hashes; no request or response bodies). Opt out with `config set telemetry.sink.enabled false`, `DO_NOT_TRACK=1` or `X402_TELEMETRY=off`; the environment wins over config. The first batch prints a one-time notice on stderr. `setup` no longer asks about telemetry; `--telemetry off` still opts out.
+  - Fixes `setup --telemetry on` sending nothing: it set `telemetry.sink.enabled` but no `telemetry.sink.url` existed to send to.
+
+- bc5cfcb: Add `rh-x402 setup`: one command from nothing to a funded wallet, a proven payment path and a stored API key. Every answer has a flag, so it runs with no terminal (`--path`, `--max-per-call`, `--daily-cap`, `--telemetry`, `--org-key`, `--min-balance`, `--fund-timeout`, `--yes`). It is idempotent and resumable, skipping a step when `status` says it is done, and exits non-zero on the first failing step with that step's name and exit code. `--json` prints one object per step, `--dry-run` makes no wallet, config write or payment, and the API key is never printed unless `--print-key`. `status` now reports `signer.policyKey` and `spend.calls.total`.
+- 3af2950: Smaller changes that the guided setup builds on.
+
+  - `wallet balance --wait --min <usdc> --timeout <duration>` polls the chain until the wallet is funded. Exit `0` when met, new exit code `48` (`wait_timeout`) when it times out. `--min` alone checks once and exits `46` if short.
+  - `config set auth.apiKey` stores a Roundhouse API key (an `env:NAME` reference, `-` for stdin, or a literal). It is sent as `Authorization: Bearer` to `roundhouseai.io` hosts only, and is redacted in `config get`, `config list` and `status`.
+  - `discover --policy` applies the default counterparty rule (live, at least one payer in 30 days, price at or under 1.5 times spot) and lists the offers it excluded with the reason. `--spot-factor` changes the factor.
+  - `rh-x402 help exit-codes` prints one table with a "what to do next" column (`--markdown`, `--json`). The help footer, `SKILL.md` and `docs/exit-codes.md` now draw on it.
+  - The guided setup refuses to run `npm i -g` into a directory the user cannot write, and says to use `npx` or a project install, never `sudo`.
+  - Importing `cli.ts` no longer runs the CLI.
+
+### Patch Changes
+
+- 7b41b7a: Fix the snags an agent hit setting up a wallet from `skill.md`.
+
+  - `setup` and the changes it builds on (`wallet balance --wait`, `config set auth.apiKey`, `discover --policy`, `help exit-codes`) were merged into intermediate branches and never reached a release. They ship now, so `rh-x402 setup --daily-cap 5 ...` works as documented.
+  - `wallet create --path import|generate` (and `setup` with those paths) checks for `X402_KEYSTORE_PASS` and the optional `ethers` peer before it asks for or writes anything, and reports both in one error. The message says how to install `ethers` next to the CLI, including `npx -p @roundhouseai/x402 -p ethers rh-x402 ...`.
+  - `status` warns when a local keystore wallet has no passphrase or no `ethers` in this shell, so a missing passphrase shows before the first paid call rather than on it.
+  - `config set` refuses a plain value on a group of settings. `config set telemetry on` used to replace the whole `telemetry` object, after which `status` threw `Cannot read properties of undefined (reading 'enabled')`. A config file already in that state now loads with an error that names the key and the fix, and `status` reports it instead of crashing.
+  - `telemetry.sink.enabled` accepts `on`/`off`/`yes`/`no` and stores a boolean. `off` used to be stored as a string and read as on by the telemetry sink.
+
 ## 0.5.0
 
 ### Minor Changes

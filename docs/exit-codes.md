@@ -1,6 +1,6 @@
 # Exit codes
 
-The codes are a stability contract from v1. New codes may be appended; existing ones are never renumbered or repurposed. The table lives in `src/core/errors.ts` and is surfaced identically on every surface:
+The codes are a stability contract from v1. New codes may be appended; existing ones are never renumbered or repurposed. The table lives in `src/core/errors.ts` (`EXIT_CODE_TABLE`) and is surfaced identically on every surface. `rh-x402 help exit-codes` prints it, with a "what to do next" column that `SKILL.md` and the Roundhouse agent document copy rather than rewrite (`--markdown` for the docs, `--json` for a caller):
 
 - **CLI** — the process exit status, plus `errorCode`/`errorName` in the JSON envelope on a non-TTY stdout.
 - **HTTP** (`rh-x402 serve`) — `errorCode` in the response body; the HTTP status is a convenience mapping (see below).
@@ -17,6 +17,7 @@ The codes are a stability contract from v1. New codes may be appended; existing 
 | 45   | `budget_exhausted`     | `--budget` for this process, or `limits.dailyCap` from the ledger, is spent                                                                   | No — stop spending                                                                          |
 | 46   | `insufficient_balance` | The wallet cannot cover the quoted price                                                                                                      | No — fund the wallet                                                                        |
 | 47   | `ows_unavailable`      | Signer backend unreachable, auth failed, or **unable to do what was asked**                                                                   | Read the message first: unreachable is retryable once, incapable never is                   |
+| 48   | `wait_timeout`         | `wallet balance --wait` timed out before the balance reached `--min`. Nothing was paid. CLI only: no HTTP or MCP surface waits on a balance.  | Check the address and chain, then wait again or report it                                   |
 | 50   | `paid_no_response`     | The paid request was sent but no valid response came back. **Money may have moved.** A receipt is logged.                                     | Re-run the _identical_ command; it reuses the cached authorization. Never add `--no-cache`. |
 
 ## Payment states
@@ -37,7 +38,7 @@ ledger — and `limits.dailyCap` counts `paid` records, so the cap would quietly
 stop binding. `settled` is the stronger claim, available when the provider says
 so; `rh-x402 verify <receiptId>` is how you confirm the rest.
 
-Codes 2-39, 41, 48, 49 and 51+ are unassigned. `41` is deliberately skipped to leave room next to `40` for a distinct "payment rejected by provider" code if we decide to split that case out.
+Codes 2-39, 41, 49 and 51+ are unassigned. `41` is deliberately skipped to leave room next to `40` for a distinct "payment rejected by provider" code if we decide to split that case out.
 
 ## HTTP status mapping
 
@@ -66,3 +67,5 @@ Two of these need care:
 **Exits 42, 43, 45 and 46 are human decisions.** They are not transient. Retrying them wastes calls and, in the case of 42, generates policy-denial noise in the wallet audit log. Report and stop.
 
 **Exit 47 covers the whole wallet layer.** It means the signer backend is unreachable, rejected the CLI's credential, or cannot sign EIP-712 typed data at all. The last case is caught when the signer is resolved — before any HTTP request — so a backend that cannot do x402 fails at config time rather than mid-payment. Retry once, then treat the wallet layer as down.
+
+**Exit 47 no longer covers a balance that cannot be read.** It used to: `wallet balance` asked the signer backend, and a backend with no balance function answered 47, the same code as a signer outage. `wallet balance` now reads the USDC contract over JSON-RPC, so every backend answers and 47 means only the wallet layer. An RPC that will not answer is exit 1 (nothing was paid, retry), and a wait that runs out of time is 48.

@@ -232,7 +232,7 @@ Auth-like request headers (`Authorization`, `X-Api-Key`, `Cookie`, `X-PAYMENT`) 
 
 ### 6.3 Remote sink
 
-Off by default. When configured, ledger records are batched (max 50 records or 10s) and POSTed to the sink, itself authenticated via a static bearer token from config. Intended target: the Roundhouse indexer ingest endpoint, which turns fleet-wide payment telemetry into pricing and liveness data for `rh-x402 discover`.
+Off by default (implementation: on by default, opt-out; see [spec-deviations.md](spec-deviations.md) §12). When configured, ledger records are batched (max 50 records or 10s) and POSTed to the sink, itself authenticated via a static bearer token from config. Intended target: the Roundhouse indexer ingest endpoint, which turns fleet-wide payment telemetry into pricing and liveness data for `rh-x402 discover`.
 
 ```json
 "telemetry": {

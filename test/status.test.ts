@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { DEFAULT_CONFIG, mergeDeep, type X402Config } from '../src/core/config.js';
+import { DEFAULT_CONFIG, loadConfig, mergeDeep, type X402Config } from '../src/core/config.js';
 import { parseArgs } from '../src/core/args.js';
 import {
   collectStatus,
@@ -162,8 +162,9 @@ describe('collectStatus', () => {
     expect(s.balance.usdc).toBeNull();
     expect(s.limits).toEqual({ maxPerCall: 'unset', dailyCap: 'unset' });
     expect(s.auth.apiKey).toBe('unset');
-    expect(s.telemetry.enabled).toBe(false);
-    expect(s.spend).toEqual({ today: '0', calls: { today: 0 } });
+    // The sink is on by default; opting out is a config key or DO_NOT_TRACK.
+    expect(s.telemetry.enabled).toBe(true);
+    expect(s.spend).toEqual({ today: '0', calls: { today: 0, total: 0 } });
     expect(s.next).toBe('create-wallet');
   });
 
@@ -222,6 +223,18 @@ describe('collectStatus', () => {
     expect(s.next).toBe('store-key');
   });
 
+  it('keeps first-payment as the next step after a paid call that returned no response', async () => {
+    // Exit 50: the authorization is cached and a re-run is safe and productive.
+    const s = await collectStatus({
+      deps: deps({
+        readRecords: () => [
+          { ...record({ url: 'https://api.roundhouseai.io/v0/test/x402' }), exitCode: 50 },
+        ],
+      }),
+    });
+    expect(s.next).toBe('first-payment');
+  });
+
   it('counts only paid calls made since UTC midnight', async () => {
     const s = await collectStatus({
       deps: deps({
@@ -233,7 +246,7 @@ describe('collectStatus', () => {
         ],
       }),
     });
-    expect(s.spend).toEqual({ today: '0.75', calls: { today: 2 } });
+    expect(s.spend).toEqual({ today: '0.75', calls: { today: 2, total: 3 } });
   });
 
   it('reports a signer outage as fields rather than throwing', async () => {
@@ -319,6 +332,9 @@ describe('collectStatus', () => {
       }),
     });
     expect(s.warnings.join('\n')).toContain('OWS_X402_KEY');
+    expect(s.signer.policyKey).toBe('missing');
+    // The address resolves and typed data is supported, but it cannot sign.
+    expect(s.next).toBe('create-wallet');
   });
 
   it('flags an old Node', async () => {
@@ -364,5 +380,45 @@ describe('--json on status', () => {
   it('keeps taking a value on call', () => {
     const parsed = parseArgs(['call', 'https://x.test', '--json', '{"a":1}']);
     expect(parsed.flags.json).toBe('{"a":1}');
+  });
+});
+
+describe('status on a config that does not load', () => {
+  it('reports a plain value over the telemetry group instead of throwing', async () => {
+    // `status` threw "Cannot read properties of undefined (reading 'enabled')"
+    // after `config set telemetry on`.
+    writeFileSync(join(home, 'config.json'), JSON.stringify({ telemetry: 'on' }));
+    const s = await collectStatus({
+      deps: deps({ loadConfig: () => loadConfig() }),
+    });
+    expect(s.config.ok).toBe(false);
+    expect(s.config.error).toMatch(/"telemetry" must be a group of settings/);
+    expect(s.telemetry.enabled).toBe(false);
+  });
+});
+
+describe('a local keystore wallet that cannot sign in this shell', () => {
+  const LOCAL = {
+    wallet: { backend: 'local', default: 'dev', path: 'generate' },
+    limits: { maxPerCall: '0.05', dailyCap: '5' },
+  };
+
+  it('warns about a missing passphrase and a missing ethers before any payment', async () => {
+    const s = await collectStatus({
+      deps: deps({ config: LOCAL, env: {}, ethersAvailable: async () => false }),
+    });
+    expect(s.warnings.join('\n')).toMatch(/X402_KEYSTORE_PASS/);
+    expect(s.warnings.join('\n')).toMatch(/npx -p @roundhouseai\/x402 -p ethers/);
+  });
+
+  it('says nothing when both are there', async () => {
+    const s = await collectStatus({
+      deps: deps({
+        config: LOCAL,
+        env: { X402_KEYSTORE_PASS: 'x' },
+        ethersAvailable: async () => true,
+      }),
+    });
+    expect(s.warnings).toEqual([]);
   });
 });

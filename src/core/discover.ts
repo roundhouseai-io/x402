@@ -3,6 +3,7 @@ import { request, parseJsonBody } from './http.js';
 import { domainAllowed } from './gates.js';
 import { findChain, findAsset } from './assets.js';
 import type { X402Config } from './config.js';
+import { authHeaders } from './auth.js';
 
 export interface Provider {
   url: string;
@@ -233,7 +234,7 @@ export async function discoverMarket(
   const res = await request({
     url: unified,
     method: 'GET',
-    headers: { accept: 'application/json' },
+    headers: { accept: 'application/json', ...authHeaders(unified, config) },
     timeoutMs,
   });
   const body = res.status < 400 ? parseJsonBody(res.body) : undefined;
@@ -266,7 +267,7 @@ export async function discoverMarket(
   const fallback = await request({
     url,
     method: 'GET',
-    headers: { accept: 'application/json' },
+    headers: { accept: 'application/json', ...authHeaders(url, config) },
     timeoutMs,
   });
   if (fallback.status >= 400) {
@@ -343,4 +344,76 @@ export async function resolveTarget(target: string, config: X402Config): Promise
     );
   }
   return { url: chosen.url, capability, provider: chosen, candidates };
+}
+
+/** The default ceiling on price, as a multiple of the going rate. */
+export const DEFAULT_SPOT_FACTOR = 1.5;
+
+export interface PolicyRejection {
+  provider: Provider;
+  /** Every rule the offer failed, not only the first. */
+  reasons: string[];
+}
+
+export interface PolicyResult {
+  accepted: Provider[];
+  rejected: PolicyRejection[];
+  /** The going rate the price rule was judged against, when the market has one. */
+  spot: string | null;
+  factor: number;
+  /** `skipped` when the market reported no spot to judge a price against. */
+  priceRule: 'applied' | 'skipped';
+}
+
+/**
+ * The default counterparty rule, applied to a discovered market.
+ *
+ * An offer passes only if it is live, has had at least one paying customer in
+ * the last 30 days, and is priced at or under `spot` times `factor`. Each rule
+ * is judged on evidence the index holds: an offer whose liveness or payer count
+ * is simply unknown fails, because "no evidence anyone has paid this" is the
+ * thing the rule exists to catch. The price rule is the one that can be skipped,
+ * and only when there is no spot to compare to; the result says so rather than
+ * quietly passing everything.
+ */
+export function applyCounterpartyPolicy(
+  providers: Provider[],
+  stats: MarketStats | undefined,
+  factor: number = DEFAULT_SPOT_FACTOR,
+): PolicyResult {
+  const spot =
+    stats?.spot !== undefined && Number.isFinite(Number(stats.spot))
+      ? Number(stats.spot)
+      : undefined;
+  const ceiling = spot === undefined ? undefined : spot * factor;
+  const accepted: Provider[] = [];
+  const rejected: PolicyRejection[] = [];
+
+  for (const provider of providers) {
+    const reasons: string[] = [];
+    if (provider.live === false) reasons.push('not live at the last probe');
+    else if (provider.live === undefined) reasons.push('liveness unknown');
+    if (provider.payers30d === undefined) reasons.push('no payer count from the index');
+    else if (provider.payers30d <= 0) reasons.push('no paying customers in the last 30 days');
+    if (ceiling !== undefined) {
+      const price = Number(provider.price);
+      if (provider.price === undefined || !Number.isFinite(price)) {
+        reasons.push('no listed price to compare with the going rate');
+      } else if (price > ceiling) {
+        reasons.push(
+          `price ${provider.price} is above ${factor}x the going rate of ${stats?.spot}`,
+        );
+      }
+    }
+    if (reasons.length === 0) accepted.push(provider);
+    else rejected.push({ provider, reasons });
+  }
+
+  return {
+    accepted,
+    rejected,
+    spot: spot === undefined ? null : String(stats?.spot),
+    factor,
+    priceRule: ceiling === undefined ? 'skipped' : 'applied',
+  };
 }

@@ -1,4 +1,5 @@
 import { spawnSync } from 'node:child_process';
+import { accessSync, constants } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, sep } from 'node:path';
 import { X402Error, ExitCode } from './errors.js';
@@ -7,7 +8,7 @@ import { readRawConfig, writeRawConfig, setPath, unsetPath } from './config.js';
 /** What the guided setup and `wallet forget` write into config.json. */
 export type ConfigValue = string | boolean | string[];
 import { addEntry, generatePrivateKey, readKeyFile, keystorePath } from './keystore.js';
-import { loadEthers } from './signers/local.js';
+import { ETHERS_INSTALL_HINT, ethersAvailable, loadEthers } from './signers/local.js';
 import { loadOwsCore, type OwsCoreModule, type OwsWallet } from './signers/owscore.js';
 import { ask, confirm, interactive, secretTwice, select } from './prompt.js';
 import { grantPolicyKey } from './owspolicy.js';
@@ -137,6 +138,46 @@ function npmGlobalRoot(): string | undefined {
   return result.stdout.trim() || undefined;
 }
 
+/**
+ * What to say when a global install cannot work.
+ *
+ * Never `sudo`: a package that handles a hot wallet should not be installed as
+ * root, and an agent told to prefix a command with `sudo` will. Both
+ * alternatives need no elevated rights and leave the machine as it was.
+ */
+export const NO_SUDO_GUIDANCE =
+  'The global npm directory is not writable by this user. Do not use sudo. ' +
+  'Run it without installing: `npx @roundhouseai/x402 <command>`. Or install into a project ' +
+  '(`npm i @roundhouseai/x402`, then `npx rh-x402`). Or give npm a prefix you own: ' +
+  '`npm config set prefix ~/.npm-global` and put `~/.npm-global/bin` on PATH.';
+
+/**
+ * Whether this user can write where `npm i -g` would put things.
+ *
+ * Walks up to the nearest directory that exists, since the global root itself
+ * is often not created until the first install. `undefined` means npm would not
+ * say where the root is, which is not evidence that it is unwritable.
+ */
+export function globalRootWritable(
+  root: string | null | undefined = npmGlobalRoot(),
+): boolean | undefined {
+  if (!root) return undefined;
+  let dir = root;
+  for (;;) {
+    try {
+      accessSync(dir, constants.W_OK);
+      return true;
+    } catch (err) {
+      // SAFETY: `code` is read off whatever accessSync threw; on a non-system
+      // error it is undefined and the walk ends as "not writable".
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') return false;
+      const parent = dirname(dir);
+      if (parent === dir) return false;
+      dir = parent;
+    }
+  }
+}
+
 /** The npm arguments that put the bindings where this module can import them. */
 export function installArgs(
   forceGlobal: boolean,
@@ -173,6 +214,14 @@ export const INSTALL_STDIO = ['inherit', 2, 'inherit'] as const;
 function installOws(forceGlobal: boolean): string {
   const args = installArgs(forceGlobal);
   const printed = `npm ${args.join(' ')}`;
+  // Checked before npm runs, so the failure is a sentence rather than an EACCES
+  // stack trace from a child process whose output we cannot read back.
+  if (args.includes('-g') && globalRootWritable() === false) {
+    throw new X402Error(
+      ExitCode.OWS_UNREACHABLE,
+      `${printed} would fail: ${NO_SUDO_GUIDANCE} Or install ${OWS_PACKAGE} somewhere you own and re-run.`,
+    );
+  }
   process.stderr.write(`\nrunning: ${printed}\n\n`);
   const result = spawnSync('npm', args, { stdio: [...INSTALL_STDIO] });
   if (result.error || result.status !== 0) {
@@ -369,6 +418,32 @@ async function setupKeystore(
   path: 'import' | 'generate',
   opts: SetupOptions,
 ): Promise<SetupResult> {
+  // Check everything this path needs before asking for anything or making a
+  // key. Both used to surface one at a time, the passphrase first and ethers
+  // only after it was fixed, and neither was mentioned before the run.
+  const missing: string[] = [];
+  if (path === 'import' && !opts.keyFile && !interactive()) {
+    missing.push('importing needs --key-file <path>: the key is read from a file, never from argv');
+  }
+  const ethersOk = await ethersAvailable();
+  if (!ethersOk)
+    missing.push(
+      `the optional peer dependency \`ethers\` is not installed: ${ETHERS_INSTALL_HINT}`,
+    );
+  if (!process.env.X402_KEYSTORE_PASS && !interactive()) {
+    missing.push(
+      'X402_KEYSTORE_PASS is not set: export it with the passphrase that will encrypt this key. ' +
+        'Every shell that pays needs it too.',
+    );
+  }
+  if (missing.length > 0) {
+    throw new X402Error(
+      ethersOk ? ExitCode.GENERIC : ExitCode.OWS_UNREACHABLE,
+      `--path ${path} needs ${missing.length === 1 ? 'one thing' : `${missing.length} things`} first. Nothing was written.\n` +
+        missing.map((m) => `  - ${m}`).join('\n'),
+    );
+  }
+
   const name = opts.name ?? (interactive() ? await ask('Wallet name', 'dev') : 'dev');
 
   let privateKey: string;

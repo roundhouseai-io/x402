@@ -6,6 +6,7 @@ import { emitCallResult, writeJson, isTty } from '../core/output.js';
 import { bool, str, list, parseHeaders, type ParsedArgs } from '../core/args.js';
 import { buildContext, callOptionsFrom } from './context.js';
 import { readStdin } from '../core/stdin.js';
+import { authHeaders } from '../core/auth.js';
 
 /** A target that is a saved 402 quote rather than a URL. */
 const isQuoteTarget = (target: string): boolean => target === '-' || target.startsWith('@');
@@ -68,10 +69,11 @@ export async function callCommand(parsed: ParsedArgs): Promise<number> {
     strings: bool(parsed.flags, 'data-strings'),
   });
 
+  const explicit = parseHeaders(list(parsed.flags, 'header'));
   const result = await ctx.engine.call({
     target: url,
     data,
-    headers: parseHeaders(list(parsed.flags, 'header')),
+    headers: { ...authHeaders(url, ctx.config, explicit), ...explicit },
     payloadLevel: ctx.payloadLevel,
     wallet: ctx.walletName,
     signer: ctx.backendName,
@@ -108,10 +110,11 @@ export async function probeCommand(parsed: ParsedArgs): Promise<number> {
     strings: bool(parsed.flags, 'data-strings'),
   });
 
+  const explicit = parseHeaders(list(parsed.flags, 'header'));
   const probe = await ctx.engine.probe({
     target: url,
     data,
-    headers: parseHeaders(list(parsed.flags, 'header')),
+    headers: { ...authHeaders(url, ctx.config, explicit), ...explicit },
     ...callOptionsFrom(parsed),
   });
 

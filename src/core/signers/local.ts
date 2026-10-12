@@ -15,6 +15,16 @@ interface EthersWallet {
 }
 
 /**
+ * How to get `ethers` next to this package. A plain `npm i ethers` in some other
+ * directory does not help: the import resolves from where this CLI is
+ * installed, and under bare `npx` that is a throwaway cache with no ethers in it.
+ */
+export const ETHERS_INSTALL_HINT =
+  'install it next to this CLI: `npm i @roundhouseai/x402 ethers` in a project, ' +
+  '`npm i -g ethers` beside a global install, or run with ' +
+  '`npx -p @roundhouseai/x402 -p ethers rh-x402 ...`';
+
+/**
  * Load `ethers` on demand. It is an *optional* peer dependency, so a default
  * install of this CLI carries no signing code at all — only the `local`
  * backend needs it, and only when it actually signs.
@@ -27,9 +37,24 @@ export async function loadEthers(): Promise<{ Wallet: new (key: string) => Ether
   } catch {
     throw new X402Error(
       ExitCode.OWS_UNREACHABLE,
-      'the local signer backend needs the optional peer dependency `ethers` (npm i ethers)',
+      `the local signer backend needs the optional peer dependency \`ethers\`: ${ETHERS_INSTALL_HINT}`,
     );
   }
+}
+
+/** Whether `ethers` resolves from here, without throwing. */
+export async function ethersAvailable(): Promise<boolean> {
+  try {
+    await loadEthers();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Whether the keystore can be unlocked in this shell without asking. */
+export function passphraseAvailable(config: LocalBackendConfig): boolean {
+  return Boolean(config.passphrase ?? process.env.X402_KEYSTORE_PASS);
 }
 
 function passphraseFor(config: LocalBackendConfig): string {

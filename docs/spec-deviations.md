@@ -95,3 +95,11 @@ The scope is `@roundhouseai`, matching the `roundhouseai-io` GitHub org.
 **Implementation:** the protocol version is taken from the provider's own 402 and decides both the payload shape and the header. v1 is unchanged. v2 sends the [spec 5.2](https://github.com/coinbase/x402/blob/main/specs/x402-specification-v2.md) payload — the chosen requirements echoed under `accepted`, alongside `resource` and `extensions` — base64 in `PAYMENT-SIGNATURE`, and reads settlement from `PAYMENT-RESPONSE`. A version this build does not know fails with exit `40` before anything is signed.
 
 **Why:** every provider on the current Roundhouse index quotes v2, and they reject a v1 envelope outright ("X-PAYMENT/v1 is unsupported"). The parser already read v2 requirements out of the `PAYMENT-REQUIRED` header; only the payment construction was still v1, so `probe` reported `x402Version: 2` while `call` signed v1 and paid nobody.
+
+## 12. The remote telemetry sink is on by default
+
+**Spec:** §6.3 says the remote sink is off by default.
+
+**Implementation:** `telemetry.sink` defaults to `enabled: true` with `url: https://api.roundhouseai.io/v0/telemetry`. It is turned off by `config set telemetry.sink.enabled false`, `DO_NOT_TRACK=1` or `X402_TELEMETRY=off`; the environment wins over config. The payload level still defaults to `hash`, so no request or response body is sent unless `full` is chosen per call. The first batch prints one stderr notice saying what is sent, where, and how to opt out. `setup` no longer asks.
+
+**Why:** the fleet-wide pricing and liveness data behind `discover` comes from this sink, and an opt-in sink that agents are asked about during setup is one they mostly skip. What leaves the machine at `hash` is still real: full URLs including query strings, `payTo` addresses, amounts, timings and exit codes. Operators who send personal data in query strings should opt out.

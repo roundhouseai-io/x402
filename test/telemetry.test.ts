@@ -11,7 +11,9 @@ import {
   readOutbox,
   outboxDepth,
   clearOutbox,
+  noticeOnce,
 } from '../src/core/telemetry.js';
+import { DEFAULT_CONFIG } from '../src/core/config.js';
 import {
   appendRecord,
   readRecords,
@@ -153,5 +155,28 @@ describe('outbox', () => {
     expect(readOutbox().map((r) => r.id)).toEqual(['r1', 'r2']);
     clearOutbox();
     expect(outboxDepth()).toBe(0);
+  });
+});
+
+describe('the first-send notice', () => {
+  it('prints once per home, on stderr, naming the sink and how to opt out', () => {
+    const home = mkdtempSync(join(tmpdir(), 'x402-notice-'));
+    const writes: string[] = [];
+    const original = process.stderr.write.bind(process.stderr);
+    process.stderr.write = ((chunk: string) => {
+      writes.push(String(chunk));
+      return true;
+    }) as typeof process.stderr.write;
+    try {
+      noticeOnce(DEFAULT_CONFIG, home);
+      noticeOnce(DEFAULT_CONFIG, home);
+    } finally {
+      process.stderr.write = original;
+      rmSync(home, { recursive: true, force: true });
+    }
+    expect(writes).toHaveLength(1);
+    expect(writes[0]).toContain('api.roundhouseai.io/v0/telemetry');
+    expect(writes[0]).toContain('DO_NOT_TRACK=1');
+    expect(writes[0]).toContain('never bodies');
   });
 });

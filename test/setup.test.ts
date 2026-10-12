@@ -3,7 +3,15 @@ import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ExitCode, X402Error } from '../src/core/errors.js';
-import { installArgs, runSetup, KEY_PATHS, OWS_PACKAGE, INSTALL_STDIO } from '../src/core/setup.js';
+import {
+  installArgs,
+  runSetup,
+  KEY_PATHS,
+  OWS_PACKAGE,
+  INSTALL_STDIO,
+  NO_SUDO_GUIDANCE,
+  globalRootWritable,
+} from '../src/core/setup.js';
 import { readRawConfig } from '../src/core/config.js';
 import { defaultKeystorePath } from '../src/core/keystore.js';
 import { isInstalled } from './optional.js';
@@ -117,8 +125,41 @@ describe('guided setup, without a terminal', () => {
     expect(readRawConfig()).toEqual({});
   });
 
+  it.skipIf(isInstalled('ethers'))(
+    'names every missing prerequisite in one error, before writing anything',
+    async () => {
+      // An agent hit these one at a time: the passphrase first, then ethers
+      // only once the passphrase was fixed.
+      const err = await runSetup({ path: 'generate', name: 'dev' }).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(X402Error);
+      expect((err as X402Error).code).toBe(ExitCode.OWS_UNREACHABLE);
+      expect((err as Error).message).toMatch(/X402_KEYSTORE_PASS/);
+      expect((err as Error).message).toMatch(/ethers/);
+      expect(existsSync(defaultKeystorePath())).toBe(false);
+      expect(readRawConfig()).toEqual({});
+    },
+  );
+
   it('requires a passphrase before generating anything', async () => {
     await expect(runSetup({ path: 'generate', name: 'dev' })).rejects.toThrow(/X402_KEYSTORE_PASS/);
     expect(existsSync(defaultKeystorePath())).toBe(false);
+  });
+});
+
+describe('when a global install cannot work', () => {
+  it('points at npx and a project install, and never at sudo', () => {
+    expect(NO_SUDO_GUIDANCE).toContain('npx @roundhouseai/x402');
+    expect(NO_SUDO_GUIDANCE).toContain('npm i @roundhouseai/x402');
+    expect(NO_SUDO_GUIDANCE).toContain('Do not use sudo');
+    expect(NO_SUDO_GUIDANCE).not.toMatch(/sudo npm|sudo -/);
+  });
+
+  it('calls a directory that does not exist yet writable when its parent is', () => {
+    expect(globalRootWritable(join(home, 'lib', 'node_modules'))).toBe(true);
+    expect(globalRootWritable(home)).toBe(true);
+  });
+
+  it('says nothing when npm would not report a root', () => {
+    expect(globalRootWritable(null)).toBeUndefined();
   });
 });

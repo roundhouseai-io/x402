@@ -7,19 +7,56 @@ import {
   setPath,
   unsetPath,
   assertKnownConfigKey,
+  assertGroupNotOverwritten,
   normalizeConfigValue,
 } from '../core/config.js';
 import { paths } from '../core/paths.js';
-import { writeJson, isTty } from '../core/output.js';
+import { writeJson, writeErr, isTty } from '../core/output.js';
 import { coerce } from '../core/data.js';
 import { type ParsedArgs } from '../core/args.js';
+import { REDACTED, redactConfig } from '../core/auth.js';
+import { readStdin } from '../core/stdin.js';
+
+const API_KEY_PATH = 'auth.apiKey';
+
+/**
+ * The value `config set` stores for `raw`.
+ *
+ * The API key gets three spellings: `env:NAME` (stored as the reference, read
+ * at call time), `-` (read from stdin, so it never lands in argv or shell
+ * history) and a literal (accepted, with a warning that argv is not private).
+ */
+async function valueFor(key: string, raw: string): Promise<unknown> {
+  if (key === API_KEY_PATH) {
+    if (raw.startsWith('env:')) return raw;
+    if (raw === '-') {
+      const piped = (await readStdin({ force: true }))?.trim();
+      if (!piped) throw new X402Error(ExitCode.GENERIC, 'no key on stdin');
+      return piped;
+    }
+    writeErr(
+      'the key is on the command line, which shell history and `ps` can read. Prefer ' +
+        '`config set auth.apiKey env:ROUNDHOUSE_API_KEY` or pipe it in with `-`.',
+    );
+    return raw;
+  }
+  // `env:NAME` stays a literal in the file and is resolved at read time, so
+  // secrets never land in config.json. Everything else is coerced to its JSON
+  // type and then normalised, so a money amount is stored as a string rather
+  // than a number `parseUnits` cannot read.
+  return raw.startsWith('env:') ? raw : normalizeConfigValue(key, coerce(raw));
+}
 
 /** Manage ~/.x402/config.json. `list` shows the effective, resolved config. */
-export function configCommand(parsed: ParsedArgs): number {
+export async function configCommand(parsed: ParsedArgs): Promise<number> {
   const sub = parsed.positionals[0] ?? 'list';
 
   if (sub === 'list') {
-    const { config, sources, origins } = loadConfig();
+    const loaded = loadConfig();
+    const { sources, origins } = loaded;
+    // Redacted before it is serialised: a `list` that echoes the key would put
+    // it in every transcript the command is run in.
+    const config = redactConfig(loaded.config);
     if (isTty()) {
       process.stdout.write(`# sources: ${sources.join(', ') || 'defaults only'}\n`);
       process.stdout.write(`${JSON.stringify(config, null, 2)}\n`);
@@ -41,7 +78,8 @@ export function configCommand(parsed: ParsedArgs): number {
     const key = parsed.positionals[1];
     if (!key) throw new X402Error(ExitCode.GENERIC, 'usage: rh-x402 config get <dotted.key>');
     const { config } = loadConfig();
-    const value = getPath(config, key);
+    const found = getPath(config, key);
+    const value = key === API_KEY_PATH && found ? REDACTED : found;
     if (isTty()) process.stdout.write(`${value === undefined ? '' : JSON.stringify(value)}\n`);
     else writeJson({ ok: value !== undefined, key, value: value ?? null });
     return value === undefined ? ExitCode.GENERIC : ExitCode.OK;
@@ -57,15 +95,15 @@ export function configCommand(parsed: ParsedArgs): number {
     // and change nothing, which is how `signer.backend` got set instead of
     // `wallet.backend` and every later command quietly used the default.
     assertKnownConfigKey(key);
-    // `env:NAME` stays a literal in the file and is resolved at read time, so
-    // secrets never land in config.json. Everything else is coerced to its JSON
-    // type and then normalised, so a money amount is stored as a string rather
-    // than a number `parseUnits` cannot read.
-    const value = raw.startsWith('env:') ? raw : normalizeConfigValue(key, coerce(raw));
+    const value = await valueFor(key, raw);
+    assertGroupNotOverwritten(key, value);
     const current = readRawConfig();
     writeRawConfig(setPath(current, key, value));
-    if (isTty()) process.stdout.write(`${key} = ${JSON.stringify(value)}\n`);
-    else writeJson({ ok: true, file: paths.config(), key, value });
+    // A literal API key is not echoed back. An `env:` reference is, because
+    // naming the variable is the whole point and it is not a secret.
+    const shown = key === API_KEY_PATH && !String(value).startsWith('env:') ? REDACTED : value;
+    if (isTty()) process.stdout.write(`${key} = ${JSON.stringify(shown)}\n`);
+    else writeJson({ ok: true, file: paths.config(), key, value: shown });
     return ExitCode.OK;
   }
 

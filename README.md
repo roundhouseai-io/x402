@@ -43,6 +43,8 @@ npm i -g @roundhouseai/x402      # then: rh-x402 <url>
 npx @roundhouseai/x402 <url>     # or zero-install
 ```
 
+**`EACCES` on `npm i -g`?** The global npm directory is not yours. Do not use `sudo`: this tool handles a hot wallet. Run it without installing (`npx @roundhouseai/x402 <command>`), install into a project (`npm i @roundhouseai/x402`, then `npx rh-x402`), or give npm a prefix you own (`npm config set prefix ~/.npm-global`, then put `~/.npm-global/bin` on `PATH`). The guided wallet setup checks this before it runs `npm i -g` and says the same.
+
 Node 20.10+ is required. Then create a wallet — one command, and it asks the questions:
 
 ```bash
@@ -118,9 +120,66 @@ base (0x2D43136FfBbbe0ED5CBaaB2E8B2b8c968059114C)
 
 Read from the chain over JSON-RPC, so it gives the same answer for every backend — `ows-core` exports no balance function and the `local` keystore has nothing to ask, which used to make this a per-backend capability that mostly answered "cannot". Base, Ethereum and Base Sepolia ship with public endpoints; override one with `rh-x402 config set rpc.base <url>`.
 
+### Waiting for funds
+
+```bash
+rh-x402 wallet balance --wait --min 1.00 --timeout 30m
+```
+
+Polls the chain until the wallet holds `--min` USDC (default `1.00`) or `--timeout` passes (default `30m`; a bare number is seconds). Exit `0` when it is met, `48` when time ran out. A failed RPC read does not end the wait. A progress line goes to stderr at most once a minute. `--min` without `--wait` checks once and exits `46` if the balance is short. Both watch one chain.
+
 **That last line matters.** An x402 payment is an EIP-3009 authorization the facilitator submits, so the payer needs USDC and **no ETH at all**. A zero ETH balance does not stop an x402 call — it only stops a direct on-chain transfer, which is a different thing. `wallet balance` exits `46` when the token balance is zero, and never on the gas balance.
 
 Nothing in the payment path calls an RPC, so a rate-limited endpoint costs you this command and nothing else.
+
+## One command: `setup`
+
+```bash
+rh-x402 setup                    # asks what it needs, in one block
+rh-x402 setup --yes             # asks nothing: OWS, 0.05 per call, 5.00 a day, telemetry on
+```
+
+Takes a machine from nothing to a funded wallet, a proven payment path and a stored API key. Every step is also a command you can run alone, and the steps use the same names as `status`'s `next`:
+
+| Step            | What it does                                                                                        | Alone                                  |
+| --------------- | --------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| `environment`   | Checks Node and whether `npm i -g` would work. Never suggests `sudo`.                               |                                        |
+| `state`         | Runs `status`.                                                                                      | `rh-x402 status`                       |
+| `decisions`     | Collects custody, both caps, telemetry and an optional org key, then prints them back.              |                                        |
+| `create-wallet` | Creates the wallet and takes the OWS policy. Keeps an existing wallet.                              | `rh-x402 wallet create`                |
+| `set-caps`      | Writes the caps. They are advisory; the balance is the real limit.                                  | `rh-x402 config set limits.maxPerCall` |
+| `fund`          | Prints the address, then waits for `--min-balance` (default `1.00`) up to `--fund-timeout` (`30m`). | `rh-x402 wallet balance --wait`        |
+| `first-payment` | Dry-runs, then pays, `/v0/test/x402` (about a cent) for a 30-day key. Skipped with `--org-key`.     | `rh-x402 call … --max 0.02`            |
+| `store-key`     | Stores the key as `auth.apiKey`. It is not printed unless `--print-key`.                            | `rh-x402 config set auth.apiKey`       |
+| `summary`       | Prints `status` and the three commands to use next.                                                 |                                        |
+
+**Idempotent and resumable.** A step is skipped when `status` says it is done, and `status` is read again after every step that changes anything. Run it again and nothing changes; kill it at any step and the next run starts there. It exits non-zero on the first failing step, with that step's name and the exit code the failure already has (`48` for a funding timeout, `47` for a signer outage). `--json` prints one object per step.
+
+**What `--yes` decides.** It accepts the defaults for everything not given as a flag: the key held by OWS (`--path ows`), `0.05` per call, `5.00` a day, no org key. It also consents to installing the OWS bindings and taking the policy. It never funds the wallet: a human or another process has to send the USDC while it waits. Without `--yes` and with no terminal, `--path` is still required.
+
+**Telemetry is on and never asked.** Call outcomes go to the Roundhouse index at the `hash` level (URLs, amounts, payees, timings, hashes; no bodies). Opt out with `--telemetry off`, `config set telemetry.sink.enabled false`, `DO_NOT_TRACK=1` or `X402_TELEMETRY=off`. See [docs/telemetry.md](docs/telemetry.md).
+
+**A keystore wallet (`--path import` or `generate`) needs `X402_KEYSTORE_PASS` and `ethers` first.** Both are checked before anything is written and reported together:
+
+```bash
+export X402_KEYSTORE_PASS='a long passphrase'
+npx -p @roundhouseai/x402 -p ethers rh-x402 setup --path generate --max-per-call 0.05 --daily-cap 5 --yes
+```
+
+**`--dry-run`** runs every check and prompt and makes no wallet, no config write and no payment. With a wallet already in place it still runs the payment's dry run, which exercises every gate and stops before signing.
+
+**The OWS policy key is shown once.** It is printed on stderr (and in the `create-wallet` event with `--json`) and must be exported as `OWS_X402_KEY` in every shell that pays. If a later run finds the wallet but not the key, it mints a new one for the same wallet and says so. The wallet and its funds are untouched.
+
+**The test key is returned once.** `setup` writes it before it prints anything. If a payment completed and the key was never stored, `setup` stops at `store-key` and says so, because paying again is a decision: `rh-x402 setup --repay` pays for a new key. `--key-env NAME` keeps the key in the environment instead of the config file, and prints the `export` line.
+
+## The Roundhouse API key
+
+```bash
+rh-x402 config set auth.apiKey env:ROUNDHOUSE_API_KEY    # a reference; the key stays in the environment
+printf %s "$KEY" | rh-x402 config set auth.apiKey -      # or a literal, from stdin
+```
+
+`auth.apiKey` is sent as `Authorization: Bearer` to `roundhouseai.io` hosts over https and to nothing else, and never replaces an `Authorization` header you pass with `-H`. `config get`, `config list` and `status` show `[redacted]` or `set`, never the value. A literal lands in `~/.x402/config.json`, which is `0600`; prefer the `env:` form where an operator can export it.
 
 ## Where am I?
 
@@ -342,6 +401,7 @@ rh-x402 call x402:web-search --data.query "..."   # resolve, then call the cheap
 | `rh-x402 discover <capability>`                 | Providers for a capability, with the market around them            |
 | `rh-x402 history [query]`                       | Query the local ledger                                             |
 | `rh-x402 status`                                | Where setup stands and which step is next. Never pays.             |
+| `rh-x402 setup`                                 | From nothing to a stored API key. Idempotent and resumable.        |
 | `rh-x402 wallet create`                         | Guided setup: pick how the key is held, configure it               |
 | `rh-x402 wallet policy`                         | Register an OWS policy and mint the API key that carries it        |
 | `rh-x402 wallet balance [usdc]`                 | Native and token balances, read from the chain over RPC            |
@@ -458,7 +518,7 @@ Found by driving the published package against production, not by reading the so
 
 **2. `wallet balance` does not ask the backend, but the engine's pre-flight check does.** The command reads the chain over JSON-RPC, so it answers on every backend — including one whose `signer check` reports `balances: false`, which most do. What that capability actually gates is the engine's pre-flight funding check, which it skips rather than guessing: a call can still fail at the provider for want of funds even where `signer check` looked fine. Run `rh-x402 wallet balance` yourself before a batch of calls rather than relying on the pre-flight.
 
-**3. The `local` backend needs `ethers`, and refuses a loose key file.** It is the only part of the tool that signs locally, and `ethers` is an _optional_ peer dependency — a default install carries no signing code at all, which is deliberate. Without it you get exit `47` and `needs the optional peer dependency ethers (npm i ethers)`. It also refuses to read a group- or world-readable keystore (`chmod 600` it) and a world-readable raw key file. Those refusals are the feature; do not chmod around them.
+**3. The `local` backend needs `ethers`, and refuses a loose key file.** It is the only part of the tool that signs locally, and `ethers` is an _optional_ peer dependency — a default install carries no signing code at all, which is deliberate. Without it you get exit `47` and a message that says how to install it next to the CLI: `npx -p @roundhouseai/x402 -p ethers rh-x402 ...` for zero-install, `npm i @roundhouseai/x402 ethers` in a project. A plain `npm i ethers` in another directory does not help, because the import resolves from where the CLI is installed. The keystore also needs `X402_KEYSTORE_PASS` in every shell that signs; `wallet create` checks both before it writes anything, and `status` warns when either is missing. It also refuses to read a group- or world-readable keystore (`chmod 600` it) and a world-readable raw key file. Those refusals are the feature; do not chmod around them.
 
 **4. `npx x402` is a different project.** The unscoped name on npm belongs to someone else. Zero-install is `npx @roundhouseai/x402`; a global install gives you `rh-x402` (unique) alongside `x402` (short, and contested). Scripts should say `rh-x402`.
 
@@ -538,7 +598,7 @@ A backend that declares it cannot sign EIP-712 typed data fails when the signer 
   },
   "limits": { "maxPerCall": "0.05", "dailyCap": "5.00" },
   "allowlist": { "payTo": [], "domains": [] },
-  "telemetry": { "payload": "hash", "sink": { "enabled": false } },
+  "telemetry": { "payload": "hash", "sink": { "enabled": true } },
   "defaults": { "chain": "base", "timeout": 30 },
   "pins": { "lei": "https://provider.example/v1/lei" }
 }

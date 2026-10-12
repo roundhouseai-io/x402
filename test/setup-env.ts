@@ -9,6 +9,11 @@
  * Tests that care about proxy behaviour pass an explicit environment to
  * `proxyFromEnv` / `proxyHint` rather than relying on the ambient one.
  */
+// The remote sink is on by default. Opt the whole suite out, so a test that
+// forgets to stub `fetch` can never post a record to the real ingest endpoint.
+// Tests of the opt-out itself pass an explicit environment.
+process.env.X402_TELEMETRY = 'off';
+
 for (const name of [
   'HTTPS_PROXY',
   'https_proxy',

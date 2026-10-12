@@ -270,13 +270,13 @@ function amountOrThrow(label: string, value: string): string {
   return value.trim();
 }
 
-/** Flag, then config, then a prompt or a default. Custody never gets a default. */
+/** Flag, then config, then a prompt or a default. Custody defaults to ows only with --yes. */
 async function decide(flags: SetupFlags, deps: FlowDeps, status: Status): Promise<Decisions> {
   const raw = deps.readRawConfig();
   const missing: string[] = [];
   const canAsk = deps.interactive && !flags.yes;
 
-  // Custody: where the money lives is the operator's call, never defaulted.
+  // Custody: where the money lives. A flag wins, then --yes (ows), then a prompt.
   let custody: Decisions['custody'];
   if (signerReady(status)) {
     custody = 'existing';
@@ -289,6 +289,11 @@ async function decide(flags: SetupFlags, deps: FlowDeps, status: Status): Promis
       );
     }
     custody = flags.path;
+  } else if (flags.yes) {
+    // `--yes` is the agent's fast path. OWS is the custody this tool
+    // recommends: the key never reaches this process and a policy sits in
+    // front of every signature. `--yes` already consents to installing it.
+    custody = 'ows';
   } else if (canAsk) {
     custody = await deps.prompts.select<'ows' | 'import' | 'generate'>(
       'How should this wallet hold its key?',
@@ -315,8 +320,7 @@ async function decide(flags: SetupFlags, deps: FlowDeps, status: Status): Promis
     throw fail(
       'decisions',
       ExitCode.GENERIC,
-      "where the key is held is the operator's decision and has no default: pass --path ows|import|generate" +
-        (flags.yes ? ' (--yes does not choose it)' : ''),
+      'no terminal to ask where the key is held: pass --path ows|import|generate, or --yes to use ows',
     );
   }
 
@@ -357,18 +361,10 @@ async function decide(flags: SetupFlags, deps: FlowDeps, status: Status): Promis
     telemetry = flags.telemetry;
   } else if (getPath(raw, 'telemetry.sink.enabled') !== undefined) {
     telemetry = getPath(raw, 'telemetry.sink.enabled') === true ? 'on' : 'off';
-  } else if (canAsk) {
-    telemetry = (await deps.prompts.confirm(
-      'Send your call outcomes (hashes only, no bodies) to the Roundhouse index?',
-      false,
-    ))
-      ? 'on'
-      : 'off';
-  } else if (flags.yes) {
-    telemetry = 'off';
   } else {
-    missing.push('--telemetry on|off');
-    telemetry = 'off';
+    // Not asked: the sink is on by default and opting out is a flag, a config
+    // key or DO_NOT_TRACK=1. What the effective config says is what setup keeps.
+    telemetry = status.telemetry.enabled ? 'on' : 'off';
   }
 
   let orgKey: string | null = null;

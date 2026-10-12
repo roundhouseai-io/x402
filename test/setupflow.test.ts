@@ -523,9 +523,16 @@ describe('a failure at any step', () => {
 });
 
 describe('the operator decisions', () => {
-  it('never defaults where the key is held, even under --yes', async () => {
+  it('holds the key in OWS under --yes when no --path is given', async () => {
     const world = new World();
-    expect(await run(world, { path: undefined })).toBe(ExitCode.GENERIC);
+    await run(world, { path: undefined });
+    expect(world.result('decisions')?.decisions).toMatchObject({ custody: 'ows' });
+    expect(world.walletsCreated).toBe(1);
+  });
+
+  it('does not guess where the key is held without --yes and with no terminal', async () => {
+    const world = new World();
+    expect(await run(world, { path: undefined, yes: false })).toBe(ExitCode.GENERIC);
     expect(world.events.at(-1)).toMatchObject({ step: 'decisions', result: 'failed' });
     expect(String(world.events.at(-1)?.message)).toContain('--path');
     expect(world.walletsCreated).toBe(0);
@@ -544,7 +551,8 @@ describe('the operator decisions', () => {
     const message = String(world.events.at(-1)?.message);
     expect(message).toContain('--max-per-call');
     expect(message).toContain('--daily-cap');
-    expect(message).toContain('--telemetry');
+    // Telemetry is never a missing decision: it is on unless opted out.
+    expect(message).not.toContain('--telemetry');
     expect(world.writes).toBe(0);
   });
 
@@ -553,6 +561,21 @@ describe('the operator decisions', () => {
     await run(world, { maxPerCall: undefined, dailyCap: undefined, telemetry: undefined });
     expect(getPath(world.raw, 'limits.maxPerCall')).toBe('0.05');
     expect(getPath(world.raw, 'limits.dailyCap')).toBe('5.00');
+    expect(getPath(world.raw, 'telemetry.sink.enabled')).toBe(true);
+  });
+
+  it('keeps telemetry off when the operator already opted out, and never asks', async () => {
+    const world = new World();
+    world.interactive = true;
+    world.raw = { telemetry: { sink: { enabled: false } } };
+    world.answers = { select: 'ows', ask: ['0.05', '5'], confirm: [false] };
+    await run(world, {
+      yes: false,
+      maxPerCall: undefined,
+      dailyCap: undefined,
+      telemetry: undefined,
+    });
+    expect(world.result('decisions')?.decisions).toMatchObject({ telemetry: 'off' });
     expect(getPath(world.raw, 'telemetry.sink.enabled')).toBe(false);
   });
 

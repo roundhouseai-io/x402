@@ -208,12 +208,12 @@ Read-only; never pays, signs or prompts. Run it first when you are resuming. `ne
 ## Setting up — `setup`
 
 ```bash
-rh-x402 setup --path ows --max-per-call 0.05 --daily-cap 5 --telemetry off --yes --json
+rh-x402 setup --yes --json
 ```
 
 From nothing to a stored API key. Idempotent: run it again and it skips what is done. Resumable: kill it and the next run starts at the step that did not finish. Steps, in order, named as `status`'s `next`: `environment`, `state`, `decisions`, `create-wallet`, `set-caps`, `fund`, `first-payment`, `store-key`, `summary`. With `--json` each step is one JSON object with `step`, `result` (`done`, `skipped`, `planned`, `failed`) and `message`. A failure exits with the step's own exit code and names the step.
 
-The operator decides, not you: where the key is held (`--path`, never defaulted), both caps, telemetry, and whether an organization key exists (`--org-key env:NAME`). It stops at `fund` until someone sends USDC to the printed address on Base. It never prints the API key unless `--print-key`. The OWS policy key is shown once: export it as `OWS_X402_KEY` in every shell that pays. `--dry-run` makes no wallet, no config write and no payment.
+`--yes` takes the defaults: key held by OWS, `0.05` per call, `5.00` a day, no org key. If the operator gave you a different custody (`--path import|generate`), caps or an org key (`--org-key env:NAME`), pass those flags; do not pick other values yourself. Telemetry is on and is not asked; pass `--telemetry off` only if the operator opted out. It stops at `fund` until someone sends USDC to the printed address on Base. It never prints the API key unless `--print-key`. The OWS policy key is shown once: export it as `OWS_X402_KEY` in every shell that pays. `--dry-run` makes no wallet, no config write and no payment.
 
 **`--path import` and `--path generate` need two things before you start.** Both are checked up front, reported together, and nothing is written until both are there:
 
@@ -222,7 +222,7 @@ The operator decides, not you: where the key is held (`--path`, never defaulted)
 
 ```bash
 export X402_KEYSTORE_PASS='a long passphrase'
-npx -p @roundhouseai/x402 -p ethers rh-x402 setup --path generate --max-per-call 0.05 --daily-cap 5 --telemetry on --yes --json
+npx -p @roundhouseai/x402 -p ethers rh-x402 setup --path generate --max-per-call 0.05 --daily-cap 5 --yes --json
 ```
 
 **Set leaves, not groups.** `config set telemetry on` is refused: `telemetry` is a group. The switch is `config set telemetry.sink.enabled true` (`on`/`off` are accepted for it).

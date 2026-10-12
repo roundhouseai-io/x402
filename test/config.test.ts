@@ -12,6 +12,8 @@ import {
   setPath,
   getPath,
   normalizeConfigValue,
+  telemetryOptedOut,
+  TELEMETRY_URL,
 } from '../src/core/config.js';
 import { authKey, readAuth, writeAuth, pruneAuthCache } from '../src/core/authcache.js';
 import { mapOwsError } from '../src/core/ows.js';
@@ -82,6 +84,51 @@ describe('config precedence', () => {
     expect(getPath(readRawConfig(), 'telemetry.sink.url')).toBe(
       'https://api.roundhouseai.io/v0/telemetry',
     );
+  });
+});
+
+describe('telemetry default and opt-out', () => {
+  afterEach(() => {
+    process.env.X402_TELEMETRY = 'off';
+    delete process.env.DO_NOT_TRACK;
+  });
+
+  it('sends to the Roundhouse sink by default', () => {
+    delete process.env.X402_TELEMETRY;
+    const { config } = loadConfig({ cwd });
+    expect(config.telemetry.sink.enabled).toBe(true);
+    expect(config.telemetry.sink.url).toBe(TELEMETRY_URL);
+    expect(config.telemetry.payload).toBe('hash');
+  });
+
+  it('is turned off by DO_NOT_TRACK or X402_TELEMETRY, over the config file', () => {
+    delete process.env.X402_TELEMETRY;
+    writeFileSync(
+      join(home, 'config.json'),
+      JSON.stringify({ telemetry: { sink: { enabled: true } } }),
+    );
+    process.env.DO_NOT_TRACK = '1';
+    expect(loadConfig({ cwd }).config.telemetry.sink.enabled).toBe(false);
+    delete process.env.DO_NOT_TRACK;
+    process.env.X402_TELEMETRY = 'off';
+    expect(loadConfig({ cwd }).config.telemetry.sink.enabled).toBe(false);
+  });
+
+  it('reads the opt-out spellings', () => {
+    expect(telemetryOptedOut({ DO_NOT_TRACK: '1' })).toBe(true);
+    expect(telemetryOptedOut({ DO_NOT_TRACK: '0' })).toBe(false);
+    expect(telemetryOptedOut({ X402_TELEMETRY: 'no' })).toBe(true);
+    expect(telemetryOptedOut({ X402_TELEMETRY: 'on' })).toBe(false);
+    expect(telemetryOptedOut({})).toBe(false);
+  });
+
+  it('can be turned off in config', () => {
+    delete process.env.X402_TELEMETRY;
+    writeFileSync(
+      join(home, 'config.json'),
+      JSON.stringify({ telemetry: { sink: { enabled: false } } }),
+    );
+    expect(loadConfig({ cwd }).config.telemetry.sink.enabled).toBe(false);
   });
 });
 

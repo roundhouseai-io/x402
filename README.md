@@ -136,7 +136,7 @@ Nothing in the payment path calls an RPC, so a rate-limited endpoint costs you t
 
 ```bash
 rh-x402 setup                    # asks what it needs, in one block
-rh-x402 setup --path ows --max-per-call 0.05 --daily-cap 5 --telemetry off --yes   # asks nothing
+rh-x402 setup --yes             # asks nothing: OWS, 0.05 per call, 5.00 a day, telemetry on
 ```
 
 Takes a machine from nothing to a funded wallet, a proven payment path and a stored API key. Every step is also a command you can run alone, and the steps use the same names as `status`'s `next`:
@@ -155,13 +155,15 @@ Takes a machine from nothing to a funded wallet, a proven payment path and a sto
 
 **Idempotent and resumable.** A step is skipped when `status` says it is done, and `status` is read again after every step that changes anything. Run it again and nothing changes; kill it at any step and the next run starts there. It exits non-zero on the first failing step, with that step's name and the exit code the failure already has (`48` for a funding timeout, `47` for a signer outage). `--json` prints one object per step.
 
-**What `--yes` decides.** It accepts the defaults for everything not given as a flag: `0.05` per call, `5.00` a day, telemetry off, no org key. It also consents to installing the OWS bindings and taking the policy. It never chooses where the key is held (`--path` is required) and it never funds the wallet: a human or another process has to send the USDC while it waits.
+**What `--yes` decides.** It accepts the defaults for everything not given as a flag: the key held by OWS (`--path ows`), `0.05` per call, `5.00` a day, no org key. It also consents to installing the OWS bindings and taking the policy. It never funds the wallet: a human or another process has to send the USDC while it waits. Without `--yes` and with no terminal, `--path` is still required.
+
+**Telemetry is on and never asked.** Call outcomes go to the Roundhouse index at the `hash` level (URLs, amounts, payees, timings, hashes; no bodies). Opt out with `--telemetry off`, `config set telemetry.sink.enabled false`, `DO_NOT_TRACK=1` or `X402_TELEMETRY=off`. See [docs/telemetry.md](docs/telemetry.md).
 
 **A keystore wallet (`--path import` or `generate`) needs `X402_KEYSTORE_PASS` and `ethers` first.** Both are checked before anything is written and reported together:
 
 ```bash
 export X402_KEYSTORE_PASS='a long passphrase'
-npx -p @roundhouseai/x402 -p ethers rh-x402 setup --path generate --max-per-call 0.05 --daily-cap 5 --telemetry on --yes
+npx -p @roundhouseai/x402 -p ethers rh-x402 setup --path generate --max-per-call 0.05 --daily-cap 5 --yes
 ```
 
 **`--dry-run`** runs every check and prompt and makes no wallet, no config write and no payment. With a wallet already in place it still runs the payment's dry run, which exercises every gate and stops before signing.
@@ -596,7 +598,7 @@ A backend that declares it cannot sign EIP-712 typed data fails when the signer 
   },
   "limits": { "maxPerCall": "0.05", "dailyCap": "5.00" },
   "allowlist": { "payTo": [], "domains": [] },
-  "telemetry": { "payload": "hash", "sink": { "enabled": false } },
+  "telemetry": { "payload": "hash", "sink": { "enabled": true } },
   "defaults": { "chain": "base", "timeout": 30 },
   "pins": { "lei": "https://provider.example/v1/lei" }
 }

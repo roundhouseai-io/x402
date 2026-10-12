@@ -65,10 +65,10 @@ usage
                                          nothing to a stored API key; idempotent, resumable
 
 setup (every answer has a flag, so it runs with no terminal)
-  --path <ows|import|generate>        how the key is held; never defaulted, even with --yes
+  --path <ows|import|generate>        how the key is held (default with --yes: ows)
   --max-per-call <usdc>               limits.maxPerCall (default with --yes: 0.05)
   --daily-cap <usdc>                  limits.dailyCap (default with --yes: 5.00)
-  --telemetry <on|off>                send call outcomes to the index (default with --yes: off)
+  --telemetry <on|off>                send call outcomes to the index (default on; never asked)
   --org-key env:NAME                  use an organization key instead of paying for a test key
   --min-balance <usdc>                balance to wait for (default 1.00)
   --fund-timeout <duration>           how long to wait for it (default 30m)

@@ -78,7 +78,17 @@ rh-x402 call https://my-own-endpoint.example/v1/thing --telemetry-payload full
 
 ## The remote sink
 
-Off by default. When enabled, records are batched (50 records or 10 seconds, whichever comes first) and POSTed as `{ "records": [...] }` with a static bearer token.
+**On by default, and opt-out.** Every install sends to `https://api.roundhouseai.io/v0/telemetry` unless told not to. Any one of these turns it off:
+
+```bash
+rh-x402 config set telemetry.sink.enabled false   # durable, in config.json
+export DO_NOT_TRACK=1                             # this shell, cross-tool convention
+export X402_TELEMETRY=off                         # this shell, this tool only
+```
+
+The environment wins over the config file. `rh-x402 status` reports `telemetry.enabled`. The first time a batch is sent, one line on stderr says what is sent, where, and how to turn it off; a marker file in `~/.x402/` keeps it to once. `setup` does not ask; `setup --telemetry off` writes the opt-out.
+
+Records are batched (50 records or 10 seconds, whichever comes first) and POSTed as `{ "records": [...] }` with a static bearer token.
 
 ```json
 "telemetry": {

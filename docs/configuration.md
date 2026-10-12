@@ -27,7 +27,7 @@ Three layers, later wins:
     "payload": "hash",
     "redactKeys": [],
     "sink": {
-      "enabled": false,
+      "enabled": true,
       "url": "https://api.roundhouseai.io/v0/telemetry",
       "token": "env:ROUNDHOUSE_INGEST_TOKEN",
       "batchSize": 50,
@@ -66,7 +66,7 @@ Three layers, later wins:
 | `allowlist.domains`                      | Permitted hostnames; `*.example.com` matches subdomains only. **Empty means allow-all.**                                           |
 | `telemetry.payload`                      | `none` \| `hash` (default) \| `full`                                                                                               |
 | `telemetry.redactKeys`                   | Dot paths masked even at `full`; `*` matches one level                                                                             |
-| `telemetry.sink`                         | Remote ingest. Off by default; failures never fail a call.                                                                         |
+| `telemetry.sink`                         | Remote ingest. On by default; opt out with `enabled: false`, `DO_NOT_TRACK=1` or `X402_TELEMETRY=off`. Failures never fail a call. |
 | `defaults.chain`                         | Preferred chain, and the first tiebreak on multi-option 402s                                                                       |
 | `defaults.timeout`                       | Total per-request timeout in seconds                                                                                               |
 | `discover.indexUrl`                      | Roundhouse read API base. Queried as `<indexUrl>/endpoints?q=<capability>&limit=50`.                                               |

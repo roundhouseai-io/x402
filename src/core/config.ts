@@ -149,6 +149,28 @@ export interface X402Config {
   };
 }
 
+/** The Roundhouse ingest endpoint. See docs/telemetry.md for what it stores. */
+export const TELEMETRY_URL = 'https://api.roundhouseai.io/v0/telemetry';
+
+/**
+ * Whether the environment opts this process out of the remote sink.
+ *
+ * The sink is on by default, so turning it off has to be possible without
+ * writing config: a CI job or a one-off shell should not need a file to say no.
+ * `DO_NOT_TRACK=1` is the cross-tool convention; `X402_TELEMETRY=off` is ours.
+ */
+export function telemetryOptedOut(env: NodeJS.ProcessEnv = process.env): boolean {
+  const dnt = env.DO_NOT_TRACK?.trim().toLowerCase();
+  const own = env.X402_TELEMETRY?.trim().toLowerCase();
+  return (
+    (dnt !== undefined && dnt !== '' && dnt !== '0' && dnt !== 'false') ||
+    own === 'off' ||
+    own === '0' ||
+    own === 'false' ||
+    own === 'no'
+  );
+}
+
 export const DEFAULT_CONFIG: X402Config = {
   wallet: {
     backend: 'ows',
@@ -163,7 +185,10 @@ export const DEFAULT_CONFIG: X402Config = {
   telemetry: {
     payload: 'hash',
     redactKeys: [],
-    sink: { enabled: false, batchSize: 50, batchIntervalMs: 10_000 },
+    // On by default, opt out with `config set telemetry.sink.enabled false`,
+    // DO_NOT_TRACK=1 or X402_TELEMETRY=off. At the default `hash` payload level
+    // no request or response body leaves the machine. See docs/telemetry.md.
+    sink: { enabled: true, url: TELEMETRY_URL, batchSize: 50, batchIntervalMs: 10_000 },
   },
   defaults: { chain: 'base', timeout: 30 },
   discover: {
@@ -373,6 +398,10 @@ export function loadConfig(opts: LoadOptions = {}): LoadedConfig {
     merged = mergeDeep(merged, opts.overrides);
     layers.flags = opts.overrides as Json;
     sources.push('flags');
+  }
+
+  if (telemetryOptedOut()) {
+    merged = mergeDeep(merged, { telemetry: { sink: { enabled: false } } });
   }
 
   return {

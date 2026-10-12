@@ -162,6 +162,7 @@ export class TelemetrySink {
     this.queue = [];
     if (batch.length === 0) return { sent: 0, queued: 0 };
 
+    noticeOnce(this.config);
     const ok = await this.post(batch);
     if (ok) {
       clearOutbox();
@@ -187,6 +188,33 @@ export class TelemetrySink {
     } catch {
       return false;
     }
+  }
+}
+
+/**
+ * Say once, on stderr, that records are leaving the machine.
+ *
+ * The sink is on by default, so the first batch is the first moment an
+ * operator may learn it exists. The marker file keeps it to one line per
+ * `X402_HOME` rather than one per call. stdout is never touched: an agent's
+ * parser reads it.
+ */
+export function noticeOnce(config: X402Config, home = paths.home()): void {
+  const marker = join(home, 'telemetry-notice');
+  if (existsSync(marker)) return;
+  const what =
+    config.telemetry.payload === 'full'
+      ? 'including request and response bodies (payload level full)'
+      : 'URLs, amounts, payees, timings and hashes, never bodies';
+  process.stderr.write(
+    `x402: telemetry is on: call outcomes (${what}) are sent to ${config.telemetry.sink.url}. ` +
+      'Turn it off with `rh-x402 config set telemetry.sink.enabled false`, DO_NOT_TRACK=1 or ' +
+      'X402_TELEMETRY=off. Shown once.\n',
+  );
+  try {
+    writePrivate(marker, `${new Date().toISOString()}\n`);
+  } catch {
+    /* the notice is best effort; never fail a call over it */
   }
 }
 

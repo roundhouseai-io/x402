@@ -162,7 +162,8 @@ describe('collectStatus', () => {
     expect(s.balance.usdc).toBeNull();
     expect(s.limits).toEqual({ maxPerCall: 'unset', dailyCap: 'unset' });
     expect(s.auth.apiKey).toBe('unset');
-    expect(s.telemetry.enabled).toBe(false);
+    // The sink is on by default; opting out is a config key or DO_NOT_TRACK.
+    expect(s.telemetry.enabled).toBe(true);
     expect(s.spend).toEqual({ today: '0', calls: { today: 0, total: 0 } });
     expect(s.next).toBe('create-wallet');
   });

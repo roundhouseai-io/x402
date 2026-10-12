@@ -157,6 +157,13 @@ Takes a machine from nothing to a funded wallet, a proven payment path and a sto
 
 **What `--yes` decides.** It accepts the defaults for everything not given as a flag: `0.05` per call, `5.00` a day, telemetry off, no org key. It also consents to installing the OWS bindings and taking the policy. It never chooses where the key is held (`--path` is required) and it never funds the wallet: a human or another process has to send the USDC while it waits.
 
+**A keystore wallet (`--path import` or `generate`) needs `X402_KEYSTORE_PASS` and `ethers` first.** Both are checked before anything is written and reported together:
+
+```bash
+export X402_KEYSTORE_PASS='a long passphrase'
+npx -p @roundhouseai/x402 -p ethers rh-x402 setup --path generate --max-per-call 0.05 --daily-cap 5 --telemetry on --yes
+```
+
 **`--dry-run`** runs every check and prompt and makes no wallet, no config write and no payment. With a wallet already in place it still runs the payment's dry run, which exercises every gate and stops before signing.
 
 **The OWS policy key is shown once.** It is printed on stderr (and in the `create-wallet` event with `--json`) and must be exported as `OWS_X402_KEY` in every shell that pays. If a later run finds the wallet but not the key, it mints a new one for the same wallet and says so. The wallet and its funds are untouched.
@@ -509,7 +516,7 @@ Found by driving the published package against production, not by reading the so
 
 **2. `wallet balance` does not ask the backend, but the engine's pre-flight check does.** The command reads the chain over JSON-RPC, so it answers on every backend — including one whose `signer check` reports `balances: false`, which most do. What that capability actually gates is the engine's pre-flight funding check, which it skips rather than guessing: a call can still fail at the provider for want of funds even where `signer check` looked fine. Run `rh-x402 wallet balance` yourself before a batch of calls rather than relying on the pre-flight.
 
-**3. The `local` backend needs `ethers`, and refuses a loose key file.** It is the only part of the tool that signs locally, and `ethers` is an _optional_ peer dependency — a default install carries no signing code at all, which is deliberate. Without it you get exit `47` and `needs the optional peer dependency ethers (npm i ethers)`. It also refuses to read a group- or world-readable keystore (`chmod 600` it) and a world-readable raw key file. Those refusals are the feature; do not chmod around them.
+**3. The `local` backend needs `ethers`, and refuses a loose key file.** It is the only part of the tool that signs locally, and `ethers` is an _optional_ peer dependency — a default install carries no signing code at all, which is deliberate. Without it you get exit `47` and a message that says how to install it next to the CLI: `npx -p @roundhouseai/x402 -p ethers rh-x402 ...` for zero-install, `npm i @roundhouseai/x402 ethers` in a project. A plain `npm i ethers` in another directory does not help, because the import resolves from where the CLI is installed. The keystore also needs `X402_KEYSTORE_PASS` in every shell that signs; `wallet create` checks both before it writes anything, and `status` warns when either is missing. It also refuses to read a group- or world-readable keystore (`chmod 600` it) and a world-readable raw key file. Those refusals are the feature; do not chmod around them.
 
 **4. `npx x402` is a different project.** The unscoped name on npm belongs to someone else. Zero-install is `npx @roundhouseai/x402`; a global install gives you `rh-x402` (unique) alongside `x402` (short, and contested). Scripts should say `rh-x402`.
 

@@ -7,6 +7,7 @@ import {
   setPath,
   unsetPath,
   assertKnownConfigKey,
+  assertConfigValueShape,
   normalizeConfigValue,
 } from '../core/config.js';
 import { paths } from '../core/paths.js';
@@ -95,6 +96,7 @@ export async function configCommand(parsed: ParsedArgs): Promise<number> {
     // `wallet.backend` and every later command quietly used the default.
     assertKnownConfigKey(key);
     const value = await valueFor(key, raw);
+    assertConfigValueShape(key, value);
     const current = readRawConfig();
     writeRawConfig(setPath(current, key, value));
     // A literal API key is not echoed back. An `env:` reference is, because

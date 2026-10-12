@@ -215,6 +215,18 @@ From nothing to a stored API key. Idempotent: run it again and it skips what is 
 
 The operator decides, not you: where the key is held (`--path`, never defaulted), both caps, telemetry, and whether an organization key exists (`--org-key env:NAME`). It stops at `fund` until someone sends USDC to the printed address on Base. It never prints the API key unless `--print-key`. The OWS policy key is shown once: export it as `OWS_X402_KEY` in every shell that pays. `--dry-run` makes no wallet, no config write and no payment.
 
+**`--path import` and `--path generate` need two things before you start.** Both are checked up front, reported together, and nothing is written until both are there:
+
+1. **`X402_KEYSTORE_PASS`**, exported with the passphrase that encrypts the key. The wallet config then reads it as `env:X402_KEYSTORE_PASS`, so every shell that pays needs it too. `status` warns when it is missing.
+2. **`ethers`**, installed next to this CLI. It is an optional peer dependency, so bare `npx @roundhouseai/x402` cannot sign with a keystore. Use `npx -p @roundhouseai/x402 -p ethers rh-x402 ...`, or `npm i @roundhouseai/x402 ethers` in a project. `npm i ethers` in some other directory does not help.
+
+```bash
+export X402_KEYSTORE_PASS='a long passphrase'
+npx -p @roundhouseai/x402 -p ethers rh-x402 setup --path generate --max-per-call 0.05 --daily-cap 5 --telemetry on --yes --json
+```
+
+**Set leaves, not groups.** `config set telemetry on` is refused: `telemetry` is a group. The switch is `config set telemetry.sink.enabled true` (`on`/`off` are accepted for it).
+
 ## Exit codes
 
 The CLI exits with these; the endpoint returns the same number as `errorCode` (and MCP as `errorCode` inside the tool result). Branch on the number, not the message.
@@ -265,4 +277,4 @@ Run `rh-x402 signer check` before relying on anything beyond signing. Backends d
 - **Balances do not come from the backend.** `rh-x402 wallet balance` reads the chain over JSON-RPC, so it answers on every backend, including one whose `signer check` reports `balances: false`. It exits `46` on a zero token balance and never on a zero gas balance. What a backend cannot do is the engine's _pre-flight_ funding check, which it skips rather than guessing — so a call can still fail at the provider for want of funds even where `signer check` looked fine.
 - **A policy refusal is a decision, not an outage.** Exit `42` means OWS evaluated a policy and said no — to a token contract or a chain the wallet is not allowed to sign for. Retrying is pointless and `--no-cache` will not help. Report what the message names and stop. Note the policy bounds _what_ may be signed, not _how much_: an amount over budget is exit `44`, not `42`.
 - **A token this CLI does not know is refused, not priced.** Exit `40`. The decimals and the EIP-712 domain of an unknown contract would have to come from the seller, and `--max` is compared in atomic units scaled by those decimals — a 402 declaring 18 decimals for a 6-decimal token would get a cap a trillion times too large. So the table decides, a payload that disagrees is refused, and USDC on Base is what this CLI pays with today.
-- **`local` needs `ethers` and refuses loose file permissions.** It is the only backend that signs in-process, and `ethers` is an optional peer dependency, so a default install carries no signing code at all. Missing it is exit `47` with `needs the optional peer dependency ethers (npm i ethers)`. It also refuses a group- or world-readable keystore and a world-readable key file — those refusals are the point, so do not `chmod` around them. `local` is for development and CI; it has no policy layer.
+- **`local` needs `ethers` and refuses loose file permissions.** It is the only backend that signs in-process, and `ethers` is an optional peer dependency, so a default install carries no signing code at all. Missing it is exit `47`, and the message says how to install it next to this CLI (`npx -p @roundhouseai/x402 -p ethers rh-x402 ...`, or `npm i @roundhouseai/x402 ethers` in a project). It also refuses a group- or world-readable keystore and a world-readable key file — those refusals are the point, so do not `chmod` around them. `local` is for development and CI; it has no policy layer.

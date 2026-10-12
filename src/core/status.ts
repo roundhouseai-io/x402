@@ -6,6 +6,7 @@ import { readBalances, type WalletBalances } from './rpc.js';
 import { readRecords, spentToday, type LedgerRecord } from './ledger.js';
 import { formatUnits, parseUnits } from './assets.js';
 import type { SignerBackend } from './signer.js';
+import { ethersAvailable, ETHERS_INSTALL_HINT } from './signers/local.js';
 
 /**
  * "Where am I?" as data.
@@ -89,6 +90,8 @@ export interface StatusDeps {
   readBalances: (address: string, chain: string, config: X402Config) => Promise<WalletBalances>;
   readRecords: () => LedgerRecord[];
   env: NodeJS.ProcessEnv;
+  /** Whether the optional `ethers` peer resolves, for the local backend. */
+  ethersAvailable: () => Promise<boolean>;
   nodeVersion: string;
   now: number;
 }
@@ -107,6 +110,7 @@ const defaultDeps = (): StatusDeps => ({
     readBalances(address, chain, { rpc: config.rpc, symbol: 'usdc' }),
   readRecords: () => readRecords(),
   env: process.env,
+  ethersAvailable,
   nodeVersion: process.versions.node,
   now: Date.now(),
 });
@@ -370,6 +374,22 @@ async function readSigner(
       'this wallet signs only with an OWS policy key and OWS_X402_KEY is not set in this ' +
         'shell. Export it, or mint a new one with `rh-x402 wallet policy`.',
     );
+  }
+
+  // The local keystore resolves its address without the passphrase or ethers;
+  // only signing needs them. Said here, so the first paid call is not where an
+  // operator learns the wallet cannot sign.
+  if (backend === 'local') {
+    const local = config.wallet.backends.local ?? {};
+    if (!local.passphrase && !deps.env.X402_KEYSTORE_PASS) {
+      warnings.push(
+        'the local keystore cannot be unlocked in this shell: export X402_KEYSTORE_PASS, ' +
+          'or set wallet.backends.local.passphrase to an env: reference. The first payment fails without it.',
+      );
+    }
+    if (!(await deps.ethersAvailable())) {
+      warnings.push(`the local backend cannot sign without \`ethers\`: ${ETHERS_INSTALL_HINT}`);
+    }
   }
 
   return {

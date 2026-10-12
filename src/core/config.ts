@@ -189,9 +189,28 @@ export const DEFAULT_CONFIG: X402Config = {
  */
 export const AMOUNT_KEYS: readonly string[] = ['limits.maxPerCall', 'limits.dailyCap'];
 
+/**
+ * Config values that are switches, and must be booleans.
+ *
+ * `config set telemetry.sink.enabled on` stored the string `"on"`, which the
+ * telemetry sink read as truthy and `status` read as off. `off` was truthy too.
+ * The spellings an operator reaches for are mapped to a boolean, and anything
+ * else is refused rather than stored as a switch nobody can read.
+ */
+export const BOOLEAN_KEYS: readonly string[] = ['telemetry.sink.enabled'];
+
+const TRUE_WORDS = ['true', 'on', 'yes', '1'];
+const FALSE_WORDS = ['false', 'off', 'no', '0'];
+
 /** Coerce a value destined for `key` into the type that key must hold. */
 export function normalizeConfigValue(key: string, value: unknown): unknown {
   if (AMOUNT_KEYS.includes(key) && typeof value === 'number') return String(value);
+  if (BOOLEAN_KEYS.includes(key) && typeof value !== 'boolean') {
+    const word = String(value).trim().toLowerCase();
+    if (TRUE_WORDS.includes(word)) return true;
+    if (FALSE_WORDS.includes(word)) return false;
+    throw new X402Error(ExitCode.GENERIC, `${key} is a switch: set it to true or false`);
+  }
   return value;
 }
 
@@ -253,6 +272,62 @@ function readJsonFile(file: string): Json {
   }
 }
 
+/**
+ * Keys that hold a group of settings rather than a value.
+ *
+ * `config set telemetry on` wrote the string `"on"` over the whole `telemetry`
+ * object. Every reader of `telemetry.sink` then threw `Cannot read properties
+ * of undefined (reading 'enabled')`, `status` included, and nothing said which
+ * key was wrong. A branch is any known key that has known keys below it.
+ */
+export function branchConfigKeys(): string[] {
+  const branches = CONFIG_KEYS.filter((key) =>
+    CONFIG_KEYS.some((other) => other.startsWith(`${key}.`)),
+  );
+  return [...new Set([...branches, ...OPEN_SUBTREES])];
+}
+
+/** The settable keys directly or indirectly below `branch`, leaves only. */
+function leavesOf(branch: string): string[] {
+  const below = CONFIG_KEYS.filter((key) => key.startsWith(`${branch}.`));
+  return below.filter((key) => !below.some((other) => other.startsWith(`${key}.`)));
+}
+
+function branchHint(branch: string): string {
+  const leaves = leavesOf(branch);
+  return leaves.length > 0
+    ? `Set one of its keys instead: ${leaves.join(', ')}.`
+    : `Set a key below it instead, as ${branch}.<name>.`;
+}
+
+/** Refuse to write a plain value over a group of settings. */
+export function assertConfigValueShape(key: string, value: unknown): void {
+  if (!branchConfigKeys().includes(key) || isPlainObject(value)) return;
+  throw new X402Error(
+    ExitCode.GENERIC,
+    `"${key}" is a group of settings, not a value. ${branchHint(key)}`,
+  );
+}
+
+/**
+ * Name the first branch in a config file that holds a plain value, so a file
+ * written by an older build fails with the key and the fix rather than a
+ * TypeError from whichever reader reached it first.
+ */
+function assertConfigShape(layer: Json, source: string): void {
+  for (const key of branchConfigKeys()) {
+    const found = getPath(layer, key);
+    if (found === undefined || isPlainObject(found)) continue;
+    // A parent that is itself the wrong shape is reported on its own, and
+    // `getPath` returns undefined below it.
+    throw new X402Error(
+      ExitCode.GENERIC,
+      `config ${source}: "${key}" must be a group of settings, found ${JSON.stringify(found)}. ` +
+        `Fix: rh-x402 config unset ${key}, then set what you meant. ${branchHint(key)}`,
+    );
+  }
+}
+
 export interface LoadOptions {
   /** Directory to look for a project-level .x402rc in. Defaults to cwd. */
   cwd?: string;
@@ -279,6 +354,7 @@ export function loadConfig(opts: LoadOptions = {}): LoadedConfig {
   const userFile = opts.file ? resolve(opts.file) : paths.config();
   if (existsSync(userFile)) {
     const user = readJsonFile(userFile);
+    assertConfigShape(user, userFile);
     merged = mergeDeep(merged, user);
     layers.user = user;
     sources.push(userFile);
@@ -287,6 +363,7 @@ export function loadConfig(opts: LoadOptions = {}): LoadedConfig {
   const rc = join(opts.cwd ?? process.cwd(), '.x402rc');
   if (existsSync(rc)) {
     const project = readJsonFile(rc);
+    assertConfigShape(project, rc);
     merged = mergeDeep(merged, project);
     layers.project = project;
     sources.push(rc);

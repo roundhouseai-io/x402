@@ -6,6 +6,9 @@ import {
   assertKnownConfigKey,
   unsetPath,
   originsOf,
+  assertConfigValueShape,
+  branchConfigKeys,
+  normalizeConfigValue,
   type Json,
 } from '../src/core/config.js';
 import { ExitCode, X402Error } from '../src/core/errors.js';
@@ -123,5 +126,40 @@ describe('telling defaults apart from choices', () => {
     });
     expect(origins['wallet.backend']).toBe('project');
     expect(origins['defaults.chain']).toBe('flag');
+  });
+});
+
+describe('a plain value over a group of settings', () => {
+  it('refuses `config set telemetry on` and names the key that was meant', () => {
+    // The real failure: an agent ran `config set telemetry on`, the string
+    // replaced the whole telemetry object, and `status` then threw
+    // "Cannot read properties of undefined (reading 'enabled')".
+    expect(() => assertConfigValueShape('telemetry', 'on')).toThrow(/telemetry\.sink\.enabled/);
+    expect(() => assertConfigValueShape('limits', 5)).toThrow(/limits\.dailyCap/);
+    expect(() => assertConfigValueShape('pins', 'x')).toThrow(/pins\.<name>/);
+  });
+
+  it('accepts a leaf, and an object for a group', () => {
+    expect(() => assertConfigValueShape('telemetry.sink.enabled', true)).not.toThrow();
+    expect(() => assertConfigValueShape('telemetry', { payload: 'hash' })).not.toThrow();
+    expect(() => assertConfigValueShape('allowlist.domains', ['a.com'])).not.toThrow();
+  });
+
+  it('treats every known key with keys below it as a group', () => {
+    const branches = branchConfigKeys();
+    for (const key of ['wallet', 'telemetry', 'telemetry.sink', 'limits', 'wallet.backends']) {
+      expect(branches).toContain(key);
+    }
+    expect(branches).not.toContain('wallet.hidden');
+    expect(branches).not.toContain('telemetry.sink.enabled');
+  });
+});
+
+describe('switches in config', () => {
+  it('maps on/off to a boolean, and refuses anything else', () => {
+    expect(normalizeConfigValue('telemetry.sink.enabled', 'on')).toBe(true);
+    expect(normalizeConfigValue('telemetry.sink.enabled', 'off')).toBe(false);
+    expect(normalizeConfigValue('telemetry.sink.enabled', true)).toBe(true);
+    expect(() => normalizeConfigValue('telemetry.sink.enabled', 'maybe')).toThrow(/true or false/);
   });
 });

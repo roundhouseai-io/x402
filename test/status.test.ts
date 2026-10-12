@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { DEFAULT_CONFIG, mergeDeep, type X402Config } from '../src/core/config.js';
+import { DEFAULT_CONFIG, loadConfig, mergeDeep, type X402Config } from '../src/core/config.js';
 import { parseArgs } from '../src/core/args.js';
 import {
   collectStatus,
@@ -379,5 +379,45 @@ describe('--json on status', () => {
   it('keeps taking a value on call', () => {
     const parsed = parseArgs(['call', 'https://x.test', '--json', '{"a":1}']);
     expect(parsed.flags.json).toBe('{"a":1}');
+  });
+});
+
+describe('status on a config that does not load', () => {
+  it('reports a plain value over the telemetry group instead of throwing', async () => {
+    // `status` threw "Cannot read properties of undefined (reading 'enabled')"
+    // after `config set telemetry on`.
+    writeFileSync(join(home, 'config.json'), JSON.stringify({ telemetry: 'on' }));
+    const s = await collectStatus({
+      deps: deps({ loadConfig: () => loadConfig() }),
+    });
+    expect(s.config.ok).toBe(false);
+    expect(s.config.error).toMatch(/"telemetry" must be a group of settings/);
+    expect(s.telemetry.enabled).toBe(false);
+  });
+});
+
+describe('a local keystore wallet that cannot sign in this shell', () => {
+  const LOCAL = {
+    wallet: { backend: 'local', default: 'dev', path: 'generate' },
+    limits: { maxPerCall: '0.05', dailyCap: '5' },
+  };
+
+  it('warns about a missing passphrase and a missing ethers before any payment', async () => {
+    const s = await collectStatus({
+      deps: deps({ config: LOCAL, env: {}, ethersAvailable: async () => false }),
+    });
+    expect(s.warnings.join('\n')).toMatch(/X402_KEYSTORE_PASS/);
+    expect(s.warnings.join('\n')).toMatch(/npx -p @roundhouseai\/x402 -p ethers/);
+  });
+
+  it('says nothing when both are there', async () => {
+    const s = await collectStatus({
+      deps: deps({
+        config: LOCAL,
+        env: { X402_KEYSTORE_PASS: 'x' },
+        ethersAvailable: async () => true,
+      }),
+    });
+    expect(s.warnings).toEqual([]);
   });
 });

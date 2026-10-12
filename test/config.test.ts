@@ -85,6 +85,15 @@ describe('config precedence', () => {
   });
 });
 
+describe('a config file with a plain value where a group belongs', () => {
+  it('names the key and the fix instead of throwing a TypeError later', () => {
+    // What `config set telemetry on` wrote before it was refused.
+    writeFileSync(join(home, 'config.json'), JSON.stringify({ telemetry: 'on' }));
+    expect(() => loadConfig({ cwd })).toThrow(/"telemetry" must be a group of settings/);
+    expect(() => loadConfig({ cwd })).toThrow(/config unset telemetry/);
+  });
+});
+
 describe('money amounts in config', () => {
   it('reads a limit an older build wrote as a JSON number', () => {
     writeFileSync(

@@ -8,7 +8,7 @@ import { readRawConfig, writeRawConfig, setPath, unsetPath } from './config.js';
 /** What the guided setup and `wallet forget` write into config.json. */
 export type ConfigValue = string | boolean | string[];
 import { addEntry, generatePrivateKey, readKeyFile, keystorePath } from './keystore.js';
-import { loadEthers } from './signers/local.js';
+import { ETHERS_INSTALL_HINT, ethersAvailable, loadEthers } from './signers/local.js';
 import { loadOwsCore, type OwsCoreModule, type OwsWallet } from './signers/owscore.js';
 import { ask, confirm, interactive, secretTwice, select } from './prompt.js';
 import { grantPolicyKey } from './owspolicy.js';
@@ -418,6 +418,32 @@ async function setupKeystore(
   path: 'import' | 'generate',
   opts: SetupOptions,
 ): Promise<SetupResult> {
+  // Check everything this path needs before asking for anything or making a
+  // key. Both used to surface one at a time, the passphrase first and ethers
+  // only after it was fixed, and neither was mentioned before the run.
+  const missing: string[] = [];
+  if (path === 'import' && !opts.keyFile && !interactive()) {
+    missing.push('importing needs --key-file <path>: the key is read from a file, never from argv');
+  }
+  const ethersOk = await ethersAvailable();
+  if (!ethersOk)
+    missing.push(
+      `the optional peer dependency \`ethers\` is not installed: ${ETHERS_INSTALL_HINT}`,
+    );
+  if (!process.env.X402_KEYSTORE_PASS && !interactive()) {
+    missing.push(
+      'X402_KEYSTORE_PASS is not set: export it with the passphrase that will encrypt this key. ' +
+        'Every shell that pays needs it too.',
+    );
+  }
+  if (missing.length > 0) {
+    throw new X402Error(
+      ethersOk ? ExitCode.GENERIC : ExitCode.OWS_UNREACHABLE,
+      `--path ${path} needs ${missing.length === 1 ? 'one thing' : `${missing.length} things`} first. Nothing was written.\n` +
+        missing.map((m) => `  - ${m}`).join('\n'),
+    );
+  }
+
   const name = opts.name ?? (interactive() ? await ask('Wallet name', 'dev') : 'dev');
 
   let privateKey: string;

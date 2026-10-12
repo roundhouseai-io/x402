@@ -125,6 +125,21 @@ describe('guided setup, without a terminal', () => {
     expect(readRawConfig()).toEqual({});
   });
 
+  it.skipIf(isInstalled('ethers'))(
+    'names every missing prerequisite in one error, before writing anything',
+    async () => {
+      // An agent hit these one at a time: the passphrase first, then ethers
+      // only once the passphrase was fixed.
+      const err = await runSetup({ path: 'generate', name: 'dev' }).catch((e: unknown) => e);
+      expect(err).toBeInstanceOf(X402Error);
+      expect((err as X402Error).code).toBe(ExitCode.OWS_UNREACHABLE);
+      expect((err as Error).message).toMatch(/X402_KEYSTORE_PASS/);
+      expect((err as Error).message).toMatch(/ethers/);
+      expect(existsSync(defaultKeystorePath())).toBe(false);
+      expect(readRawConfig()).toEqual({});
+    },
+  );
+
   it('requires a passphrase before generating anything', async () => {
     await expect(runSetup({ path: 'generate', name: 'dev' })).rejects.toThrow(/X402_KEYSTORE_PASS/);
     expect(existsSync(defaultKeystorePath())).toBe(false);

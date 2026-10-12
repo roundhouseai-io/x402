@@ -74,6 +74,24 @@ export const FLAGS: Record<string, { kind: FlagKind; alias?: string }> = {
 
   // status / setup
   'min-balance': { kind: 'string' },
+  'daily-cap': { kind: 'string' },
+  telemetry: { kind: 'string' },
+  'org-key': { kind: 'string' },
+  'key-env': { kind: 'string' },
+  'fund-timeout': { kind: 'string' },
+  yes: { kind: 'boolean', alias: 'y' },
+  'print-key': { kind: 'boolean' },
+  repay: { kind: 'boolean' },
+
+  // wallet balance --wait
+  wait: { kind: 'boolean' },
+  min: { kind: 'string' },
+
+  // discover --policy
+  'spot-factor': { kind: 'string' },
+
+  // help exit-codes
+  markdown: { kind: 'boolean' },
 };
 
 /**
@@ -87,6 +105,9 @@ export const FLAGS: Record<string, { kind: FlagKind; alias?: string }> = {
 const COMMAND_FLAG_KINDS = new Map<string, Map<string, { kind: FlagKind }>>([
   ['status', new Map([['json', { kind: 'boolean' }]])],
   ['setup', new Map([['json', { kind: 'boolean' }]])],
+  ['help', new Map([['json', { kind: 'boolean' }]])],
+  // A duration (`30m`) here, a number of seconds for a request everywhere else.
+  ['wallet', new Map([['timeout', { kind: 'string' }]])],
 ]);
 
 const ALIASES: Record<string, string> = Object.fromEntries(
@@ -118,6 +139,7 @@ export const COMMANDS = [
   'config',
   'skill',
   'status',
+  'setup',
   'help',
   'version',
 ] as const;

@@ -91,6 +91,15 @@ export interface X402Config {
     maxPerCall?: string;
     dailyCap?: string;
   };
+  /**
+   * The Roundhouse API key, sent as `Authorization: Bearer` to Roundhouse hosts.
+   * An `env:NAME` reference is preferred; a literal is accepted because an
+   * unattended setup has no operator to export it. Never printed by `config get`,
+   * `config list` or `status`.
+   */
+  auth: {
+    apiKey?: string;
+  };
   allowlist: {
     payTo: string[];
     domains: string[];
@@ -149,6 +158,7 @@ export const DEFAULT_CONFIG: X402Config = {
     },
   },
   limits: {},
+  auth: {},
   allowlist: { payTo: [], domains: [] },
   telemetry: {
     payload: 'hash',
@@ -352,6 +362,8 @@ export const CONFIG_KEYS: readonly string[] = [
   'limits',
   'limits.maxPerCall',
   'limits.dailyCap',
+  'auth',
+  'auth.apiKey',
   'allowlist',
   'allowlist.payTo',
   'allowlist.domains',

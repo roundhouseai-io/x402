@@ -1,6 +1,10 @@
 import { X402Error, ExitCode } from '../core/errors.js';
 import { writeJson, isTty, writeErr } from '../core/output.js';
 import { bool, str, list, type ParsedArgs } from '../core/args.js';
+import { parseUnits, formatUnits } from '../core/assets.js';
+import { parseDuration } from '../core/duration.js';
+import { waitForBalance } from '../core/fundwait.js';
+import { DEFAULT_MIN_BALANCE, DEFAULT_FUND_TIMEOUT } from '../core/status.js';
 import { buildContext } from './context.js';
 
 import { runSetup, writeConfig, unsetConfig, type ConfigValue } from '../core/setup.js';
@@ -79,6 +83,15 @@ export async function walletCommand(parsed: ParsedArgs): Promise<number> {
       .filter(Boolean);
     const symbol = parsed.positionals[1];
 
+    if (bool(parsed.flags, 'wait') || str(parsed.flags, 'min') !== undefined) {
+      return balanceFloor(parsed, {
+        address,
+        chain: wanted,
+        rpc: ctx.config.rpc,
+        wallet: signer?.wallet ?? null,
+      });
+    }
+
     const results = [];
     for (const chain of wanted) {
       results.push(
@@ -114,6 +127,120 @@ export async function walletCommand(parsed: ParsedArgs): Promise<number> {
     ExitCode.GENERIC,
     `usage: rh-x402 wallet <create|policy|list|balance|address|forget|restore>`,
   );
+}
+
+/**
+ * `wallet balance --min <usdc>` checks once; adding `--wait` polls until the
+ * balance arrives or `--timeout` passes.
+ *
+ * Its own exit codes, because the caller branches on them: 0 the floor is met,
+ * 46 it is not (a single look), 48 it was not met in time. An RPC that fails
+ * mid-wait does not end the wait, only the last error is kept for the report.
+ */
+async function balanceFloor(
+  parsed: ParsedArgs,
+  input: { address: string; chain: string[]; rpc: Record<string, string>; wallet: string | null },
+): Promise<number> {
+  const [chain, ...extra] = input.chain;
+  if (!chain || extra.length > 0) {
+    throw new X402Error(
+      ExitCode.GENERIC,
+      '--min and --wait watch one chain: pass a single --chain, not a list',
+    );
+  }
+  const minText = str(parsed.flags, 'min') ?? DEFAULT_MIN_BALANCE;
+  let minAtomic: bigint;
+  try {
+    minAtomic = parseUnits(minText, 6);
+  } catch {
+    throw new X402Error(ExitCode.GENERIC, `--min must be a decimal USDC amount, got ${minText}`);
+  }
+  const timeoutMs = parseDuration(str(parsed.flags, 'timeout') ?? DEFAULT_FUND_TIMEOUT);
+  const label = `${formatUnits(minAtomic, 6)} USDC on ${chain} at ${input.address}`;
+
+  const read = async () => {
+    const result = await readBalances(input.address, chain, { rpc: input.rpc, symbol: 'usdc' });
+    const usdc = result.tokens.find((t) => t.symbol === 'usdc');
+    if (!usdc) throw new Error(`no USDC contract is known on ${chain}`);
+    return { amount: usdc.amount, atomic: BigInt(usdc.atomic) };
+  };
+
+  if (!bool(parsed.flags, 'wait')) {
+    const reading = await read();
+    if (reading.atomic < minAtomic) {
+      throw new X402Error(
+        ExitCode.INSUFFICIENT_BALANCE,
+        `${reading.amount} USDC on ${chain}, under the ${formatUnits(minAtomic, 6)} asked for. ` +
+          'Add --wait to poll until it arrives.',
+        { amount: reading.amount, minimum: formatUnits(minAtomic, 6), chain },
+      );
+    }
+    emitFloor(input, chain, reading.amount, formatUnits(minAtomic, 6), 1, 0);
+    return ExitCode.OK;
+  }
+
+  const result = await waitForBalance({
+    read,
+    minAtomic,
+    label,
+    timeoutMs,
+    onProgress: (line) => {
+      writeErr(line);
+    },
+  });
+  if (!result.met) {
+    throw new X402Error(
+      ExitCode.WAIT_TIMEOUT,
+      `timed out after ${Math.round(result.elapsedMs / 1000)}s waiting for ${label}` +
+        (result.amount === null
+          ? '; the balance could not be read at all'
+          : `; it holds ${result.amount} USDC`) +
+        (result.lastError ? ` (last read error: ${result.lastError})` : '') +
+        '. Check the address and that the transfer went out on the right chain.',
+      {
+        amount: result.amount,
+        minimum: formatUnits(minAtomic, 6),
+        chain,
+        polls: result.polls,
+        ...(result.lastError ? { lastError: result.lastError } : {}),
+      },
+    );
+  }
+  emitFloor(
+    input,
+    chain,
+    result.amount ?? '0',
+    formatUnits(minAtomic, 6),
+    result.polls,
+    result.elapsedMs,
+  );
+  return ExitCode.OK;
+}
+
+function emitFloor(
+  input: { address: string; wallet: string | null },
+  chain: string,
+  amount: string,
+  minimum: string,
+  polls: number,
+  waitedMs: number,
+): void {
+  if (isTty()) {
+    process.stdout.write(`${amount} USDC on ${chain} (${input.address}), at or above ${minimum}\n`);
+  } else {
+    writeJson({
+      ok: true,
+      met: true,
+      wallet: input.wallet,
+      address: input.address,
+      chain,
+      asset: 'usdc',
+      amount,
+      minimum,
+      polls,
+      waitedMs,
+    });
+  }
 }
 
 /** Guided setup: pick how the key is held, create the wallet, write config. */

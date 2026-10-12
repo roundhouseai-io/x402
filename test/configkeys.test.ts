@@ -6,7 +6,7 @@ import {
   assertKnownConfigKey,
   unsetPath,
   originsOf,
-  assertConfigValueShape,
+  assertGroupNotOverwritten,
   branchConfigKeys,
   normalizeConfigValue,
   type Json,
@@ -134,15 +134,15 @@ describe('a plain value over a group of settings', () => {
     // The real failure: an agent ran `config set telemetry on`, the string
     // replaced the whole telemetry object, and `status` then threw
     // "Cannot read properties of undefined (reading 'enabled')".
-    expect(() => assertConfigValueShape('telemetry', 'on')).toThrow(/telemetry\.sink\.enabled/);
-    expect(() => assertConfigValueShape('limits', 5)).toThrow(/limits\.dailyCap/);
-    expect(() => assertConfigValueShape('pins', 'x')).toThrow(/pins\.<name>/);
+    expect(() => assertGroupNotOverwritten('telemetry', 'on')).toThrow(/telemetry\.sink\.enabled/);
+    expect(() => assertGroupNotOverwritten('limits', 5)).toThrow(/limits\.dailyCap/);
+    expect(() => assertGroupNotOverwritten('pins', 'x')).toThrow(/pins\.<name>/);
   });
 
   it('accepts a leaf, and an object for a group', () => {
-    expect(() => assertConfigValueShape('telemetry.sink.enabled', true)).not.toThrow();
-    expect(() => assertConfigValueShape('telemetry', { payload: 'hash' })).not.toThrow();
-    expect(() => assertConfigValueShape('allowlist.domains', ['a.com'])).not.toThrow();
+    expect(() => assertGroupNotOverwritten('telemetry.sink.enabled', true)).not.toThrow();
+    expect(() => assertGroupNotOverwritten('telemetry', { payload: 'hash' })).not.toThrow();
+    expect(() => assertGroupNotOverwritten('allowlist.domains', ['a.com'])).not.toThrow();
   });
 
   it('treats every known key with keys below it as a group', () => {

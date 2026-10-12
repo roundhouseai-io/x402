@@ -326,7 +326,7 @@ function branchHint(branch: string): string {
 }
 
 /** Refuse to write a plain value over a group of settings. */
-export function assertConfigValueShape(key: string, value: unknown): void {
+export function assertGroupNotOverwritten(key: string, value: unknown): void {
   if (!branchConfigKeys().includes(key) || isPlainObject(value)) return;
   throw new X402Error(
     ExitCode.GENERIC,
@@ -339,7 +339,7 @@ export function assertConfigValueShape(key: string, value: unknown): void {
  * written by an older build fails with the key and the fix rather than a
  * TypeError from whichever reader reached it first.
  */
-function assertConfigShape(layer: Json, source: string): void {
+function assertGroupsAreObjects(layer: Json, source: string): void {
   for (const key of branchConfigKeys()) {
     const found = getPath(layer, key);
     if (found === undefined || isPlainObject(found)) continue;
@@ -379,7 +379,7 @@ export function loadConfig(opts: LoadOptions = {}): LoadedConfig {
   const userFile = opts.file ? resolve(opts.file) : paths.config();
   if (existsSync(userFile)) {
     const user = readJsonFile(userFile);
-    assertConfigShape(user, userFile);
+    assertGroupsAreObjects(user, userFile);
     merged = mergeDeep(merged, user);
     layers.user = user;
     sources.push(userFile);
@@ -388,7 +388,7 @@ export function loadConfig(opts: LoadOptions = {}): LoadedConfig {
   const rc = join(opts.cwd ?? process.cwd(), '.x402rc');
   if (existsSync(rc)) {
     const project = readJsonFile(rc);
-    assertConfigShape(project, rc);
+    assertGroupsAreObjects(project, rc);
     merged = mergeDeep(merged, project);
     layers.project = project;
     sources.push(rc);

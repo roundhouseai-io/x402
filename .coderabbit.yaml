@@ -1,0 +1,65 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+# Adapted from ECC's config for a CLI that signs payments. The path rules point
+# review at what costs money or leaks keys when it is wrong; CLAUDE.md and
+# CONTRIBUTING.md hold the invariants the reviewer should enforce.
+language: 'en-GB'
+early_access: false
+tone_instructions: 'Be direct, concise and evidence-led. Prioritise findings that could move money, leak a key, or change an exit code.'
+
+reviews:
+  profile: 'assertive'
+  request_changes_workflow: false
+  high_level_summary: true
+  review_status: true
+  commit_status: true
+  fail_commit_status: false
+  auto_review:
+    enabled: true
+    drafts: false
+  path_filters:
+    - '!package-lock.json'
+    - '!CHANGELOG.md'
+    - '!tools/oxlint/anti-slop/**'
+  path_instructions:
+    - path: 'src/core/{engine,gates,authcache,eip3009,x402}.ts'
+      instructions: |
+        Payment path. Flag any route that can pay twice for one logical call, pay past --max /
+        --budget / limits.dailyCap / an allowlist, sign for a different recipient, amount, asset or
+        chain than quoted, or bypass the authorization cache. Every change here needs a test proving
+        money does NOT move on the failure path.
+    - path: 'src/core/{signers/**,keystore.ts,ows.ts,owspolicy.ts,signer.ts}'
+      instructions: |
+        Key handling. No private key in argv, env vars, logs, the ledger or telemetry. No fallback
+        signing when the backend denies or is unreachable. Keystore files 0600, dirs 0700.
+    - path: 'src/core/{telemetry,ledger,config,auth}.ts'
+      instructions: |
+        Data leaving the machine. The remote sink is on by default, so check that hash-level
+        payloads never include bodies, auth-like headers stay redacted at every level, opt-outs
+        (DO_NOT_TRACK, X402_TELEMETRY=off) still win, and the Roundhouse API key is only sent to
+        Roundhouse hosts.
+    - path: 'src/serve/**'
+      instructions: |
+        Local HTTP/MCP server that can spend. Flag unauthenticated spend, token comparison that is
+        not constant-time, a token escaping its budget or capability list, and non-loopback binds
+        without the explicit acknowledgement flag.
+    - path: 'src/core/errors.ts'
+      instructions: |
+        Exit codes are append-only public API. Flag any renumbering or repurposing.
+    - path: '.github/workflows/**'
+      instructions: |
+        Security-sensitive. Flag unpinned third-party actions, broad write permissions, persisted
+        checkout credentials, pull_request_target misuse, untrusted github.event text in run:
+        scripts, and anything that exposes NPM_TOKEN to fork PRs. release.yml publishes to npm on
+        merge to main.
+    - path: 'test/**'
+      instructions: |
+        Tests must be hermetic: stub fetch, point X402_HOME at a temp dir, implement Signer rather
+        than mocking OWS over HTTP, and never use a real key, wallet or network endpoint.
+    - path: '{README.md,SKILL.md,docs/**,SECURITY.md}'
+      instructions: |
+        SKILL.md is read by agents: flag instructions that would make an agent spend without caps.
+        Check that commands say rh-x402 (never a bare x402 binary) and that SECURITY.md contacts are
+        accurate.
+
+chat:
+  auto_reply: true

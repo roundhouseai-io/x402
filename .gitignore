@@ -8,3 +8,6 @@ coverage/
 !.env.example
 .x402/
 *.log
+
+# npm pack output; never commit a tarball
+*.tgz

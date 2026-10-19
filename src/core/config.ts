@@ -171,6 +171,30 @@ export function telemetryOptedOut(env: NodeJS.ProcessEnv = process.env): boolean
   );
 }
 
+/**
+ * Environment variables that override an endpoint, for a fork, a self-hosted
+ * index or a test deployment. The defaults are the public Roundhouse
+ * endpoints; nothing here is a secret, and a token still belongs in an `env:`
+ * reference in config. Precedence: defaults < env < config file < .x402rc <
+ * flags, so a value someone wrote down deliberately still wins.
+ */
+export const ENDPOINT_ENV: readonly { env: string; key: string }[] = [
+  { env: 'X402_INDEX_URL', key: 'discover.indexUrl' },
+  { env: 'X402_UNIFIED_URL', key: 'discover.unifiedUrl' },
+  { env: 'X402_TELEMETRY_URL', key: 'telemetry.sink.url' },
+  { env: 'X402_FACILITATOR_URL', key: 'facilitator.url' },
+];
+
+/** The endpoint overrides present in `env`, as a config layer. */
+export function endpointEnvLayer(env: NodeJS.ProcessEnv = process.env): Json {
+  const layer: Json = {};
+  for (const { env: name, key } of ENDPOINT_ENV) {
+    const value = env[name]?.trim();
+    if (value) setPath(layer, key, value);
+  }
+  return layer;
+}
+
 export const DEFAULT_CONFIG: X402Config = {
   wallet: {
     backend: 'ows',
@@ -369,12 +393,22 @@ export interface LoadedConfig {
   origins: Record<string, ValueOrigin>;
 }
 
-/** ~/.x402/config.json < ./.x402rc < flags. `env:` values resolved last. */
+/**
+ * defaults < endpoint env vars < ~/.x402/config.json < ./.x402rc < flags.
+ * `env:` values resolved last.
+ */
 export function loadConfig(opts: LoadOptions = {}): LoadedConfig {
   const sources: string[] = [];
   let merged: X402Config = DEFAULT_CONFIG;
 
-  const layers: { user?: Json; project?: Json; flags?: Json } = {};
+  const layers: { env?: Json; user?: Json; project?: Json; flags?: Json } = {};
+
+  const envLayer = endpointEnvLayer();
+  if (Object.keys(envLayer).length > 0) {
+    merged = mergeDeep(merged, envLayer);
+    layers.env = envLayer;
+    sources.push('env');
+  }
 
   const userFile = opts.file ? resolve(opts.file) : paths.config();
   if (existsSync(userFile)) {
@@ -608,7 +642,7 @@ export function unsetPath(obj: Json, dotted: string): { config: Json; removed: b
 }
 
 /** Where an effective config value came from. */
-export type ValueOrigin = 'default' | 'user' | 'project' | 'flag';
+export type ValueOrigin = 'default' | 'env' | 'user' | 'project' | 'flag';
 
 /**
  * Label each leaf of the effective config with the layer it came from.
@@ -620,6 +654,7 @@ export type ValueOrigin = 'default' | 'user' | 'project' | 'flag';
  * that self-diagnosing.
  */
 export function originsOf(layers: {
+  env?: Json;
   user?: Json;
   project?: Json;
   flags?: Json;
@@ -635,6 +670,7 @@ export function originsOf(layers: {
   };
   // Later layers win, matching how the config itself is merged.
   for (const path of defaultedConfigKeys()) out[path] = 'default';
+  mark(layers.env, 'env');
   mark(layers.user, 'user');
   mark(layers.project, 'project');
   mark(layers.flags, 'flag');

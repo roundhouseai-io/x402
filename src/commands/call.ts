@@ -11,6 +11,10 @@ import { authHeaders } from '../core/auth.js';
 /** A target that is a saved 402 quote rather than a URL. */
 const isQuoteTarget = (target: string): boolean => target === '-' || target.startsWith('@');
 
+// Only an explicit `-` forces a read of stdin to EOF. A `@file` quote used to
+// force it too, so `call @402.json` from an agent that spawns with an open,
+// never-written stdin pipe blocked forever before making any request.
+
 /**
  * Resolve a `@file` or `-` target to the URL its 402 quote refers to.
  *
@@ -59,7 +63,7 @@ export async function callCommand(parsed: ParsedArgs): Promise<number> {
       'stdin cannot carry both the 402 quote and --json -; pass the quote as @file',
     );
   }
-  const stdin = await readStdin({ force: quoteTarget || str(parsed.flags, 'json') === '-' });
+  const stdin = await readStdin({ force: target === '-' || str(parsed.flags, 'json') === '-' });
   const url = quoteTarget ? targetFromQuote(target, stdin) : target;
   const { data } = buildData({
     dataFlags: parsed.dataFlags,
@@ -101,7 +105,7 @@ export async function probeCommand(parsed: ParsedArgs): Promise<number> {
 
   const ctx = buildContext(parsed);
   const quoteTarget = isQuoteTarget(target);
-  const stdin = await readStdin({ force: quoteTarget || str(parsed.flags, 'json') === '-' });
+  const stdin = await readStdin({ force: target === '-' || str(parsed.flags, 'json') === '-' });
   const url = quoteTarget ? targetFromQuote(target, stdin) : target;
   const { data } = buildData({
     dataFlags: parsed.dataFlags,

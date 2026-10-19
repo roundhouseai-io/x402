@@ -23,8 +23,16 @@ If any box above is ticked, say here what an agent that depends on today's behav
      test that proves money does NOT move on the failure path. -->
 
 ```
-npm run typecheck && npm test && npm run format:check
+npm run typecheck && npm run test:coverage && npm run format:check && npm run check
 ```
+
+## Security and hygiene
+
+- [ ] No secrets, keys or tokens added — fixtures are obviously fake and, if gitleaks flags them, allowlisted by exact value in `.gitleaks.toml`
+- [ ] No personal absolute paths (`/Users/<name>`, `/home/<name>`), no internal or staging URLs
+- [ ] No invisible or bidi-control characters (`npm run check:unicode`)
+- [ ] Tests are hermetic: `fetch` stubbed, `X402_HOME` a temp dir, no real wallet, key or network call
+- [ ] Workflow changes keep actions pinned, permissions minimal and `NPM_TOKEN` away from fork PRs
 
 ## Docs and changeset
 

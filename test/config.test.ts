@@ -14,6 +14,8 @@ import {
   normalizeConfigValue,
   telemetryOptedOut,
   TELEMETRY_URL,
+  endpointEnvLayer,
+  ENDPOINT_ENV,
 } from '../src/core/config.js';
 import { authKey, readAuth, writeAuth, pruneAuthCache } from '../src/core/authcache.js';
 import { mapOwsError } from '../src/core/ows.js';
@@ -350,5 +352,26 @@ describe('gates', () => {
     budget.record(2000n);
     expect(budget.remaining()).toBe(3000n);
     expect(new SessionBudget().remaining()).toBeUndefined();
+  });
+});
+
+describe('endpoint environment overrides', () => {
+  it('maps each documented variable onto its config key', () => {
+    const env = Object.fromEntries(
+      ENDPOINT_ENV.map((e) => [e.env, `https://${e.env.toLowerCase()}.example`]),
+    );
+    const layer = endpointEnvLayer(env);
+    expect(layer).toEqual({
+      discover: {
+        indexUrl: 'https://x402_index_url.example',
+        unifiedUrl: 'https://x402_unified_url.example',
+      },
+      telemetry: { sink: { url: 'https://x402_telemetry_url.example' } },
+      facilitator: { url: 'https://x402_facilitator_url.example' },
+    });
+  });
+
+  it('ignores unset and blank variables', () => {
+    expect(endpointEnvLayer({ X402_INDEX_URL: '  ' })).toEqual({});
   });
 });

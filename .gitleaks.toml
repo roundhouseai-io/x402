@@ -1,0 +1,23 @@
+# gitleaks configuration: the default ruleset plus a narrow allowlist of test
+# fixtures that look like credentials and are not. Used by the secret-scan job
+# in .github/workflows/quality-gates.yml, which scans the full git history.
+#
+# Add to the allowlist only for a value that is provably fake (a fixture, a
+# public contract address). Never allowlist a path wholesale, and never
+# allowlist a real key "because it was rotated" — rotate it AND scrub it.
+
+title = "rh-x402 gitleaks config"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Test fixtures and public on-chain addresses, not secrets"
+regexTarget = "match"
+regexes = [
+  # Fake Roundhouse / OWS keys used in unit tests.
+  '''rh_live_(?:0123456789abcdef|mintedsecret0123456789|fixture_not_a_real_key)''',
+  '''ows_key_policytoken0123456789''',
+  # USDC contract on Base: a public address, matched as a "token" field.
+  '''0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913''',
+]

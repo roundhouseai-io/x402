@@ -540,7 +540,15 @@ rh-x402 history --sum
 rh-x402 history --by payTo --sum
 ```
 
-An optional remote sink batches records to the Roundhouse indexer; sink failures never fail a call, and records queue in `~/.x402/outbox/` for the next invocation. See [`docs/telemetry.md`](docs/telemetry.md).
+**A remote sink is on by default** and batches call outcomes to the Roundhouse indexer at `https://api.roundhouseai.io/v0/telemetry`. At the default `hash` level no request or response body leaves the machine. Turn it off with any one of:
+
+```bash
+export DO_NOT_TRACK=1                              # the cross-tool convention
+export X402_TELEMETRY=off                          # this tool's own switch
+rh-x402 config set telemetry.sink.enabled false    # persistent
+```
+
+Sink failures never fail a call, and records queue in `~/.x402/outbox/` for the next invocation. Point it at your own collector with `X402_TELEMETRY_URL` or `telemetry.sink.url`. Exactly what is sent, field by field: [`docs/telemetry.md`](docs/telemetry.md).
 
 ## The unified endpoint
 
@@ -606,9 +614,19 @@ A backend that declares it cannot sign EIP-712 typed data fails when the signer 
 
 See [`docs/configuration.md`](docs/configuration.md).
 
+## Security
+
+- **No private keys in this process's inputs.** Signing is delegated to a signer backend (OWS by default). There is no `--private-key` flag and no key-bearing environment variable; the `local` development keystore is scrypt + AES-256-GCM encrypted and imports keys from a `0600` file, never argv.
+- **Spend is capped before signing.** `--max`, `--budget`, `limits.dailyCap` and the allowlists are checked before any signature exists; mirror them as OWS policies, which are binding.
+- **Secrets go through `env:` references** (`"apiKey": "env:OWS_API_KEY"`), so config files never hold the literal. State files are created `0600`, directories `0700`.
+- **Endpoints are configurable.** Every Roundhouse URL the CLI talks to has a config key and an environment override — see [Environment variables](docs/configuration.md#environment-variables).
+- **`serve` binds to `127.0.0.1`** and refuses anything else without an explicit acknowledgement flag.
+
+Report vulnerabilities privately — see [`SECURITY.md`](SECURITY.md).
+
 ## Status
 
-**v0.1, pre-release.** v1 targets Base + USDC, the `exact` scheme, CLI and `serve` HTTP. Five questions block v1 — the load-bearing one is whether OWS exposes EIP-712 typed-data signing at all. They are tracked as issues and summarised in [`docs/roadmap.md`](docs/roadmap.md).
+**Pre-1.0.** v1 targets Base + USDC, the `exact` scheme, CLI and `serve` HTTP. Five questions block v1 — the load-bearing one is whether OWS exposes EIP-712 typed-data signing at all. They are tracked as issues and summarised in [`docs/roadmap.md`](docs/roadmap.md).
 
 ## Docs
 

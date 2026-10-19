@@ -28,7 +28,7 @@ This applies in every project space — issues, pull requests, discussions, comm
 
 ## Enforcement
 
-Report unacceptable behaviour to **conduct@roundhouse.ai**. Reports are handled confidentially. Maintainers will respond as they judge appropriate, from a private word through to a permanent ban, and will explain the decision to the reporter.
+Report unacceptable behaviour to **<conduct@roundhouseai.io>**. Reports are handled confidentially. Maintainers will respond as they judge appropriate, from a private word through to a permanent ban, and will explain the decision to the reporter.
 
 Maintainers who do not follow this in good faith may face consequences decided by other maintainers.
 

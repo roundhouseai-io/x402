@@ -1,0 +1,107 @@
+name: Quality gates
+
+# Gates adapted from ECC (affaan-m/ECC) for a public, payment-signing CLI.
+# They complement ci.yml, which already runs format, typecheck, unit tests on
+# Node 20/22, anti-slop lint, the npm pack contents check and the tarball
+# install. docs/branch-protection.md lists which jobs should be required.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  coverage:
+    name: coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      # Thresholds live in vitest.config.ts; dropping below them fails here.
+      - run: npm run test:coverage
+      - name: Coverage summary
+        if: always()
+        run: |
+          if [ -f coverage/coverage-summary.json ]; then
+            node -e "
+              const t = require('./coverage/coverage-summary.json').total;
+              const rows = ['lines','statements','functions','branches']
+                .map(k => '| ' + k + ' | ' + t[k].pct + '% |').join('\n');
+              console.log('### coverage\n\n| metric | covered |\n| --- | ---: |\n' + rows);
+            " >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  secret-scan:
+    name: secret scan (full history)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GITLEAKS_VERSION: '8.28.0'
+      # sha256 of gitleaks_8.28.0_linux_x64.tar.gz from the release checksums.
+      GITLEAKS_SHA256: 'a65b5253807a68ac0cafa4414031fd740aeb55f54fb7e55f386acb52e6a840eb'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      # The binary rather than gitleaks-action: the action needs a paid
+      # licence for organisation repositories. The checksum pins the download.
+      - name: Install gitleaks
+        run: |
+          set -euo pipefail
+          TARBALL="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -sSfL -o "$TARBALL" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${TARBALL}"
+          echo "${GITLEAKS_SHA256}  ${TARBALL}" | sha256sum -c -
+          tar -xzf "$TARBALL" gitleaks
+      - name: Scan every commit on every branch
+        run: ./gitleaks git --log-opts="--all" --config .gitleaks.toml --redact --no-banner --verbose .
+      - name: Scan the working tree
+        run: ./gitleaks dir --config .gitleaks.toml --redact --no-banner .
+
+  hygiene:
+    name: unicode, paths, workflows
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+      # Dependency-free Node scripts; no install needed.
+      - name: Unicode safety (invisible / bidi-control characters)
+        run: npm run check:unicode
+      - name: No personal absolute paths
+        run: npm run check:paths
+      - name: Workflow security
+        run: npm run check:workflows
+
+  markdown:
+    name: markdownlint
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+      - run: npx --yes markdownlint-cli2@0.18.1 "**/*.md" "#node_modules" "#CHANGELOG.md" "#tools/**"

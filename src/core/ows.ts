@@ -1,5 +1,6 @@
-import { X402Error, ExitCode } from './errors.js';
-import { request, parseJsonBody } from './http.js';
+import { X402Error, ExitCode, messageOf } from './errors.js';
+import { request, parseJsonBody, type HeaderMap } from './http.js';
+import { isJsonObject, isNumber, isString, type JsonValue } from './json.js';
 import type { TypedData } from './eip3009.js';
 import type { SignerAccount, SignerBackend, SignerBalance, SignerCapabilities } from './signer.js';
 
@@ -31,23 +32,24 @@ export interface OwsClientOptions {
   timeoutMs?: number;
 }
 
-const isObj = (v: unknown): v is Record<string, unknown> =>
-  typeof v === 'object' && v !== null && !Array.isArray(v);
-
-function owsErrorText(body: unknown, status: number): string {
-  if (isObj(body)) {
+function owsErrorText(body: JsonValue | undefined, status: number): string {
+  if (isJsonObject(body)) {
     const msg = body.error ?? body.message ?? body.detail;
-    if (typeof msg === 'string') return msg;
-    if (isObj(msg) && typeof msg.message === 'string') return msg.message;
+    if (isString(msg)) return msg;
+    if (isJsonObject(msg) && isString(msg.message)) return msg.message;
   }
   return `HTTP ${status}`;
 }
 
 /** Map an OWS failure onto the CLI's exit-code taxonomy. */
-export function mapOwsError(status: number, body: unknown, endpoint: string): X402Error {
+export function mapOwsError(
+  status: number,
+  body: JsonValue | undefined,
+  endpoint: string,
+): X402Error {
   const text = owsErrorText(body, status);
   const lowered = text.toLowerCase();
-  const code = isObj(body) && typeof body.code === 'string' ? body.code.toLowerCase() : '';
+  const code = isJsonObject(body) && isString(body.code) ? body.code.toLowerCase() : '';
 
   if (/insufficient|balance/.test(lowered) || code.includes('insufficient')) {
     return new X402Error(ExitCode.INSUFFICIENT_BALANCE, `wallet balance insufficient: ${text}`);
@@ -112,13 +114,14 @@ export class OwsClient {
     this.timeoutMs = opts.timeoutMs ?? 15_000;
   }
 
-  private headers(): Record<string, string> {
-    const h: Record<string, string> = { accept: 'application/json' };
+  private headers(): HeaderMap {
+    const h: HeaderMap = { accept: 'application/json' };
     if (this.apiKey) h.authorization = `Bearer ${this.apiKey}`;
     return h;
   }
 
-  private async call(method: string, path: string, body?: unknown): Promise<unknown> {
+  /** One OWS request. `body` is already-serialized JSON. */
+  private async call(method: string, path: string, body?: string): Promise<JsonValue | undefined> {
     const headers = this.headers();
     if (body !== undefined) headers['content-type'] = 'application/json';
     let res;
@@ -127,15 +130,13 @@ export class OwsClient {
         url: `${this.endpoint}${path}`,
         method,
         headers,
-        body: body === undefined ? undefined : JSON.stringify(body),
+        body,
         timeoutMs: this.timeoutMs,
       });
     } catch (err) {
-      // SAFETY: `.message` off a non-Error is `undefined`, not a throw.
       throw new X402Error(
         ExitCode.OWS_UNREACHABLE,
-        `OWS unreachable at ${this.endpoint}: ${(err as Error).message}` +
-          noDaemonHint(this.endpoint),
+        `OWS unreachable at ${this.endpoint}: ${messageOf(err)}` + noDaemonHint(this.endpoint),
       );
     }
     const parsed = parseJsonBody(res.body);
@@ -147,12 +148,12 @@ export class OwsClient {
     const body = await this.call('GET', '/v1/wallets');
     const items = Array.isArray(body)
       ? body
-      : isObj(body) && Array.isArray(body.wallets)
+      : isJsonObject(body) && Array.isArray(body.wallets)
         ? body.wallets
         : [];
-    return items.filter(isObj).map((w) => ({
+    return items.filter(isJsonObject).map((w) => ({
       id: String(w.id ?? w.name ?? ''),
-      name: typeof w.name === 'string' ? w.name : undefined,
+      name: isString(w.name) ? w.name : undefined,
       address: String(w.address ?? ''),
       chains: Array.isArray(w.chains) ? w.chains.map(String) : undefined,
     }));
@@ -160,12 +161,12 @@ export class OwsClient {
 
   async getWallet(wallet: string): Promise<OwsWallet> {
     const body = await this.call('GET', `/v1/wallets/${encodeURIComponent(wallet)}`);
-    if (!isObj(body) || typeof body.address !== 'string') {
+    if (!isJsonObject(body) || !isString(body.address)) {
       throw new X402Error(ExitCode.OWS_UNREACHABLE, `OWS returned no address for wallet ${wallet}`);
     }
     return {
       id: String(body.id ?? wallet),
-      name: typeof body.name === 'string' ? body.name : undefined,
+      name: isString(body.name) ? body.name : undefined,
       address: body.address,
       chains: Array.isArray(body.chains) ? body.chains.map(String) : undefined,
     };
@@ -177,14 +178,14 @@ export class OwsClient {
       'GET',
       `/v1/wallets/${encodeURIComponent(wallet)}/balance${query}`,
     );
-    if (!isObj(body)) return undefined;
+    if (!isJsonObject(body)) return undefined;
     const amount = body.amount ?? body.balance ?? body.value;
     if (amount === undefined) return undefined;
     return {
       asset: String(body.asset ?? asset),
       chain: String(body.chain ?? chain),
       amount: String(amount),
-      decimals: typeof body.decimals === 'number' ? body.decimals : undefined,
+      decimals: isNumber(body.decimals) ? body.decimals : undefined,
     };
   }
 
@@ -196,12 +197,10 @@ export class OwsClient {
     const body = await this.call(
       'POST',
       `/v1/wallets/${encodeURIComponent(wallet)}/sign-typed-data`,
-      {
-        typedData,
-      },
+      JSON.stringify({ typedData }),
     );
-    const signature = isObj(body) ? (body.signature ?? body.result ?? body.data) : undefined;
-    if (typeof signature !== 'string' || !/^0x[0-9a-fA-F]+$/.test(signature)) {
+    const signature = isJsonObject(body) ? (body.signature ?? body.result ?? body.data) : undefined;
+    if (!isString(signature) || !/^0x[0-9a-fA-F]+$/.test(signature)) {
       throw new X402Error(ExitCode.OWS_UNREACHABLE, 'OWS returned no signature for signTypedData');
     }
     return signature;
@@ -214,7 +213,7 @@ export class OwsClient {
   async capabilities(): Promise<{ typedData: boolean; policies: boolean } | undefined> {
     try {
       const body = await this.call('GET', '/v1/capabilities');
-      if (!isObj(body)) return undefined;
+      if (!isJsonObject(body)) return undefined;
       const methods = Array.isArray(body.methods) ? body.methods.map(String) : [];
       const typedData =
         body.typedData === true ||
@@ -232,7 +231,7 @@ export class OwsClient {
       await this.call('GET', '/v1/wallets');
       return { ok: true, detail: 'reachable' };
     } catch (err) {
-      return { ok: false, detail: (err as Error).message };
+      return { ok: false, detail: messageOf(err) };
     }
   }
 }

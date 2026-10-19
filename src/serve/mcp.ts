@@ -1,8 +1,26 @@
 import { createInterface } from 'node:readline';
-import { messageOf, exitCodeOf, ExitCodeName } from '../core/errors.js';
-import { toEnvelope } from '../core/output.js';
+import { messageOf, exitCodeOf, ExitCodeName, X402Error, ExitCode } from '../core/errors.js';
+import { jsonSafe, toEnvelope } from '../core/output.js';
 import { discoverMarket, filterByAllowlist } from '../core/discover.js';
-import { readRecords, queryRecords, sumRecords, type GroupKey } from '../core/ledger.js';
+import {
+  readRecords,
+  queryRecords,
+  sumRecords,
+  GROUP_KEYS,
+  isGroupKey,
+  type GroupKey,
+} from '../core/ledger.js';
+import type { HeaderMap } from '../core/http.js';
+import {
+  isJsonObject,
+  isNumber,
+  isString,
+  numberField,
+  parseJson,
+  stringField,
+  type JsonObject,
+  type JsonValue,
+} from '../core/json.js';
 import type { Engine } from '../core/engine.js';
 import type { X402Config } from '../core/config.js';
 
@@ -19,11 +37,27 @@ export interface McpDeps {
   version: string;
 }
 
-interface JsonRpcRequest {
-  jsonrpc: '2.0';
+export interface JsonRpcRequest {
+  /** Always `2.0` from a conforming client; not checked, as before. */
+  jsonrpc?: string;
   id?: string | number | null;
   method: string;
-  params?: Record<string, unknown>;
+  params?: JsonObject;
+}
+
+export interface JsonRpcResponse {
+  jsonrpc: '2.0';
+  id: string | number | null;
+  result?: object;
+  error?: { code: number; message: string };
+}
+
+/** A parsed line shaped like a JSON-RPC request: a string method, optional object params. */
+export function isJsonRpcRequest<T>(value: T): value is T & JsonRpcRequest {
+  if (!isJsonObject(value) || !isString(value.method)) return false;
+  const { id, params } = value;
+  const idOk = id === undefined || id === null || isString(id) || isNumber(id);
+  return idOk && (params === undefined || isJsonObject(params));
 }
 
 export const TOOLS = [
@@ -92,29 +126,37 @@ export async function runMcpStdio(deps: McpDeps): Promise<void> {
   const rl = createInterface({ input: process.stdin });
   for await (const line of rl) {
     if (line.trim() === '') continue;
-    let req: JsonRpcRequest;
+    let parsed: JsonValue;
     try {
-      req = JSON.parse(line) as JsonRpcRequest;
+      parsed = parseJson(line);
     } catch {
       write({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'parse error' } });
       continue;
     }
-    const response = await dispatch(deps, req);
+    if (!isJsonRpcRequest(parsed)) {
+      write({ jsonrpc: '2.0', id: null, error: { code: -32600, message: 'invalid request' } });
+      continue;
+    }
+    const response = await dispatch(deps, parsed);
     if (response) write(response);
   }
 }
 
-function write(payload: unknown): void {
-  process.stdout.write(`${JSON.stringify(payload)}\n`);
+function write(payload: JsonRpcResponse): void {
+  process.stdout.write(`${JSON.stringify(payload, jsonSafe)}\n`);
 }
 
 export async function dispatch(
   deps: McpDeps,
   req: JsonRpcRequest,
-): Promise<Record<string, unknown> | undefined> {
+): Promise<JsonRpcResponse | undefined> {
   // Notifications carry no id and expect no response.
   const isNotification = req.id === undefined || req.id === null;
-  const reply = (result: unknown) => ({ jsonrpc: '2.0' as const, id: req.id ?? null, result });
+  const reply = <T extends object>(result: T): JsonRpcResponse => ({
+    jsonrpc: '2.0',
+    id: req.id ?? null,
+    result,
+  });
 
   switch (req.method) {
     case 'initialize':
@@ -131,12 +173,13 @@ export async function dispatch(
       return reply({ tools: TOOLS });
     case 'tools/call': {
       const name = String(req.params?.name ?? '');
-      const args = (req.params?.arguments ?? {}) as Record<string, any>;
+      const rawArgs = req.params?.arguments;
+      const args = isJsonObject(rawArgs) ? rawArgs : {};
       try {
         const result = await callTool(deps, name, args);
         return reply({
-          content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
-          isError: result.ok === false,
+          content: [{ type: 'text', text: result.text }],
+          isError: !result.ok,
         });
       } catch (err) {
         const code = exitCodeOf(err);
@@ -170,27 +213,41 @@ export async function dispatch(
   }
 }
 
-async function callTool(
-  deps: McpDeps,
-  name: string,
-  args: Record<string, any>,
-): Promise<Record<string, any>> {
+/** A tool's answer: whether it succeeded, and the JSON text the client reads. */
+interface ToolOutput {
+  ok: boolean;
+  text: string;
+}
+
+function toolOutput<T extends { ok: boolean }>(payload: T): ToolOutput {
+  return { ok: payload.ok, text: JSON.stringify(payload, jsonSafe, 2) };
+}
+
+/** A tool's `headers` argument, every value stringified. */
+function headersArg(value: JsonValue | undefined): HeaderMap | undefined {
+  if (!isJsonObject(value)) return undefined;
+  const out: HeaderMap = {};
+  for (const [k, v] of Object.entries(value)) out[k] = String(v);
+  return out;
+}
+
+async function callTool(deps: McpDeps, name: string, args: JsonObject): Promise<ToolOutput> {
   switch (name) {
     case 'x402_call': {
       const result = await deps.engine.call({
         target: String(args.url ?? ''),
-        method: args.method,
+        method: stringField(args, 'method'),
         data: args.data,
-        headers: args.headers,
-        max: args.max,
+        headers: headersArg(args.headers),
+        max: args.max === undefined ? undefined : String(args.max),
         dryRun: args.dryRun === true,
         agentToken: 'mcp',
       });
-      return toEnvelope(result) as unknown as Record<string, any>;
+      return toolOutput(toEnvelope(result));
     }
     case 'x402_probe': {
       const probe = await deps.engine.probe({ target: String(args.url ?? ''), data: args.data });
-      return {
+      return toolOutput({
         ok: true,
         url: probe.url,
         status: probe.status,
@@ -202,13 +259,13 @@ async function callTool(
           payTo: probe.selected.payTo,
           scheme: probe.selected.scheme,
         },
-      };
+      });
     }
     case 'x402_discover': {
       const capability = String(args.capability ?? '');
       const market = await discoverMarket(capability, deps.config);
       const providers = filterByAllowlist(market.providers, deps.config);
-      return {
+      return toolOutput({
         ok: true,
         capability,
         name: market.name ?? null,
@@ -220,24 +277,28 @@ async function callTool(
         truncated: market.truncated ?? false,
         indexSurface: market.from,
         providers,
-      };
+      });
     }
     case 'x402_history': {
-      const records = queryRecords(readRecords(), {
-        since: args.since,
-        paidOnly: args.paidOnly === true,
-        limit: args.limit,
-      });
-      if (args.sum === true || args.by) {
-        return {
-          ok: true,
-          groupedBy: args.by ?? null,
-          rows: sumRecords(records, args.by as GroupKey),
-        };
+      const byRaw = stringField(args, 'by');
+      let by: GroupKey | undefined;
+      if (byRaw) {
+        if (!isGroupKey(byRaw)) {
+          throw new X402Error(ExitCode.GENERIC, `by must be one of ${GROUP_KEYS.join('|')}`);
+        }
+        by = byRaw;
       }
-      return { ok: true, count: records.length, records };
+      const records = queryRecords(readRecords(), {
+        since: stringField(args, 'since'),
+        paidOnly: args.paidOnly === true,
+        limit: numberField(args, 'limit'),
+      });
+      if (args.sum === true || by) {
+        return toolOutput({ ok: true, groupedBy: by ?? null, rows: sumRecords(records, by) });
+      }
+      return toolOutput({ ok: true, count: records.length, records });
     }
     default:
-      return { ok: false, error: `unknown tool: ${name}` };
+      return toolOutput({ ok: false, error: `unknown tool: ${name}` });
   }
 }

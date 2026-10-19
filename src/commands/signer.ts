@@ -1,8 +1,8 @@
-import { X402Error, ExitCode } from '../core/errors.js';
+import { X402Error, ExitCode, messageOf } from '../core/errors.js';
 import { writeJson, isTty, writeErr } from '../core/output.js';
 import { bool, str, type ParsedArgs } from '../core/args.js';
 import { buildContext } from './context.js';
-import { BUILTIN_BACKENDS, resolveSigner } from '../core/signers/index.js';
+import { BUILTIN_BACKENDS, isBuiltinBackend, resolveSigner } from '../core/signers/index.js';
 import {
   addEntry,
   readKeystore,
@@ -12,12 +12,22 @@ import {
 } from '../core/keystore.js';
 import { loadEthers } from '../core/signers/local.js';
 import { interactive, secretTwice } from '../core/prompt.js';
-import type { LocalBackendConfig } from '../core/config.js';
+import type { SignerCapabilities } from '../core/signer.js';
 
 /**
  * Inspect and configure signer backends. The payment engine never touches key
  * material; this is where the wallet side is set up and checked.
  */
+/** `signer check` output. */
+interface SignerCheckReport {
+  ok: boolean;
+  backend: string;
+  wallet: string;
+  capabilities: SignerCapabilities;
+  address: string | null;
+  error?: string;
+}
+
 export async function signerCommand(parsed: ParsedArgs): Promise<number> {
   const sub = parsed.positionals[0] ?? 'list';
   if (sub === 'keystore') return keystoreSubcommand(parsed);
@@ -31,7 +41,7 @@ export async function signerCommand(parsed: ParsedArgs): Promise<number> {
     const rows = backends.map((name) => ({
       backend: name,
       active: name === ctx.backendName,
-      builtin: (BUILTIN_BACKENDS as readonly string[]).includes(name),
+      builtin: isBuiltinBackend(name),
       configured: ctx.config.wallet.backends[name] !== undefined,
     }));
     if (isTty()) {
@@ -63,7 +73,7 @@ export async function signerCommand(parsed: ParsedArgs): Promise<number> {
     try {
       address = await signer.getAddress();
     } catch (err) {
-      error = (err as Error).message;
+      error = messageOf(err);
     }
     if (isTty()) {
       process.stdout.write(
@@ -72,14 +82,15 @@ export async function signerCommand(parsed: ParsedArgs): Promise<number> {
           `wallet ${signer.wallet}: ${address ?? `unavailable (${error})`}\n`,
       );
     } else {
-      writeJson({
+      const report: SignerCheckReport = {
         ok: address !== undefined,
         backend,
         wallet: signer.wallet,
         capabilities,
         address: address ?? null,
-        ...(error ? { error } : {}),
-      });
+      };
+      if (error) report.error = error;
+      writeJson(report);
     }
     return address === undefined ? ExitCode.OWS_UNREACHABLE : ExitCode.OK;
   }
@@ -90,7 +101,7 @@ export async function signerCommand(parsed: ParsedArgs): Promise<number> {
 async function keystoreSubcommand(parsed: ParsedArgs): Promise<number> {
   const action = parsed.positionals[1] ?? 'list';
   const ctx = buildContext(parsed);
-  const local = (ctx.config.wallet.backends.local ?? {}) as LocalBackendConfig;
+  const local = ctx.config.wallet.backends.local;
   const file = str(parsed.flags, 'keystore') ?? local.keystore;
 
   if (action === 'list') {

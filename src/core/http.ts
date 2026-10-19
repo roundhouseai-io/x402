@@ -1,17 +1,23 @@
-import { X402Error, ExitCode } from './errors.js';
+import { X402Error, ExitCode, messageOf } from './errors.js';
+import { isJsonObject, isString, parseJson, type JsonObject, type JsonValue } from './json.js';
 import { ProxyTunnelAgent, bypassesProxy, proxyFromEnv, type ProxyConfig } from './proxy.js';
+
+/** Header name -> value, names lower-cased on responses. */
+export interface HeaderMap {
+  [name: string]: string;
+}
 
 export interface HttpRequest {
   url: string;
   method: string;
-  headers: Record<string, string>;
+  headers: HeaderMap;
   body?: string | undefined;
   timeoutMs: number;
 }
 
 export interface HttpResponse {
   status: number;
-  headers: Record<string, string>;
+  headers: HeaderMap;
   body: string;
   bytes: number;
   latencyMs: number;
@@ -46,9 +52,9 @@ async function requestViaProxy(req: HttpRequest, proxy: ProxyConfig): Promise<Ht
         res.on('data', (c: Buffer) => chunks.push(c));
         res.on('end', () => {
           const body = Buffer.concat(chunks).toString('utf8');
-          const headers: Record<string, string> = {};
+          const headers: HeaderMap = {};
           for (const [k, v] of Object.entries(res.headers)) {
-            if (typeof v === 'string') headers[k.toLowerCase()] = v;
+            if (isString(v)) headers[k.toLowerCase()] = v;
             else if (Array.isArray(v)) headers[k.toLowerCase()] = v.join(', ');
           }
           resolve({
@@ -117,7 +123,7 @@ export async function request(req: HttpRequest): Promise<HttpResponse> {
       signal: controller.signal,
     });
     const text = await res.text();
-    const headers: Record<string, string> = {};
+    const headers: HeaderMap = {};
     res.headers.forEach((v, k) => {
       headers[k.toLowerCase()] = v;
     });
@@ -129,34 +135,42 @@ export async function request(req: HttpRequest): Promise<HttpResponse> {
       latencyMs: Date.now() - started,
     };
   } catch (err) {
-    const e = err as Error & { name?: string; cause?: { code?: string } };
-    if (e.name === 'AbortError') {
+    if (err instanceof Error && err.name === 'AbortError') {
       throw new X402Error(ExitCode.GENERIC, `request timed out after ${req.timeoutMs}ms`, {
         url: req.url,
         timeoutMs: req.timeoutMs,
         transient: true,
       });
     }
-    throw new X402Error(ExitCode.GENERIC, `network error: ${e.message}.${proxyHint(viaProxy)}`, {
-      url: req.url,
-      cause: e.cause?.code,
-      transient: true,
-    });
+    const detail: JsonObject = { url: req.url, transient: true };
+    // undici reports the socket-level reason (ECONNREFUSED, ENOTFOUND) as `cause.code`.
+    const code = err instanceof Error ? causeCode(err.cause) : undefined;
+    if (code !== undefined) detail.cause = code;
+    throw new X402Error(
+      ExitCode.GENERIC,
+      `network error: ${messageOf(err)}.${proxyHint(viaProxy)}`,
+      detail,
+    );
   } finally {
     clearTimeout(timer);
   }
 }
 
-export function parseJsonBody(body: string): unknown {
+/** The `code` of an error's `cause`, when it has a string one. */
+function causeCode(cause: unknown): string | undefined {
+  return isJsonObject(cause) && isString(cause.code) ? cause.code : undefined;
+}
+
+export function parseJsonBody(body: string): JsonValue | undefined {
   if (body.trim() === '') return undefined;
   try {
-    return JSON.parse(body);
+    return parseJson(body);
   } catch {
     return undefined;
   }
 }
 
-export function isJsonResponse(headers: Record<string, string>): boolean {
+export function isJsonResponse(headers: HeaderMap): boolean {
   const ct = headers['content-type'] ?? '';
   return ct.includes('json');
 }

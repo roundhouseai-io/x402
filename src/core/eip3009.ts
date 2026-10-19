@@ -1,4 +1,13 @@
 import { randomNonce } from './ids.js';
+import type { HeaderMap } from './http.js';
+import {
+  isBoolean,
+  isJsonObject,
+  isString,
+  parseJson,
+  type JsonObject,
+  type JsonValue,
+} from './json.js';
 import type { PaymentOption } from './x402.js';
 
 export interface TypedDataField {
@@ -6,8 +15,13 @@ export interface TypedDataField {
   type: string;
 }
 
+/** EIP-712 `types`: struct name -> its fields, in encoding order. */
+export interface TypedDataTypes {
+  [struct: string]: TypedDataField[];
+}
+
 export interface TypedData {
-  types: Record<string, TypedDataField[]>;
+  types: TypedDataTypes;
   primaryType: 'TransferWithAuthorization';
   domain: { name: string; version: string; chainId: number; verifyingContract: string };
   message: {
@@ -20,7 +34,7 @@ export interface TypedData {
   };
 }
 
-export const TRANSFER_WITH_AUTHORIZATION_TYPES: Record<string, TypedDataField[]> = {
+export const TRANSFER_WITH_AUTHORIZATION_TYPES: TypedDataTypes = {
   EIP712Domain: [
     { name: 'name', type: 'string' },
     { name: 'version', type: 'string' },
@@ -112,10 +126,10 @@ export interface PaymentPayloadV1 {
  */
 export interface PaymentPayloadV2 {
   x402Version: 2;
-  resource?: Record<string, unknown>;
-  accepted: Record<string, unknown>;
+  resource?: JsonObject;
+  accepted: JsonObject;
   payload: SchemePayload;
-  extensions?: Record<string, unknown>;
+  extensions?: JsonObject;
 }
 
 export type PaymentPayload = PaymentPayloadV1 | PaymentPayloadV2;
@@ -132,9 +146,6 @@ export function paymentHeaderName(x402Version: number): string {
   return x402Version >= 2 ? 'payment-signature' : 'x-payment';
 }
 
-const isObj = (v: unknown): v is Record<string, unknown> =>
-  typeof v === 'object' && v !== null && !Array.isArray(v);
-
 /**
  * The `accepted` block of a v2 payload.
  *
@@ -145,9 +156,9 @@ const isObj = (v: unknown): v is Record<string, unknown> =>
  * The normalised form is the fallback for a payload that did not arrive as a
  * canonical requirements object.
  */
-function acceptedFor(option: PaymentOption): Record<string, unknown> {
+function acceptedFor(option: PaymentOption): JsonObject {
   const raw = option.raw;
-  if (isObj(raw) && raw.scheme !== undefined && raw.payTo !== undefined) return raw;
+  if (raw.scheme !== undefined && raw.payTo !== undefined) return raw;
   return {
     scheme: option.scheme,
     network: option.network,
@@ -163,9 +174,9 @@ export interface PaymentPayloadContext {
   /** The 402's protocol version. Decides both the payload shape and the header. */
   x402Version: number;
   /** v2 `resource` object, echoed back. */
-  resource?: Record<string, unknown> | undefined;
+  resource?: JsonObject | undefined;
   /** v2 `extensions` map. The client must return at least what it received. */
-  extensions?: Record<string, unknown> | undefined;
+  extensions?: JsonObject | undefined;
 }
 
 export function buildPaymentPayload(
@@ -176,13 +187,10 @@ export function buildPaymentPayload(
 ): PaymentPayload {
   const payload: SchemePayload = { signature, authorization: typedData.message };
   if (context.x402Version >= 2) {
-    return {
-      x402Version: 2,
-      ...(context.resource ? { resource: context.resource } : {}),
-      accepted: acceptedFor(option),
-      payload,
-      ...(context.extensions ? { extensions: context.extensions } : {}),
-    };
+    const v2: PaymentPayloadV2 = { x402Version: 2, accepted: acceptedFor(option), payload };
+    if (context.resource) v2.resource = context.resource;
+    if (context.extensions) v2.extensions = context.extensions;
+    return v2;
   }
   return {
     x402Version: 1,
@@ -197,8 +205,35 @@ export function encodePaymentHeader(payload: PaymentPayload): string {
   return Buffer.from(JSON.stringify(payload), 'utf8').toString('base64');
 }
 
+const AUTHORIZATION_FIELDS = ['from', 'to', 'value', 'validAfter', 'validBefore', 'nonce'];
+
+/** A payload carrying a signature and every EIP-3009 authorization field as a string. */
+function hasSchemePayload(value: JsonObject): boolean {
+  const scheme = value.payload;
+  if (!isJsonObject(scheme) || !isString(scheme.signature)) return false;
+  const auth = scheme.authorization;
+  return isJsonObject(auth) && AUTHORIZATION_FIELDS.every((f) => isString(auth[f]));
+}
+
+/** A decoded payment header in the v1 or v2 shape {@link buildPaymentPayload} writes. */
+export function isPaymentPayload<T>(value: T): value is T & PaymentPayload {
+  if (!isJsonObject(value) || !hasSchemePayload(value)) return false;
+  if (value.x402Version === 1) return isString(value.scheme) && isString(value.network);
+  if (value.x402Version === 2) {
+    return (
+      isJsonObject(value.accepted) &&
+      (value.resource === undefined || isJsonObject(value.resource)) &&
+      (value.extensions === undefined || isJsonObject(value.extensions))
+    );
+  }
+  return false;
+}
+
+/** Decode a payment header. Throws on anything that is not a v1 or v2 payload. */
 export function decodePaymentHeader(header: string): PaymentPayload {
-  return JSON.parse(Buffer.from(header, 'base64').toString('utf8')) as PaymentPayload;
+  const decoded = parseJson(Buffer.from(header, 'base64').toString('utf8'));
+  if (!isPaymentPayload(decoded)) throw new Error('not an x402 payment payload');
+  return decoded;
 }
 
 /** Parse the `X-PAYMENT-RESPONSE` settlement receipt a facilitator returns. */
@@ -208,7 +243,21 @@ export interface SettlementResponse {
   network?: string;
   payer?: string;
   errorReason?: string;
-  [key: string]: unknown;
+  [key: string]: JsonValue | undefined;
+}
+
+/** A settlement receipt whose documented fields, where present, have their documented types. */
+export function isSettlementResponse<T>(value: T): value is T & SettlementResponse {
+  if (!isJsonObject(value)) return false;
+  const optional = (v: JsonValue | undefined, check: (x: JsonValue) => boolean): boolean =>
+    v === undefined || check(v);
+  return (
+    optional(value.success, isBoolean) &&
+    optional(value.transaction, isString) &&
+    optional(value.network, isString) &&
+    optional(value.payer, isString) &&
+    optional(value.errorReason, isString)
+  );
 }
 
 /**
@@ -217,9 +266,7 @@ export interface SettlementResponse {
  * v2 renamed `X-PAYMENT-RESPONSE` to `PAYMENT-RESPONSE`; a provider may send
  * either, so both are read and the v2 name wins where both are present.
  */
-export function settlementFromHeaders(
-  headers: Record<string, string>,
-): SettlementResponse | undefined {
+export function settlementFromHeaders(headers: HeaderMap): SettlementResponse | undefined {
   return (
     decodeSettlement(headers['payment-response']) ?? decodeSettlement(headers['x-payment-response'])
   );
@@ -233,8 +280,8 @@ export function decodeSettlement(
     const text = header.trim().startsWith('{')
       ? header
       : Buffer.from(header, 'base64').toString('utf8');
-    const parsed = JSON.parse(text) as SettlementResponse;
-    return typeof parsed === 'object' && parsed !== null ? parsed : undefined;
+    const parsed = parseJson(text);
+    return isSettlementResponse(parsed) ? parsed : undefined;
   } catch {
     return undefined;
   }

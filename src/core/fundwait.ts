@@ -49,6 +49,18 @@ const realSleep = (ms: number): Promise<void> =>
     setTimeout(resolve, ms);
   });
 
+function finished(
+  met: boolean,
+  amount: string | null,
+  polls: number,
+  elapsedMs: number,
+  lastError: string | undefined,
+): WaitResult {
+  const result: WaitResult = { met, amount, polls, elapsedMs };
+  if (lastError) result.lastError = lastError;
+  return result;
+}
+
 export async function waitForBalance(opts: WaitOptions): Promise<WaitResult> {
   const now = opts.now ?? Date.now;
   const sleep = opts.sleep ?? realSleep;
@@ -66,13 +78,7 @@ export async function waitForBalance(opts: WaitOptions): Promise<WaitResult> {
       const reading = await opts.read();
       amount = reading.amount;
       if (reading.atomic >= opts.minAtomic) {
-        return {
-          met: true,
-          amount,
-          polls,
-          elapsedMs: now() - started,
-          ...(lastError ? { lastError } : {}),
-        };
+        return finished(true, amount, polls, now() - started, lastError);
       }
     } catch (err) {
       lastError = messageOf(err);
@@ -80,7 +86,7 @@ export async function waitForBalance(opts: WaitOptions): Promise<WaitResult> {
 
     const elapsed = now() - started;
     if (elapsed >= opts.timeoutMs) {
-      return { met: false, amount, polls, elapsedMs: elapsed, ...(lastError ? { lastError } : {}) };
+      return finished(false, amount, polls, elapsed, lastError);
     }
 
     if (now() - lastProgress >= every) {

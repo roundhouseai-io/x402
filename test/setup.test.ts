@@ -130,7 +130,9 @@ describe('guided setup, without a terminal', () => {
     async () => {
       // An agent hit these one at a time: the passphrase first, then ethers
       // only once the passphrase was fixed.
-      const err = await runSetup({ path: 'generate', name: 'dev' }).catch((e: unknown) => e);
+      const err = await runSetup({ path: 'generate', name: 'dev' }).catch(
+        (cause: unknown) => cause,
+      );
       expect(err).toBeInstanceOf(X402Error);
       expect((err as X402Error).code).toBe(ExitCode.OWS_UNREACHABLE);
       expect((err as Error).message).toMatch(/X402_KEYSTORE_PASS/);

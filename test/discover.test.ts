@@ -8,15 +8,16 @@ import {
   resolveTarget,
 } from '../src/core/discover.js';
 import { ExitCode, X402Error } from '../src/core/errors.js';
+import type { JsonObject } from '../src/core/json.js';
 
 const PAY_TO = '0x1831f336585a6C67B6A954d28f3E07F44C4EEBbd';
 const USDC_BASE = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 
-function config(override: unknown = {}): X402Config {
+function config(override: JsonObject = {}): X402Config {
   return mergeDeep(DEFAULT_CONFIG, override);
 }
 
-function jsonResponse(status: number, body: unknown): Response {
+function jsonResponse<T>(status: number, body: T): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: { 'content-type': 'application/json' },
@@ -24,7 +25,7 @@ function jsonResponse(status: number, body: unknown): Response {
 }
 
 /** One entry shaped exactly as the live Roundhouse index returns it. */
-const endpoint = (over: Record<string, unknown> = {}) => ({
+const endpoint = (over: JsonObject = {}) => ({
   resource: 'https://provider.example/v1/lei',
   service_name: 'lei',
   description: 'Legal entity identifier lookup.',
@@ -50,7 +51,7 @@ let calledUrls: string[] = [];
  */
 function stubRoutes(routes: { unified?: [number, unknown]; endpoints?: [number, unknown] }) {
   calledUrls = [];
-  vi.stubGlobal('fetch', async (input: unknown) => {
+  vi.stubGlobal('fetch', async (input: string | URL | Request) => {
     const url = String(input instanceof Request ? input.url : input);
     calledUrls.push(url);
     // The two surfaces are told apart by their path, not their host: the
@@ -64,12 +65,12 @@ function stubRoutes(routes: { unified?: [number, unknown]; endpoints?: [number, 
 }
 
 /** The capability is not a registered slug, so only `/endpoints` answers. */
-function stubIndex(body: unknown, status = 200) {
+function stubIndex<T>(body: T, status = 200) {
   stubRoutes({ endpoints: [status, body] });
 }
 
 /** The capability is a registered slug, so the capability document answers. */
-function stubUnified(body: unknown, status = 200) {
+function stubUnified<T>(body: T, status = 200) {
   stubRoutes({ unified: [status, body] });
 }
 
@@ -263,7 +264,7 @@ describe('discover', () => {
 
 describe('discoverMarket', () => {
   /** Shaped as the live `GET /v0/unified/web-search` document. */
-  const unified = (over: Record<string, unknown> = {}) => ({
+  const unified = (over: JsonObject = {}) => ({
     capability: {
       slug: 'web-search',
       name: 'Web search',

@@ -22,7 +22,7 @@ export interface SignerBalance {
   decimals?: number;
 }
 
-export interface SignerCapabilities {
+export type SignerCapabilities = {
   /** EIP-712 typed-data signing. Required for the x402 `exact` scheme. */
   typedData: boolean;
   /** The backend enforces its own spend policies and may refuse to sign. */
@@ -37,7 +37,7 @@ export interface SignerCapabilities {
    * rejected at config time.
    */
   declared: boolean;
-}
+};
 
 export interface SignerBackend {
   /** Backend name, e.g. `ows`. Recorded in the ledger. */

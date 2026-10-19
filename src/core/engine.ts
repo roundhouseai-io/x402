@@ -1,5 +1,6 @@
 import { X402Error, ExitCode, exitCodeOf, messageOf } from './errors.js';
-import { request, parseJsonBody, type HttpResponse } from './http.js';
+import { request, parseJsonBody, type HeaderMap, type HttpResponse } from './http.js';
+import { isJsonObject, isString, type JsonObject, type JsonValue } from './json.js';
 import { toQueryParams, topLevelKeys } from './data.js';
 import {
   assertSupportedVersion,
@@ -32,8 +33,8 @@ export interface CallOptions {
   /** Absolute URL or `x402:<capability>`. */
   target: string;
   method?: string | undefined;
-  data?: unknown;
-  headers?: Record<string, string>;
+  data?: JsonValue | undefined;
+  headers?: HeaderMap;
   timeoutSeconds?: number | undefined;
   /** Per-call cap, human decimal. Overrides config `limits.maxPerCall`. */
   max?: string | undefined;
@@ -117,7 +118,7 @@ export interface CallResult {
   amount: string;
   asset?: string | undefined;
   receiptId: string;
-  body?: unknown;
+  body?: JsonValue | undefined;
   rawBody?: string;
   headers?: Record<string, string>;
   provider?: Provider | undefined;
@@ -131,6 +132,8 @@ export interface CallResult {
   dryRun?: boolean;
   errorCode?: number;
   error?: string;
+  /** The {@link X402Error.detail} of the failure, when it carried one. */
+  detail?: JsonObject;
 }
 
 export interface EngineDeps {
@@ -149,7 +152,7 @@ export interface EngineDeps {
 const BODY_METHODS = new Set(['POST', 'PUT', 'PATCH']);
 
 /** Method inference: no data -> GET; any data -> POST unless told otherwise. */
-export function inferMethod(data: unknown, explicit?: string): string {
+export function inferMethod(data: JsonValue | undefined, explicit?: string): string {
   if (explicit) return explicit.toUpperCase();
   return data === undefined ? 'GET' : 'POST';
 }
@@ -157,24 +160,26 @@ export function inferMethod(data: unknown, explicit?: string): string {
 export interface PreparedRequest {
   url: string;
   method: string;
-  headers: Record<string, string>;
+  headers: HeaderMap;
   body: string | undefined;
+}
+
+export interface PlacementOptions {
+  method?: string | undefined;
+  headers?: HeaderMap;
+  form?: boolean;
+  bodyAlways?: boolean;
+  rawBody?: string | undefined;
 }
 
 /** Apply the placement rules from spec 4.3. */
 export function prepareRequest(
   target: string,
-  data: unknown,
-  opts: {
-    method?: string | undefined;
-    headers?: Record<string, string>;
-    form?: boolean;
-    bodyAlways?: boolean;
-    rawBody?: string | undefined;
-  } = {},
+  data: JsonValue | undefined,
+  opts: PlacementOptions = {},
 ): PreparedRequest {
   const method = inferMethod(data, opts.method);
-  const headers: Record<string, string> = { accept: 'application/json', ...(opts.headers ?? {}) };
+  const headers: HeaderMap = { accept: 'application/json', ...opts.headers };
   let url: string;
   try {
     url = new URL(target).toString();
@@ -194,7 +199,7 @@ export function prepareRequest(
       for (const [k, v] of toQueryParams(data)) form.append(k, v);
       body = form.toString();
       headers['content-type'] = 'application/x-www-form-urlencoded';
-    } else if (typeof data === 'string') {
+    } else if (isString(data)) {
       body = data;
       headers['content-type'] ??= 'text/plain';
     } else {
@@ -228,15 +233,17 @@ export function providerRejection(
   // reason the first payment failed in their `error` field.
   try {
     const fresh = requirementsFromHeaders(res.headers);
-    const err = (fresh as { error?: unknown } | undefined)?.error;
-    if (typeof err === 'string' && err !== '') reasons.push(err);
+    const err = isJsonObject(fresh) ? fresh.error : undefined;
+    if (isString(err) && err !== '') reasons.push(err);
   } catch {
     // A malformed header is not worth failing the error message over.
   }
 
-  const body = parseJsonBody(res.body) as { error?: unknown; message?: unknown } | undefined;
-  for (const value of [body?.error, body?.message]) {
-    if (typeof value === 'string' && value !== '') reasons.push(value);
+  const body = parseJsonBody(res.body);
+  if (isJsonObject(body)) {
+    for (const value of [body.error, body.message]) {
+      if (isString(value) && value !== '') reasons.push(value);
+    }
   }
   if (reasons.length === 0 && res.body.trim() !== '') {
     reasons.push(res.body.trim().slice(0, REJECTION_BODY_LIMIT));
@@ -279,7 +286,7 @@ export class Engine {
     selected?: PaymentOption;
     provider?: Provider;
     capability?: string;
-    body?: unknown;
+    body?: JsonValue;
   }> {
     const resolved = await resolveTarget(opts.target, this.config);
     const prepared = prepareRequest(resolved.url, opts.data, opts);
@@ -318,7 +325,8 @@ export class Engine {
     const id = ulid(this.now());
     const startedAt = this.now();
     const level = this.payloadLevel(opts.payloadLevel);
-    const agent = { ...agentContext(), ...(opts.agentToken ? { token: opts.agentToken } : {}) };
+    const agent = agentContext();
+    if (opts.agentToken) agent.token = opts.agentToken;
 
     let resolved: Awaited<ReturnType<typeof resolveTarget>>;
     let prepared: PreparedRequest;
@@ -373,7 +381,7 @@ export class Engine {
       record.response.latencyMs = this.now() - startedAt;
       this.commit(record);
       const body = parseJsonBody(first.body);
-      return {
+      const result: CallResult = {
         ok: record.exitCode === ExitCode.OK,
         status: first.status,
         paid: false,
@@ -387,10 +395,12 @@ export class Engine {
         provider: resolved.provider,
         capability: resolved.capability,
         record,
-        ...(record.exitCode === ExitCode.OK
-          ? {}
-          : { errorCode: record.exitCode, error: `upstream returned HTTP ${first.status}` }),
       };
+      if (record.exitCode !== ExitCode.OK) {
+        result.errorCode = record.exitCode;
+        result.error = `upstream returned HTTP ${first.status}`;
+      }
+      return result;
     }
 
     // 3. Parse requirements and select an option.
@@ -582,7 +592,7 @@ export class Engine {
     this.commit(record);
 
     const body = parseJsonBody(second.body);
-    return {
+    const result: CallResult = {
       ok: httpOk,
       status: second.status,
       paid: true,
@@ -601,8 +611,12 @@ export class Engine {
       capability: resolved.capability,
       cacheHit: record.payment.cacheHit,
       record,
-      ...(httpOk ? {} : { errorCode: record.exitCode, error: record.error }),
     };
+    if (!httpOk) {
+      result.errorCode = record.exitCode;
+      if (record.error !== undefined) result.error = record.error;
+    }
+    return result;
   }
 
   private gate(option: PaymentOption, url: string, opts: CallOptions): void {
@@ -769,9 +783,9 @@ export class Engine {
     method: string;
     agent: LedgerRecord['agent'];
     level: PayloadLevel;
-    data?: unknown;
+    data?: JsonValue | undefined;
     body?: string | undefined;
-    headers?: Record<string, string>;
+    headers?: HeaderMap;
     capability?: string | undefined;
     provider?: string | undefined;
   }): LedgerRecord {
@@ -781,28 +795,31 @@ export class Engine {
       args.level,
       this.config.telemetry.redactKeys,
     );
-    const headerSummary = args.headers ? summarizeHeaders(args.headers) : undefined;
-    return {
+    const request: LedgerRecord['request'] = { bytes: summary.bytes };
+    if (summary.hash) request.dataHash = summary.hash;
+    request.dataKeys = summary.keys ?? topLevelKeys(args.data);
+    if (summary.body !== undefined) request.data = summary.body;
+    if (args.headers) {
+      const headerSummary = summarizeHeaders(args.headers);
+      request.headerNames = headerSummary.headerNames;
+      request.headersHash = headerSummary.headersHash;
+    }
+    const record: LedgerRecord = {
       id: args.id,
       ts: new Date(this.now()).toISOString(),
       url: args.url,
       method: args.method,
       wallet: this.deps.walletName ?? null,
-      ...(this.deps.backendName ? { backend: this.deps.backendName } : {}),
-      ...(args.capability ? { capability: args.capability } : {}),
-      ...(args.provider ? { provider: args.provider } : {}),
-      request: {
-        ...(summary.hash ? { dataHash: summary.hash } : {}),
-        ...(summary.keys ? { dataKeys: summary.keys } : { dataKeys: topLevelKeys(args.data) }),
-        ...(summary.body !== undefined ? { data: summary.body } : {}),
-        ...(headerSummary ?? {}),
-        bytes: summary.bytes,
-      },
+      request,
       payment: { paid: false, amount: '0', state: 'none' },
       response: { status: null, bytes: 0, latencyMs: 0 },
       exitCode: ExitCode.OK,
       agent: args.agent,
     };
+    if (this.deps.backendName) record.backend = this.deps.backendName;
+    if (args.capability) record.capability = args.capability;
+    if (args.provider) record.provider = args.provider;
+    return record;
   }
 
   private recordResponse(record: LedgerRecord, res: HttpResponse, level: PayloadLevel): void {
@@ -827,8 +844,8 @@ export class Engine {
     this.deps.sink?.enqueue(record);
   }
 
-  private errorResult(record: LedgerRecord, err: unknown): CallResult {
-    return {
+  private errorResult(record: LedgerRecord, cause: unknown): CallResult {
+    const result: CallResult = {
       ok: false,
       status: record.response.status,
       paid: record.payment.paid,
@@ -838,9 +855,10 @@ export class Engine {
       receiptId: record.id,
       url: record.url,
       record,
-      errorCode: exitCodeOf(err),
-      error: messageOf(err),
-      ...(err instanceof X402Error && err.detail ? { detail: err.detail } : {}),
+      errorCode: exitCodeOf(cause),
+      error: messageOf(cause),
     };
+    if (cause instanceof X402Error && cause.detail) result.detail = cause.detail;
+    return result;
   }
 }

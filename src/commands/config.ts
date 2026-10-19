@@ -13,6 +13,7 @@ import {
 import { paths } from '../core/paths.js';
 import { writeJson, writeErr, isTty } from '../core/output.js';
 import { coerce } from '../core/data.js';
+import type { JsonValue } from '../core/json.js';
 import { type ParsedArgs } from '../core/args.js';
 import { REDACTED, redactConfig } from '../core/auth.js';
 import { readStdin } from '../core/stdin.js';
@@ -26,7 +27,7 @@ const API_KEY_PATH = 'auth.apiKey';
  * at call time), `-` (read from stdin, so it never lands in argv or shell
  * history) and a literal (accepted, with a warning that argv is not private).
  */
-async function valueFor(key: string, raw: string): Promise<unknown> {
+async function valueFor(key: string, raw: string): Promise<JsonValue> {
   if (key === API_KEY_PATH) {
     if (raw.startsWith('env:')) return raw;
     if (raw === '-') {

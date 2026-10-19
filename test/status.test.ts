@@ -17,6 +17,7 @@ import { ExitCode, X402Error } from '../src/core/errors.js';
 import type { LedgerRecord } from '../src/core/ledger.js';
 import type { SignerBackend } from '../src/core/signer.js';
 import type { WalletBalances } from '../src/core/rpc.js';
+import type { JsonObject } from '../src/core/json.js';
 
 const ADDRESS = '0x2D43136FfBbbe0ED5CBaaB2E8B2b8c968059114C';
 const NOW = Date.parse('2026-10-02T12:00:00Z');
@@ -31,7 +32,7 @@ afterEach(() => {
   rmSync(home, { recursive: true, force: true });
 });
 
-const configWith = (patch: unknown): X402Config => mergeDeep(DEFAULT_CONFIG, patch);
+const configWith = (patch: JsonObject): X402Config => mergeDeep(DEFAULT_CONFIG, patch);
 
 const READY_CONFIG = {
   wallet: { backend: 'ows-core', default: 'agent', path: 'ows' },
@@ -88,7 +89,7 @@ function record(over: {
   };
 }
 
-function deps(over: Partial<StatusDeps> & { config?: unknown } = {}): Partial<StatusDeps> {
+function deps(over: Partial<StatusDeps> & { config?: JsonObject } = {}): Partial<StatusDeps> {
   const { config, ...rest } = over;
   return {
     loadConfig: () => ({ config: configWith(config ?? READY_CONFIG) }),

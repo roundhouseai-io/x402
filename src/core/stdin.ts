@@ -13,7 +13,7 @@ export function stdinIsReadable(
 ): boolean {
   if (stream.isTTY) return false;
   try {
-    const stat = fstatSync(typeof stream.fd === 'number' ? stream.fd : 0);
+    const stat = fstatSync(stream.fd ?? 0);
     return stat.isFIFO() || stat.isFile() || stat.isSocket();
   } catch {
     return false;
@@ -99,9 +99,11 @@ export async function readStdin(opts: ReadStdinOptions = {}): Promise<string | u
     if (first === undefined) return undefined;
     chunks.push(first);
   }
-  // SAFETY: process.stdin is a byte stream with no encoding set, so every
-  // chunk it yields is a Buffer; `Buffer.from` would copy a string wrongly.
-  for await (const chunk of stream) chunks.push(Buffer.from(chunk as Buffer));
+  // No encoding is set on the stream, so chunks are Buffers; a string chunk
+  // (setEncoding called elsewhere) is re-encoded as UTF-8 rather than dropped.
+  for await (const chunk of stream) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk), 'utf8'));
+  }
   const text = Buffer.concat(chunks).toString('utf8');
   return text === '' ? undefined : text;
 }

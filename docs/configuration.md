@@ -6,6 +6,24 @@ Three layers, later wins:
 2. `.x402rc` in the working directory — per-project overrides
 3. Flags — per-call overrides
 
+## Environment variables
+
+Nothing secret is ever read from a fixed environment variable name except where listed; credentials in config use `env:NAME` indirection so the literal never lands in a file.
+
+| Variable               | Default                                    | Effect                                                   |
+| ---------------------- | ------------------------------------------ | -------------------------------------------------------- |
+| `X402_HOME`            | `~/.x402`                                  | Root of all CLI state                                    |
+| `X402_INDEX_URL`       | `https://api.roundhouseai.io/v0`           | `discover.indexUrl` — a self-hosted or test index        |
+| `X402_UNIFIED_URL`     | `https://api.roundhouseai.io/v0/unified`   | `discover.unifiedUrl`                                    |
+| `X402_TELEMETRY_URL`   | `https://api.roundhouseai.io/v0/telemetry` | `telemetry.sink.url`                                     |
+| `X402_FACILITATOR_URL` | unset                                      | `facilitator.url`, used by `rh-x402 verify`              |
+| `X402_TELEMETRY=off`   | unset                                      | Turn the remote sink off. `DO_NOT_TRACK=1` does the same |
+| `X402_KEYSTORE_PASS`   | unset                                      | Passphrase for the `local` development keystore          |
+| `OWS_VAULT_PASS`       | unset                                      | OWS vault passphrase during `setup` / `wallet create`    |
+| `X402_STDIN_WAIT_MS`   | `500`                                      | How long to wait for piped stdin's first byte            |
+
+The endpoint variables sit between the built-in defaults and the config files: `defaults < env < ~/.x402/config.json < .x402rc < flags`, so a value written down deliberately still wins, and `config list` reports an env-supplied value with origin `env`. The Roundhouse API key (`auth.apiKey`) is only ever attached to requests for Roundhouse hosts, so pointing an endpoint elsewhere never sends it there.
+
 `X402_HOME` relocates the whole state tree (`config.json`, `ledger.jsonl`, `authcache/`, `outbox/`, `tokens.json`). The test suite relies on it; so can your CI.
 
 ## Full shape

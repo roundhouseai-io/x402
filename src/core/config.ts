@@ -2,16 +2,25 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { paths, writePrivate } from './paths.js';
 import { X402Error, ExitCode } from './errors.js';
+import {
+  isBoolean,
+  isJsonObject,
+  isNumber,
+  isString,
+  parseJson,
+  type JsonObject,
+  type JsonValue,
+} from './json.js';
 
 export type PayloadLevel = 'none' | 'hash' | 'full';
 
-export interface OwsBackendConfig {
+export type OwsBackendConfig = {
   endpoint: string;
   apiKey?: string;
   timeoutMs?: number;
-}
+};
 
-export interface OwsCoreBackendConfig {
+export type OwsCoreBackendConfig = {
   /** OWS vault directory; OWS's own default when unset. */
   vaultPath?: string;
   /**
@@ -43,21 +52,21 @@ export interface OwsCoreBackendConfig {
    * Written by `rh-x402 wallet policy` and by the guided setup.
    */
   requireApiKey?: boolean;
-}
+};
 
-export interface LocalBackendConfig {
+export type LocalBackendConfig = {
   /** Encrypted keystore path; `~` is expanded. Defaults to `$X402_HOME/keystore.json`. */
   keystore?: string;
   passphrase?: string;
-}
+};
 
-export interface ExecBackendConfig {
+export type ExecBackendConfig = {
   command: string;
   args?: string[];
   timeoutMs?: number;
-}
+};
 
-export interface X402Config {
+export type X402Config = {
   wallet: {
     /** Active signer backend. See docs/signers.md. */
     backend: string;
@@ -83,8 +92,8 @@ export interface X402Config {
       'ows-core'?: OwsCoreBackendConfig;
       local: LocalBackendConfig;
       exec?: ExecBackendConfig;
-      /** Third-party backends resolved as `x402-signer-<name>`. */
-      [name: string]: unknown;
+      /** Third-party backends resolved as `x402-signer-<name>`: their own JSON settings. */
+      [name: string]: JsonValue | undefined;
     };
   };
   limits: {
@@ -147,7 +156,7 @@ export interface X402Config {
     host: string;
     port: number;
   };
-}
+};
 
 /** The Roundhouse ingest endpoint. See docs/telemetry.md for what it stores. */
 export const TELEMETRY_URL = 'https://api.roundhouseai.io/v0/telemetry';
@@ -169,6 +178,30 @@ export function telemetryOptedOut(env: NodeJS.ProcessEnv = process.env): boolean
     own === 'false' ||
     own === 'no'
   );
+}
+
+/**
+ * Environment variables that override an endpoint, for a fork, a self-hosted
+ * index or a test deployment. The defaults are the public Roundhouse
+ * endpoints; nothing here is a secret, and a token still belongs in an `env:`
+ * reference in config. Precedence: defaults < env < config file < .x402rc <
+ * flags, so a value someone wrote down deliberately still wins.
+ */
+export const ENDPOINT_ENV: readonly { env: string; key: string }[] = [
+  { env: 'X402_INDEX_URL', key: 'discover.indexUrl' },
+  { env: 'X402_UNIFIED_URL', key: 'discover.unifiedUrl' },
+  { env: 'X402_TELEMETRY_URL', key: 'telemetry.sink.url' },
+  { env: 'X402_FACILITATOR_URL', key: 'facilitator.url' },
+];
+
+/** The endpoint overrides present in `env`, as a config layer. */
+export function endpointEnvLayer(env: NodeJS.ProcessEnv = process.env): Json {
+  const layer: Json = {};
+  for (const { env: name, key } of ENDPOINT_ENV) {
+    const value = env[name]?.trim();
+    if (value) setPath(layer, key, value);
+  }
+  return layer;
 }
 
 export const DEFAULT_CONFIG: X402Config = {
@@ -228,9 +261,9 @@ const TRUE_WORDS = ['true', 'on', 'yes', '1'];
 const FALSE_WORDS = ['false', 'off', 'no', '0'];
 
 /** Coerce a value destined for `key` into the type that key must hold. */
-export function normalizeConfigValue(key: string, value: unknown): unknown {
-  if (AMOUNT_KEYS.includes(key) && typeof value === 'number') return String(value);
-  if (BOOLEAN_KEYS.includes(key) && typeof value !== 'boolean') {
+export function normalizeConfigValue(key: string, value: JsonValue): JsonValue {
+  if (AMOUNT_KEYS.includes(key) && isNumber(value)) return String(value);
+  if (BOOLEAN_KEYS.includes(key) && !isBoolean(value)) {
     const word = String(value).trim().toLowerCase();
     if (TRUE_WORDS.includes(word)) return true;
     if (FALSE_WORDS.includes(word)) return false;
@@ -239,33 +272,66 @@ export function normalizeConfigValue(key: string, value: unknown): unknown {
   return value;
 }
 
-/** Coerce every amount in a loaded config to a string, in place of the caller. */
-export function normalizeAmounts<T>(config: T): T {
-  const limits = (config as { limits?: Record<string, unknown> }).limits;
-  if (!limits) return config;
-  const fixed: Record<string, unknown> = { ...limits };
+/**
+ * Coerce every amount in a config layer to a string.
+ *
+ * Runs on each raw JSON layer as it is read, before the layers are merged into
+ * an `X402Config`, which is where a number-typed amount from an older file
+ * would otherwise be mistaken for the string the type promises.
+ */
+export function normalizeAmounts(layer: JsonObject): JsonObject {
+  const limits = layer.limits;
+  if (!isJsonObject(limits)) return layer;
+  const fixed = { ...limits };
   for (const key of AMOUNT_KEYS) {
     const leaf = key.split('.')[1]!;
-    if (typeof fixed[leaf] === 'number') fixed[leaf] = String(fixed[leaf]);
+    const value = fixed[leaf];
+    if (isNumber(value)) fixed[leaf] = String(value);
   }
-  return { ...config, limits: fixed } as T;
+  return { ...layer, limits: fixed };
 }
 
-export type Json = Record<string, unknown>;
+export type Json = JsonObject;
 
-function isPlainObject(v: unknown): v is Json {
-  return typeof v === 'object' && v !== null && !Array.isArray(v);
-}
-
-/** Deep merge where later sources win. Arrays replace, they do not concatenate. */
-export function mergeDeep<T>(base: T, override: unknown): T {
-  if (!isPlainObject(override)) return override === undefined ? base : (override as T);
-  const out: Json = isPlainObject(base) ? { ...(base as unknown as Json) } : {};
+/** Merge two JSON objects; later wins, arrays and scalars replace. */
+function mergeObjects(base: JsonValue | undefined, override: JsonObject): JsonObject {
+  const out = isJsonObject(base) ? { ...base } : {};
   for (const [k, v] of Object.entries(override)) {
     if (v === undefined) continue;
-    out[k] = isPlainObject(v) ? mergeDeep(out[k], v) : v;
+    out[k] = isJsonObject(v) ? mergeObjects(out[k], v) : v;
   }
-  return out as unknown as T;
+  return out;
+}
+
+/**
+ * Deep merge where later sources win. Arrays replace, they do not concatenate.
+ *
+ * `T` is the shape of `base`; an undefined `override` returns `base` itself.
+ */
+export function mergeDeep<T extends JsonObject>(base: T, override: JsonObject | undefined): T {
+  if (override === undefined) return base;
+  const merged = mergeObjects(base, override);
+  // SAFETY: `merged` keeps every key of `base` and replaces only the keys
+  // `override` names. An override from a config file is unchecked JSON, so a
+  // leaf it replaces can hold the wrong type; `loadConfig` therefore rejects a
+  // scalar written over a group (`assertGroupsAreObjects`) and re-strings
+  // amounts (`normalizeAmounts`), and `config set` refuses unknown keys
+  // (`assertKnownConfigKey`) and coerces switches and amounts on write.
+  return merged as T;
+}
+
+/** Resolve `env:NAME` strings anywhere in a JSON value. */
+function resolveJson(value: JsonValue | undefined, env: NodeJS.ProcessEnv): JsonValue | undefined {
+  if (isString(value) && value.startsWith('env:')) return env[value.slice(4)];
+  if (Array.isArray(value)) {
+    return value.map((v) => resolveJson(v, env)).filter((v): v is JsonValue => v !== undefined);
+  }
+  if (isJsonObject(value)) {
+    const out: JsonObject = {};
+    for (const [k, v] of Object.entries(value)) out[k] = resolveJson(v, env);
+    return out;
+  }
+  return value;
 }
 
 /**
@@ -273,28 +339,32 @@ export function mergeDeep<T>(base: T, override: unknown): T {
  * A missing variable resolves to undefined rather than the literal string,
  * so an unset token is a disabled feature, not a bogus credential.
  */
-export function resolveEnv<T>(value: T, env: NodeJS.ProcessEnv = process.env): T {
-  if (typeof value === 'string' && value.startsWith('env:')) {
-    const name = value.slice(4);
-    return env[name] as unknown as T;
-  }
-  if (Array.isArray(value)) return value.map((v) => resolveEnv(v, env)) as unknown as T;
-  if (isPlainObject(value)) {
-    const out: Json = {};
-    for (const [k, v] of Object.entries(value)) out[k] = resolveEnv(v, env);
-    return out as unknown as T;
-  }
-  return value;
+export function resolveEnv<T extends JsonValue | undefined>(
+  value: T,
+  env: NodeJS.ProcessEnv = process.env,
+): T {
+  // SAFETY: resolution replaces `env:` strings with the variable's value (a
+  // string) or undefined, and rebuilds every object with the same keys, so
+  // the result has `T`'s shape except that a string leaf set to an unset
+  // `env:` reference reads as absent. Every key that takes an `env:`
+  // reference (tokens, API keys, passphrases) is optional for that reason.
+  return resolveJson(value, env) as T;
 }
 
 function readJsonFile(file: string): Json {
+  let parsed: JsonValue;
   try {
     const raw = readFileSync(file, 'utf8');
     if (raw.trim() === '') return {};
-    return JSON.parse(raw) as Json;
+    parsed = parseJson(raw);
   } catch (err) {
-    throw new X402Error(ExitCode.GENERIC, `cannot read config ${file}: ${(err as Error).message}`);
+    const message = err instanceof Error ? err.message : String(err);
+    throw new X402Error(ExitCode.GENERIC, `cannot read config ${file}: ${message}`);
   }
+  if (!isJsonObject(parsed)) {
+    throw new X402Error(ExitCode.GENERIC, `cannot read config ${file}: not a JSON object`);
+  }
+  return parsed;
 }
 
 /**
@@ -326,8 +396,8 @@ function branchHint(branch: string): string {
 }
 
 /** Refuse to write a plain value over a group of settings. */
-export function assertGroupNotOverwritten(key: string, value: unknown): void {
-  if (!branchConfigKeys().includes(key) || isPlainObject(value)) return;
+export function assertGroupNotOverwritten(key: string, value: JsonValue): void {
+  if (!branchConfigKeys().includes(key) || isJsonObject(value)) return;
   throw new X402Error(
     ExitCode.GENERIC,
     `"${key}" is a group of settings, not a value. ${branchHint(key)}`,
@@ -342,7 +412,7 @@ export function assertGroupNotOverwritten(key: string, value: unknown): void {
 function assertGroupsAreObjects(layer: Json, source: string): void {
   for (const key of branchConfigKeys()) {
     const found = getPath(layer, key);
-    if (found === undefined || isPlainObject(found)) continue;
+    if (found === undefined || isJsonObject(found)) continue;
     // A parent that is itself the wrong shape is reported on its own, and
     // `getPath` returns undefined below it.
     throw new X402Error(
@@ -362,23 +432,46 @@ export interface LoadOptions {
   overrides?: Json;
 }
 
+/** The raw layers a config was merged from, for `originsOf`. */
+export interface ConfigLayers {
+  env?: Json;
+  user?: Json;
+  project?: Json;
+  flags?: Json;
+}
+
+/** Dotted key -> the layer its effective value came from. */
+export interface ConfigOrigins {
+  [path: string]: ValueOrigin;
+}
+
 export interface LoadedConfig {
   config: X402Config;
   sources: string[];
   /** Which layer each leaf came from, so a default is distinguishable. */
-  origins: Record<string, ValueOrigin>;
+  origins: ConfigOrigins;
 }
 
-/** ~/.x402/config.json < ./.x402rc < flags. `env:` values resolved last. */
+/**
+ * defaults < endpoint env vars < ~/.x402/config.json < ./.x402rc < flags.
+ * `env:` values resolved last.
+ */
 export function loadConfig(opts: LoadOptions = {}): LoadedConfig {
   const sources: string[] = [];
   let merged: X402Config = DEFAULT_CONFIG;
 
-  const layers: { user?: Json; project?: Json; flags?: Json } = {};
+  const layers: ConfigLayers = {};
+
+  const envLayer = endpointEnvLayer();
+  if (Object.keys(envLayer).length > 0) {
+    merged = mergeDeep(merged, envLayer);
+    layers.env = envLayer;
+    sources.push('env');
+  }
 
   const userFile = opts.file ? resolve(opts.file) : paths.config();
   if (existsSync(userFile)) {
-    const user = readJsonFile(userFile);
+    const user = normalizeAmounts(readJsonFile(userFile));
     assertGroupsAreObjects(user, userFile);
     merged = mergeDeep(merged, user);
     layers.user = user;
@@ -387,7 +480,7 @@ export function loadConfig(opts: LoadOptions = {}): LoadedConfig {
 
   const rc = join(opts.cwd ?? process.cwd(), '.x402rc');
   if (existsSync(rc)) {
-    const project = readJsonFile(rc);
+    const project = normalizeAmounts(readJsonFile(rc));
     assertGroupsAreObjects(project, rc);
     merged = mergeDeep(merged, project);
     layers.project = project;
@@ -395,8 +488,9 @@ export function loadConfig(opts: LoadOptions = {}): LoadedConfig {
   }
 
   if (opts.overrides && Object.keys(opts.overrides).length > 0) {
-    merged = mergeDeep(merged, opts.overrides);
-    layers.flags = opts.overrides as Json;
+    const flags = normalizeAmounts(opts.overrides);
+    merged = mergeDeep(merged, flags);
+    layers.flags = flags;
     sources.push('flags');
   }
 
@@ -405,7 +499,7 @@ export function loadConfig(opts: LoadOptions = {}): LoadedConfig {
   }
 
   return {
-    config: normalizeAmounts(resolveEnv(merged)),
+    config: resolveEnv(merged),
     sources,
     origins: originsOf(layers),
   };
@@ -420,20 +514,27 @@ export function writeRawConfig(value: Json, file = paths.config()): void {
   writePrivate(file, `${JSON.stringify(value, null, 2)}\n`);
 }
 
-export function getPath(obj: unknown, dotted: string): unknown {
-  return dotted.split('.').reduce<unknown>((acc, key) => {
-    if (!isPlainObject(acc)) return undefined;
-    return acc[key];
-  }, obj);
+export function getPath(obj: JsonValue | undefined, dotted: string): JsonValue | undefined {
+  let cursor = obj;
+  for (const key of dotted.split('.')) {
+    if (!isJsonObject(cursor)) return undefined;
+    cursor = cursor[key];
+  }
+  return cursor;
 }
 
-export function setPath(obj: Json, dotted: string, value: unknown): Json {
+export function setPath(obj: Json, dotted: string, value: JsonValue): Json {
   const keys = dotted.split('.');
-  let cursor: Json = obj;
+  let cursor = obj;
   for (const key of keys.slice(0, -1)) {
     const next = cursor[key];
-    if (!isPlainObject(next)) cursor[key] = {};
-    cursor = cursor[key] as Json;
+    if (isJsonObject(next)) {
+      cursor = next;
+    } else {
+      const created: JsonObject = {};
+      cursor[key] = created;
+      cursor = created;
+    }
   }
   cursor[keys[keys.length - 1]!] = value;
   return obj;
@@ -500,11 +601,11 @@ export const CONFIG_KEYS: readonly string[] = [
 
 /** The dotted paths `DEFAULT_CONFIG` actually contains, for the drift guard. */
 export function defaultedConfigKeys(
-  node: unknown = DEFAULT_CONFIG,
+  node: JsonValue | undefined = DEFAULT_CONFIG,
   prefix = '',
   out: string[] = [],
 ): string[] {
-  if (!isPlainObject(node)) return out;
+  if (!isJsonObject(node)) return out;
   for (const [key, value] of Object.entries(node)) {
     const path = prefix ? `${prefix}.${key}` : key;
     out.push(path);
@@ -578,7 +679,12 @@ export function assertKnownConfigKey(key: string): void {
  * removed by hand-editing `config.json`, which is the thing this command
  * exists to avoid.
  */
-export function unsetPath(obj: Json, dotted: string): { config: Json; removed: boolean } {
+export interface UnsetResult {
+  config: Json;
+  removed: boolean;
+}
+
+export function unsetPath(obj: Json, dotted: string): UnsetResult {
   const parts = dotted.split('.').filter(Boolean);
   if (parts.length === 0) return { config: obj, removed: false };
 
@@ -595,7 +701,7 @@ export function unsetPath(obj: Json, dotted: string): { config: Json; removed: b
       return copy;
     }
     const child = copy[key];
-    if (!isPlainObject(child)) return copy;
+    if (!isJsonObject(child)) return copy;
     const next = walk(child, depth + 1);
     // Prune an object the removal emptied, so `config list` does not grow
     // hollow branches over time.
@@ -608,7 +714,7 @@ export function unsetPath(obj: Json, dotted: string): { config: Json; removed: b
 }
 
 /** Where an effective config value came from. */
-export type ValueOrigin = 'default' | 'user' | 'project' | 'flag';
+export type ValueOrigin = 'default' | 'env' | 'user' | 'project' | 'flag';
 
 /**
  * Label each leaf of the effective config with the layer it came from.
@@ -619,22 +725,19 @@ export type ValueOrigin = 'default' | 'user' | 'project' | 'flag';
  * "overriding" a key that was set somewhere else. Saying which layer won makes
  * that self-diagnosing.
  */
-export function originsOf(layers: {
-  user?: Json;
-  project?: Json;
-  flags?: Json;
-}): Record<string, ValueOrigin> {
-  const out: Record<string, ValueOrigin> = {};
-  const mark = (node: unknown, origin: ValueOrigin, prefix = ''): void => {
-    if (!isPlainObject(node)) return;
+export function originsOf(layers: ConfigLayers): ConfigOrigins {
+  const out: ConfigOrigins = {};
+  const mark = (node: JsonValue | undefined, origin: ValueOrigin, prefix = ''): void => {
+    if (!isJsonObject(node)) return;
     for (const [key, value] of Object.entries(node)) {
       const path = prefix ? `${prefix}.${key}` : key;
-      if (isPlainObject(value)) mark(value, origin, path);
+      if (isJsonObject(value)) mark(value, origin, path);
       else out[path] = origin;
     }
   };
   // Later layers win, matching how the config itself is merged.
   for (const path of defaultedConfigKeys()) out[path] = 'default';
+  mark(layers.env, 'env');
   mark(layers.user, 'user');
   mark(layers.project, 'project');
   mark(layers.flags, 'flag');

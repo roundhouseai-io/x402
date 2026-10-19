@@ -1,5 +1,7 @@
 import { X402Error, ExitCode } from './errors.js';
 import type { DataFlag } from './data.js';
+import type { HeaderMap } from './http.js';
+import { isNumber, isString } from './json.js';
 
 export type FlagKind = 'string' | 'number' | 'boolean' | 'list';
 
@@ -7,92 +9,97 @@ export type FlagKind = 'string' | 'number' | 'boolean' | 'list';
  * Flag table. Explicit kinds keep `--dry-run <url>` from swallowing the URL,
  * which is the classic hand-rolled-parser bug.
  */
-export const FLAGS: Record<string, { kind: FlagKind; alias?: string }> = {
+export interface FlagSpec {
+  kind: FlagKind;
+  alias?: string;
+}
+
+export const FLAGS = new Map<string, FlagSpec>([
   // request
-  method: { kind: 'string', alias: 'X' },
-  header: { kind: 'list', alias: 'H' },
-  timeout: { kind: 'number' },
-  out: { kind: 'string' },
-  raw: { kind: 'boolean' },
-  json: { kind: 'string' },
-  form: { kind: 'boolean' },
-  'body-always': { kind: 'boolean' },
-  'data-strings': { kind: 'boolean' },
+  ['method', { kind: 'string', alias: 'X' }],
+  ['header', { kind: 'list', alias: 'H' }],
+  ['timeout', { kind: 'number' }],
+  ['out', { kind: 'string' }],
+  ['raw', { kind: 'boolean' }],
+  ['json', { kind: 'string' }],
+  ['form', { kind: 'boolean' }],
+  ['body-always', { kind: 'boolean' }],
+  ['data-strings', { kind: 'boolean' }],
   // payment
-  wallet: { kind: 'string', alias: 'w' },
-  max: { kind: 'string' },
-  budget: { kind: 'string' },
-  chain: { kind: 'string' },
-  'dry-run': { kind: 'boolean' },
-  'receipt-out': { kind: 'string' },
-  'no-cache': { kind: 'boolean' },
-  signer: { kind: 'string' },
+  ['wallet', { kind: 'string', alias: 'w' }],
+  ['max', { kind: 'string' }],
+  ['budget', { kind: 'string' }],
+  ['chain', { kind: 'string' }],
+  ['dry-run', { kind: 'boolean' }],
+  ['receipt-out', { kind: 'string' }],
+  ['no-cache', { kind: 'boolean' }],
+  ['signer', { kind: 'string' }],
   // telemetry
-  'telemetry-payload': { kind: 'string' },
+  ['telemetry-payload', { kind: 'string' }],
   // output / global
-  config: { kind: 'string' },
-  help: { kind: 'boolean', alias: 'h' },
-  version: { kind: 'boolean', alias: 'V' },
-  quiet: { kind: 'boolean', alias: 'q' },
-  verbose: { kind: 'boolean', alias: 'v' },
+  ['config', { kind: 'string' }],
+  ['help', { kind: 'boolean', alias: 'h' }],
+  ['version', { kind: 'boolean', alias: 'V' }],
+  ['quiet', { kind: 'boolean', alias: 'q' }],
+  ['verbose', { kind: 'boolean', alias: 'v' }],
   // history
-  since: { kind: 'string' },
-  until: { kind: 'string' },
-  'paid-only': { kind: 'boolean' },
-  sum: { kind: 'boolean' },
-  by: { kind: 'string' },
-  limit: { kind: 'number' },
+  ['since', { kind: 'string' }],
+  ['until', { kind: 'string' }],
+  ['paid-only', { kind: 'boolean' }],
+  ['sum', { kind: 'boolean' }],
+  ['by', { kind: 'string' }],
+  ['limit', { kind: 'number' }],
   // discover
-  capability: { kind: 'string' },
+  ['capability', { kind: 'string' }],
   // serve
-  host: { kind: 'string' },
-  port: { kind: 'number' },
-  mcp: { kind: 'boolean' },
-  'i-understand-this-exposes-spending': { kind: 'boolean' },
-  'budget-daily': { kind: 'string' },
-  'max-per-call': { kind: 'string' },
-  capabilities: { kind: 'string' },
-  admin: { kind: 'boolean' },
+  ['host', { kind: 'string' }],
+  ['port', { kind: 'number' }],
+  ['mcp', { kind: 'boolean' }],
+  ['i-understand-this-exposes-spending', { kind: 'boolean' }],
+  ['budget-daily', { kind: 'string' }],
+  ['max-per-call', { kind: 'string' }],
+  ['capabilities', { kind: 'string' }],
+  ['admin', { kind: 'boolean' }],
   // verify / pay
-  receipt: { kind: 'string' },
-  file: { kind: 'string' },
+  ['receipt', { kind: 'string' }],
+  ['file', { kind: 'string' }],
   // signer / keystore
-  'key-file': { kind: 'string' },
-  keystore: { kind: 'string' },
-  replace: { kind: 'boolean' },
+  ['key-file', { kind: 'string' }],
+  ['keystore', { kind: 'string' }],
+  ['replace', { kind: 'boolean' }],
 
   // guided wallet setup (`wallet create`)
-  path: { kind: 'string' },
-  name: { kind: 'string' },
-  vault: { kind: 'string' },
-  expires: { kind: 'string' },
-  address: { kind: 'string' },
-  policy: { kind: 'boolean' },
-  'no-policy': { kind: 'boolean' },
-  install: { kind: 'boolean' },
-  'install-global': { kind: 'boolean' },
+  ['path', { kind: 'string' }],
+  ['name', { kind: 'string' }],
+  ['vault', { kind: 'string' }],
+  ['expires', { kind: 'string' }],
+  ['address', { kind: 'string' }],
+  ['policy', { kind: 'boolean' }],
+  ['no-policy', { kind: 'boolean' }],
+  ['install', { kind: 'boolean' }],
+  ['install-global', { kind: 'boolean' }],
 
   // status / setup
-  'min-balance': { kind: 'string' },
-  'daily-cap': { kind: 'string' },
-  telemetry: { kind: 'string' },
-  'org-key': { kind: 'string' },
-  'key-env': { kind: 'string' },
-  'fund-timeout': { kind: 'string' },
-  yes: { kind: 'boolean', alias: 'y' },
-  'print-key': { kind: 'boolean' },
-  repay: { kind: 'boolean' },
+  ['min-balance', { kind: 'string' }],
+  ['daily-cap', { kind: 'string' }],
+  ['telemetry', { kind: 'string' }],
+  ['org-key', { kind: 'string' }],
+  ['key-env', { kind: 'string' }],
+  ['fund-timeout', { kind: 'string' }],
+  ['yes', { kind: 'boolean', alias: 'y' }],
+  ['print-key', { kind: 'boolean' }],
+  ['repay', { kind: 'boolean' }],
 
   // wallet balance --wait
-  wait: { kind: 'boolean' },
-  min: { kind: 'string' },
+  ['wait', { kind: 'boolean' }],
+  ['min', { kind: 'string' }],
 
   // discover --policy
-  'spot-factor': { kind: 'string' },
+  ['spot-factor', { kind: 'string' }],
 
   // help exit-codes
-  markdown: { kind: 'boolean' },
-};
+  ['markdown', { kind: 'boolean' }],
+]);
 
 /**
  * Flags whose kind differs by command.
@@ -110,11 +117,9 @@ const COMMAND_FLAG_KINDS = new Map<string, Map<string, { kind: FlagKind }>>([
   ['wallet', new Map([['timeout', { kind: 'string' }]])],
 ]);
 
-const ALIASES: Record<string, string> = Object.fromEntries(
-  Object.entries(FLAGS)
-    .filter(([, spec]) => spec.alias)
-    .map(([name, spec]) => [spec.alias!, name]),
-);
+/** Short alias -> long flag name, e.g. `X` -> `method`. */
+const ALIASES = new Map<string, string>();
+for (const [name, spec] of FLAGS) if (spec.alias) ALIASES.set(spec.alias, name);
 
 export interface ParsedArgs {
   command: string | undefined;
@@ -143,6 +148,12 @@ export const COMMANDS = [
   'help',
   'version',
 ] as const;
+
+export type Command = (typeof COMMANDS)[number];
+
+export function isCommand(word: string): word is Command {
+  return COMMANDS.some((command) => command === word);
+}
 
 export function parseArgs(argv: string[]): ParsedArgs {
   const flags: ParsedArgs['flags'] = {};
@@ -188,14 +199,15 @@ export function parseArgs(argv: string[]): ParsedArgs {
         inline = name.slice(eq + 1);
         name = name.slice(0, eq);
       }
-      if (!isLong) name = ALIASES[name] ?? name;
+      if (!isLong) name = ALIASES.get(name) ?? name;
 
       let negated = false;
-      let spec = kinds?.get(name) ?? FLAGS[name];
+      let spec = kinds?.get(name) ?? FLAGS.get(name);
       if (!spec && name.startsWith('no-')) {
         const positive = name.slice(3);
-        if (FLAGS[positive]?.kind === 'boolean') {
-          spec = FLAGS[positive];
+        const positiveSpec = FLAGS.get(positive);
+        if (positiveSpec?.kind === 'boolean') {
+          spec = positiveSpec;
           name = positive;
           negated = true;
         }
@@ -214,7 +226,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
         if (!Number.isFinite(n)) throw new X402Error(ExitCode.GENERIC, `${arg} needs a number`);
         flags[name] = n;
       } else if (spec.kind === 'list') {
-        const existing = Array.isArray(flags[name]) ? (flags[name] as string[]) : [];
+        const prior = flags[name];
+        const existing = Array.isArray(prior) ? prior : [];
         flags[name] = [...existing, value];
       } else {
         flags[name] = value;
@@ -228,7 +241,7 @@ export function parseArgs(argv: string[]): ParsedArgs {
   let command: string | undefined;
   const first = positionals[0];
   if (first !== undefined) {
-    if ((COMMANDS as readonly string[]).includes(first)) {
+    if (isCommand(first)) {
       command = positionals.shift();
     } else if (looksLikeUrl(first)) {
       // `rh-x402 <url>` is sugar for `rh-x402 call <url>`.
@@ -241,12 +254,12 @@ export function parseArgs(argv: string[]): ParsedArgs {
 
 export function str(flags: ParsedArgs['flags'], name: string): string | undefined {
   const v = flags[name];
-  return typeof v === 'string' ? v : undefined;
+  return isString(v) ? v : undefined;
 }
 
 export function num(flags: ParsedArgs['flags'], name: string): number | undefined {
   const v = flags[name];
-  return typeof v === 'number' ? v : undefined;
+  return isNumber(v) ? v : undefined;
 }
 
 export function bool(flags: ParsedArgs['flags'], name: string): boolean {
@@ -259,8 +272,8 @@ export function list(flags: ParsedArgs['flags'], name: string): string[] {
 }
 
 /** Parse repeatable `-H "Name: value"` into a header map. */
-export function parseHeaders(raw: string[]): Record<string, string> {
-  const out: Record<string, string> = {};
+export function parseHeaders(raw: string[]): HeaderMap {
+  const out: HeaderMap = {};
   for (const item of raw) {
     const idx = item.indexOf(':');
     if (idx <= 0) throw new X402Error(ExitCode.GENERIC, `malformed --header: ${item}`);

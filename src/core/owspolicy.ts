@@ -1,4 +1,4 @@
-import { X402Error, ExitCode } from './errors.js';
+import { X402Error, ExitCode, messageOf } from './errors.js';
 import { CHAINS, ASSETS, caip2, findChain } from './assets.js';
 import { loadOwsCore, type OwsCoreModule } from './signers/owscore.js';
 
@@ -105,14 +105,19 @@ export function buildX402Policy(input: PolicyInput): OwsPolicy {
 }
 
 /** `--expires 30d` / `90d` / an ISO-8601 instant. */
+const EXPIRY_UNIT_HOURS = new Map([
+  ['h', 1],
+  ['d', 24],
+  ['w', 168],
+]);
+
 export function resolveExpiry(input: string | undefined, now = new Date()): string | undefined {
   if (!input) return undefined;
   const relative = /^(\d+)([dhw])$/.exec(input.trim());
   if (relative) {
     const amount = Number(relative[1]);
-    // SAFETY: the regex above matched exactly one of d, h or w, so the index is
-    // one of the three keys; the `?? 24` covers the impossible case anyway.
-    const unitHours = { h: 1, d: 24, w: 168 }[relative[2] as 'h' | 'd' | 'w'] ?? 24;
+    // The regex admits only d, h or w; the `?? 24` covers the impossible case.
+    const unitHours = EXPIRY_UNIT_HOURS.get(relative[2] ?? 'd') ?? 24;
     return new Date(now.getTime() + amount * unitHours * 3_600_000).toISOString();
   }
   const parsed = new Date(input);
@@ -155,21 +160,20 @@ export async function grantPolicyKey(
 ): Promise<PolicyGrant> {
   const ows = await load();
   const id = opts.policyName ?? `x402-${opts.wallet}`;
-  const policy = buildX402Policy({
+  const policyInput: PolicyInput = {
     id,
     name: `x402 payer: ${opts.chains.join(', ')}`,
     chains: opts.chains,
-    ...(opts.expires ? { expiresAt: resolveExpiry(opts.expires, opts.now) ?? '' } : {}),
-    ...(opts.now ? { now: opts.now } : {}),
-  });
+  };
+  if (opts.expires) policyInput.expiresAt = resolveExpiry(opts.expires, opts.now) ?? '';
+  if (opts.now) policyInput.now = opts.now;
+  const policy = buildX402Policy(policyInput);
 
   try {
     ows.createPolicy(JSON.stringify(policy), opts.vaultPath);
   } catch (err) {
     // Re-registering the same id is the common re-run, not a failure.
-    // SAFETY: `.message` off a non-Error is `undefined`, and `??` falls back to
-    // the stringified value rather than losing the reason.
-    const message = (err as Error).message ?? String(err);
+    const message = messageOf(err);
     if (!/exists|duplicate/i.test(message)) {
       throw new X402Error(
         ExitCode.OWS_UNREACHABLE,
@@ -189,8 +193,7 @@ export async function grantPolicyKey(
       opts.vaultPath,
     );
   } catch (err) {
-    // SAFETY: as above — `.message` off a non-Error is `undefined`, not a throw.
-    const message = (err as Error).message ?? String(err);
+    const message = messageOf(err);
     throw new X402Error(
       ExitCode.OWS_UNREACHABLE,
       `ows-core could not create an API key: ${message}. The vault passphrase must be the ` +

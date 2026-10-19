@@ -1,5 +1,15 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { X402Error, ExitCode } from '../core/errors.js';
+import { isSettlementResponse, type SettlementResponse } from '../core/eip3009.js';
+import type { HeaderMap } from '../core/http.js';
+import {
+  isJsonObject,
+  isNumber,
+  isString,
+  parseJson,
+  type JsonObject,
+  type JsonValue,
+} from '../core/json.js';
 import { readRecords } from '../core/ledger.js';
 import { request, parseJsonBody } from '../core/http.js';
 import { writeJson, isTty } from '../core/output.js';
@@ -16,8 +26,36 @@ interface ReceiptLike {
   network?: string;
   nonce?: string;
   validBefore?: number;
-  settlement?: { success?: boolean; transaction?: string; errorReason?: string } | undefined;
+  settlement?: SettlementResponse | undefined;
   status?: number | null;
+}
+
+const optionalString = (value: JsonValue | undefined): boolean =>
+  value === undefined || isString(value);
+
+/**
+ * A receipt as `--receipt-out` writes it, or near enough: every field this
+ * command reads is optional, but one that is present must have its type.
+ */
+function isReceiptLike<T>(value: T): value is T & ReceiptLike {
+  if (!isJsonObject(value)) return false;
+  const { validBefore, settlement, status } = value;
+  return (
+    ['id', 'amount', 'assetSymbol', 'payTo', 'chain', 'network', 'nonce'].every((key) =>
+      optionalString(value[key]),
+    ) &&
+    (validBefore === undefined || isNumber(validBefore)) &&
+    (settlement === undefined || isSettlementResponse(settlement)) &&
+    (status === undefined || status === null || isNumber(status))
+  );
+}
+
+function parseReceipt(text: string, label: string): ReceiptLike {
+  const parsed = parseJson(text);
+  if (!isReceiptLike(parsed)) {
+    throw new X402Error(ExitCode.GENERIC, `${label} is not a payment receipt`);
+  }
+  return parsed;
 }
 
 /**
@@ -37,10 +75,10 @@ export async function verifyCommand(parsed: ParsedArgs): Promise<number> {
 
   let verified = false;
   let source: 'facilitator' | 'receipt' | 'none' = 'none';
-  let detail: unknown;
+  let detail: JsonValue | undefined;
 
   if (facilitator && tx) {
-    const headers: Record<string, string> = { accept: 'application/json' };
+    const headers: HeaderMap = { accept: 'application/json' };
     if (ctx.config.facilitator.token)
       headers.authorization = `Bearer ${ctx.config.facilitator.token}`;
     const res = await request({
@@ -50,9 +88,7 @@ export async function verifyCommand(parsed: ParsedArgs): Promise<number> {
       timeoutMs: 15_000,
     });
     detail = parseJsonBody(res.body) ?? res.body;
-    verified =
-      res.status < 400 &&
-      (detail as { success?: boolean; settled?: boolean } | undefined)?.success !== false;
+    verified = res.status < 400 && !(isJsonObject(detail) && detail.success === false);
     source = 'facilitator';
   } else if (receipt.settlement) {
     verified = receipt.settlement.success === true;
@@ -60,7 +96,7 @@ export async function verifyCommand(parsed: ParsedArgs): Promise<number> {
     detail = receipt.settlement;
   }
 
-  const payload = {
+  const payload: JsonObject = {
     ok: verified,
     verified,
     source,
@@ -72,13 +108,11 @@ export async function verifyCommand(parsed: ParsedArgs): Promise<number> {
     payTo: receipt.payTo,
     chain: receipt.chain,
     detail,
-    ...(source === 'none'
-      ? {
-          error:
-            'no settlement information available: the provider returned no X-PAYMENT-RESPONSE and no facilitator is configured',
-        }
-      : {}),
   };
+  if (source === 'none') {
+    payload.error =
+      'no settlement information available: the provider returned no X-PAYMENT-RESPONSE and no facilitator is configured';
+  }
 
   if (isTty()) {
     process.stdout.write(
@@ -101,9 +135,9 @@ async function loadReceipt(arg: string | undefined): Promise<ReceiptLike> {
   }
 
   const text = raw.trim();
-  if (text.startsWith('@')) return JSON.parse(readFileSync(text.slice(1), 'utf8')) as ReceiptLike;
-  if (text.startsWith('{')) return JSON.parse(text) as ReceiptLike;
-  if (existsSync(text)) return JSON.parse(readFileSync(text, 'utf8')) as ReceiptLike;
+  if (text.startsWith('@')) return parseReceipt(readFileSync(text.slice(1), 'utf8'), text.slice(1));
+  if (text.startsWith('{')) return parseReceipt(text, 'the argument');
+  if (existsSync(text)) return parseReceipt(readFileSync(text, 'utf8'), text);
 
   // Otherwise treat it as a ledger record id.
   const record = readRecords().find((r) => r.id === text);
@@ -114,7 +148,7 @@ async function loadReceipt(arg: string | undefined): Promise<ReceiptLike> {
     assetSymbol: record.payment.asset,
     payTo: record.payment.payTo,
     chain: record.payment.chain,
-    settlement: record.payment.settlement as ReceiptLike['settlement'],
+    settlement: record.payment.settlement,
     status: record.response.status,
   };
 }

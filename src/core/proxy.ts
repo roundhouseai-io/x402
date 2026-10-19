@@ -6,7 +6,8 @@ import { request as httpRequest, type ClientRequestArgs } from 'node:http';
 // overridden and hands back a socket that is already tunnelled and secured.
 import { Agent, type AgentOptions } from 'node:https';
 import type { Duplex } from 'node:stream';
-import type { Socket } from 'node:net';
+import { Socket } from 'node:net';
+import type { HeaderMap } from './http.js';
 
 /**
  * `HTTPS_PROXY` support, without a dependency.
@@ -61,7 +62,7 @@ export function bypassesProxy(host: string, port: number, noProxy: string[]): bo
 }
 
 /** `Proxy-Authorization` from credentials in the proxy URL, when present. */
-function proxyAuthHeader(proxy: URL): Record<string, string> {
+function proxyAuthHeader(proxy: URL): HeaderMap {
   if (!proxy.username) return {};
   const raw = `${decodeURIComponent(proxy.username)}:${decodeURIComponent(proxy.password)}`;
   return { 'proxy-authorization': `Basic ${Buffer.from(raw).toString('base64')}` };
@@ -86,8 +87,8 @@ export class ProxyTunnelAgent extends Agent {
     options: ClientRequestArgs & { servername?: string },
     callback?: (err: Error | null, stream: Duplex) => void,
   ): undefined {
-    // SAFETY: Node calls this with a callback for every request it makes; the
-    // optional signature is the base class being permissive, not a real case.
+    // Node calls this with a callback for every request it makes; the optional
+    // signature is the base class being permissive, not a real case.
     const done = callback ?? (() => undefined);
     const host = options.host ?? '';
     const port = Number(options.port ?? 443);
@@ -121,7 +122,9 @@ export class ProxyTunnelAgent extends Agent {
       tls.once('error', (err) => done(err, tls));
       tls.once('secureConnect', () => done(null, tls));
     });
-    req.once('error', (err) => done(err, req.socket as Socket));
+    // On an error Node reads only `err`; a request that never got a socket
+    // hands over an unconnected one to satisfy the signature.
+    req.once('error', (err) => done(err, req.socket ?? new Socket()));
     req.end();
     return undefined;
   }

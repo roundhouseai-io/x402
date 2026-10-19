@@ -18,6 +18,7 @@ import {
 } from '../src/serve/tokens.js';
 import { paths } from '../src/core/paths.js';
 import type { SignerBackend } from '../src/core/signer.js';
+import type { JsonObject, JsonValue } from '../src/core/json.js';
 
 const PAY_TO = '0x1831f336585a6C67B6A954d28f3E07F44C4EEBbd';
 const USDC = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
@@ -123,7 +124,7 @@ describe('exit-code mapping', () => {
 describe('serve HTTP API', () => {
   async function withServer(
     run: (base: string) => Promise<void>,
-    configOverrides: Record<string, unknown> = {},
+    configOverrides: JsonObject = {},
   ) {
     const config = mergeDeep(DEFAULT_CONFIG, configOverrides);
     const engine = new Engine({
@@ -153,7 +154,7 @@ describe('serve HTTP API', () => {
   async function post(
     base: string,
     path: string,
-    body: unknown,
+    body: JsonValue,
     headers: Record<string, string> = {},
   ) {
     const { request: nodeRequest } = await import('node:http');

@@ -8,8 +8,12 @@ import type { ParsedArgs } from '../src/core/args.js';
  * `SKILL.md` is the agent-facing contract, and `rh-x402 skill` is how an agent
  * reads it without knowing where npm put the package.
  */
-const args = (flags: Record<string, unknown> = {}): ParsedArgs =>
-  ({ command: 'skill', positionals: [], flags, passthrough: [] }) as unknown as ParsedArgs;
+const args = (flags: ParsedArgs['flags'] = {}): ParsedArgs => ({
+  command: 'skill',
+  positionals: [],
+  flags,
+  dataFlags: [],
+});
 
 /**
  * Pin the terminal check, since the branch under test is exactly that check

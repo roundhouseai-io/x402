@@ -84,7 +84,7 @@ These are not preferences. Breaking one is a breaking change to the product, and
 ```bash
 npm install
 npm run typecheck     # tsc --noEmit over src + test
-npm run lint          # oxlint + vendored anti-slop rules over src + test (needs Node 22)
+npm run lint:slop     # anti-slop gate over src + test + scripts, zero findings (needs Node 22)
 npm test              # vitest run (157 tests, no network)
 npm run build         # tsc → dist/
 npm run format:check  # prettier
@@ -92,9 +92,9 @@ node dist/cli.js --help
 npm run dev -- probe https://example.com/v1/thing   # tsx, no build step
 ```
 
-Before pushing, run `npm run typecheck && npm run lint && npm test && npm run format:check`. CI runs the same checks, on Node 20 and 22 — except `lint`, which runs once on Node 22 because its config is TypeScript and Node 20 cannot load it.
+Before pushing, run `npm run typecheck && npm run lint:slop && npm test && npm run format:check`. CI runs the same checks, on Node 20 and 22, except `lint:slop`, which runs once on Node 22 because its config is TypeScript and Node 20 cannot load it. The pre-commit hook in `.githooks/` runs it on staged files.
 
-`lint` fails only on the rules the codebase already satisfies; the rest report as warnings. Do not demote a rule to make it pass — see [`docs/linting.md`](docs/linting.md).
+Every anti-slop rule is `error` and the package is at zero. Read JSON through `core/json.ts` (`parseJson`, `isJsonObject`, the named guards) rather than casting; write tests with injected fakes or a stubbed `fetch`, never `vi.mock`. Do not add an override, a `warn` or a boilerplate `SAFETY:` comment to make it pass. See [`docs/linting.md`](docs/linting.md).
 
 Tests never touch the network and never touch a real `~/.x402`: they stub `fetch` and point `X402_HOME` at a temp dir. Keep it that way. When a test needs a signer, implement the small `Signer` interface rather than mocking OWS over HTTP.
 

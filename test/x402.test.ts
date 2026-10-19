@@ -14,6 +14,7 @@ import {
 } from '../src/core/eip3009.js';
 import { formatUnits, parseUnits } from '../src/core/assets.js';
 import { X402Error, ExitCode } from '../src/core/errors.js';
+import type { JsonObject } from '../src/core/json.js';
 
 const canonical = {
   x402Version: 1,
@@ -214,7 +215,7 @@ describe('requirementsFromHeaders (x402 v2)', () => {
 });
 
 describe('what a 402 is allowed to tell the CLI about the token', () => {
-  const withAsset = (over: Record<string, unknown>) => ({
+  const withAsset = (over: JsonObject) => ({
     ...canonical.accepts[0],
     ...over,
   });
@@ -266,7 +267,7 @@ describe('what a 402 is allowed to tell the CLI about the token', () => {
   });
 
   it('still says "missing asset" when there is no asset at all', () => {
-    const bare = { ...canonical.accepts[0] } as Record<string, unknown>;
+    const bare: JsonObject = { ...canonical.accepts[0] };
     delete bare.asset;
     expect(() => parsePaymentRequired(bare)).toThrow(/missing asset address/);
   });

@@ -9,7 +9,8 @@ import { request, parseJsonBody } from '../core/http.js';
 import { loadConfig, readRawConfig } from '../core/config.js';
 import { ask, confirm, interactive, select } from '../core/prompt.js';
 import { globalRootWritable, runSetup, writeConfig } from '../core/setup.js';
-import { grantPolicyKey } from '../core/owspolicy.js';
+import { grantPolicyKey, type GrantOptions } from '../core/owspolicy.js';
+import { isJsonObject } from '../core/json.js';
 import {
   collectStatus,
   DEFAULT_FUND_TIMEOUT,
@@ -69,16 +70,16 @@ function humanEmitter(): (event: StepEvent) => void {
   return (event) => {
     const head = `${event.step.padEnd(14)} ${event.result.padEnd(8)} ${event.message}`;
     process.stdout.write(`${head}\n`);
-    if (event.result === 'failed' && typeof event.resume === 'string') {
+    if (event.result === 'failed' && event.resume !== undefined) {
       process.stdout.write(`${' '.repeat(23)}${event.resume}\n`);
     }
     // Present only when the operator asked for it with --print-key or --key-env.
-    if (event.step === 'store-key' && typeof event.apiKey === 'string') {
+    if (event.step === 'store-key' && event.apiKey !== undefined) {
       process.stdout.write(`${' '.repeat(23)}api key: ${event.apiKey}\n`);
     }
     if (event.step === 'summary' && event.report) {
-      process.stdout.write(`\n${formatStatus(event.report as Status)}`);
-      const commands = event.commands as string[] | undefined;
+      process.stdout.write(`\n${formatStatus(event.report)}`);
+      const commands = event.commands;
       if (commands)
         process.stdout.write(`\nnext commands:\n${commands.map((c) => `  ${c}`).join('\n')}\n`);
     }
@@ -113,12 +114,10 @@ export function realDeps(json: boolean): FlowDeps {
       if (!wallet)
         throw new X402Error(ExitCode.GENERIC, 'no wallet is configured to mint a key for');
       const core = config.wallet.backends['ows-core'] ?? {};
-      const grant = await grantPolicyKey({
-        wallet,
-        chains: [config.defaults.chain],
-        ...(core.vaultPath ? { vaultPath: core.vaultPath } : {}),
-        ...(core.passphrase ? { passphrase: core.passphrase } : {}),
-      });
+      const grantOptions: GrantOptions = { wallet, chains: [config.defaults.chain] };
+      if (core.vaultPath) grantOptions.vaultPath = core.vaultPath;
+      if (core.passphrase) grantOptions.passphrase = core.passphrase;
+      const grant = await grantPolicyKey(grantOptions);
       return { id: grant.policy.id, keyId: grant.keyId, token: grant.token };
     },
     waitForFunds: async ({ address, chain, minAtomic, timeoutMs }) => {
@@ -179,9 +178,10 @@ export function realDeps(json: boolean): FlowDeps {
           headers: { accept: 'application/json', authorization: `Bearer ${key}` },
           timeoutMs: 10_000,
         });
-        const body = parseJsonBody(res.body) as { key_recognised?: unknown } | undefined;
-        if (body?.key_recognised === true) return 'recognised';
-        if (body?.key_recognised === false) return 'rejected';
+        const body = parseJsonBody(res.body);
+        const recognised = isJsonObject(body) ? body.key_recognised : undefined;
+        if (recognised === true) return 'recognised';
+        if (recognised === false) return 'rejected';
         return 'unknown';
       } catch {
         return 'unknown';

@@ -14,6 +14,7 @@ import {
 } from './core/errors.js';
 import { writeErr, writeJson, isTty } from './core/output.js';
 import { VERSION } from './version.js';
+import type { JsonObject } from './core/json.js';
 import { callCommand, probeCommand } from './commands/call.js';
 import { payCommand } from './commands/pay.js';
 import { verifyCommand } from './commands/verify.js';
@@ -244,19 +245,29 @@ export async function main(argv = process.argv.slice(2)): Promise<number> {
   }
 }
 
-function reportError(err: unknown): number {
-  const code = exitCodeOf(err);
-  const message = messageOf(err);
+/** The JSON error envelope on stdout. */
+interface ErrorEnvelope {
+  ok: false;
+  errorCode: number;
+  errorName: string;
+  error: string;
+  detail?: JsonObject;
+}
+
+function reportError(cause: unknown): number {
+  const code = exitCodeOf(cause);
+  const message = messageOf(cause);
   if (isTty()) {
     writeErr(message);
   } else {
-    writeJson({
+    const envelope: ErrorEnvelope = {
       ok: false,
       errorCode: code,
       errorName: ExitCodeName[code] ?? 'error',
       error: message,
-      ...(err instanceof X402Error && err.detail ? { detail: err.detail } : {}),
-    });
+    };
+    if (cause instanceof X402Error && cause.detail) envelope.detail = cause.detail;
+    writeJson(envelope);
   }
   return code;
 }
@@ -286,8 +297,8 @@ if (invokedDirectly) {
     (code) => {
       process.exitCode = code;
     },
-    (err: unknown) => {
-      process.stderr.write(`x402: ${messageOf(err)}\n`);
+    (cause: unknown) => {
+      process.stderr.write(`x402: ${messageOf(cause)}\n`);
       process.exitCode = ExitCode.GENERIC;
     },
   );

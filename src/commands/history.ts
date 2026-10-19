@@ -4,6 +4,7 @@ import {
   queryRecords,
   sumRecords,
   GROUP_KEYS,
+  isGroupKey,
   type GroupKey,
 } from '../core/ledger.js';
 import { writeJson, isTty } from '../core/output.js';
@@ -20,10 +21,13 @@ export function historyCommand(parsed: ParsedArgs): number {
   });
 
   const byRaw = str(parsed.flags, 'by');
-  if (byRaw && !GROUP_KEYS.includes(byRaw as GroupKey)) {
-    throw new X402Error(ExitCode.GENERIC, `--by must be one of ${GROUP_KEYS.join('|')}`);
+  let by: GroupKey | undefined;
+  if (byRaw) {
+    if (!isGroupKey(byRaw)) {
+      throw new X402Error(ExitCode.GENERIC, `--by must be one of ${GROUP_KEYS.join('|')}`);
+    }
+    by = byRaw;
   }
-  const by = byRaw as GroupKey | undefined;
 
   if (bool(parsed.flags, 'sum') || by) {
     const rows = sumRecords(records, by);

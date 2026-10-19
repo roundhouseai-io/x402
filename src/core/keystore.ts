@@ -4,7 +4,8 @@ import { homedir } from 'node:os';
 import { isAbsolute, resolve } from 'node:path';
 import { join } from 'node:path';
 import { writePrivate, x402Home } from './paths.js';
-import { X402Error, ExitCode } from './errors.js';
+import { X402Error, ExitCode, messageOf } from './errors.js';
+import { isJsonObject, isNumber, isString, parseJson, type JsonValue } from './json.js';
 
 /**
  * Encrypted keystore for the `local` signer backend: scrypt to stretch the
@@ -57,6 +58,33 @@ function derive(passphrase: string, salt: Buffer, params = KDF): Buffer {
   });
 }
 
+/**
+ * A stored entry with every field decryption reads. A malformed entry fails
+ * the read outright rather than being skipped: the keystore is rewritten on
+ * every add, so skipping would delete a key the next time one is added.
+ */
+export function isKeystoreEntry<T>(value: T): value is T & KeystoreEntry {
+  if (!isJsonObject(value)) return false;
+  const { kdf, cipher } = value;
+  return (
+    isString(value.name) &&
+    isString(value.address) &&
+    isString(value.ciphertext) &&
+    isString(value.createdAt) &&
+    isJsonObject(kdf) &&
+    kdf.name === 'scrypt' &&
+    isString(kdf.salt) &&
+    isNumber(kdf.N) &&
+    isNumber(kdf.r) &&
+    isNumber(kdf.p) &&
+    isNumber(kdf.dkLen) &&
+    isJsonObject(cipher) &&
+    cipher.name === 'aes-256-gcm' &&
+    isString(cipher.iv) &&
+    isString(cipher.tag)
+  );
+}
+
 export function readKeystore(file?: string): KeystoreFile {
   const path = keystorePath(file);
   if (!existsSync(path)) return { version: 1, entries: [] };
@@ -67,15 +95,22 @@ export function readKeystore(file?: string): KeystoreFile {
       `refusing to read a group- or world-readable keystore: ${path} (chmod 600 it)`,
     );
   }
+  let entries: JsonValue[];
   try {
-    const parsed = JSON.parse(readFileSync(path, 'utf8')) as KeystoreFile;
-    return { version: 1, entries: Array.isArray(parsed.entries) ? parsed.entries : [] };
+    const parsed = parseJson(readFileSync(path, 'utf8'));
+    entries = isJsonObject(parsed) && Array.isArray(parsed.entries) ? parsed.entries : [];
   } catch (err) {
+    throw new X402Error(ExitCode.GENERIC, `cannot read keystore ${path}: ${messageOf(err)}`);
+  }
+  const valid = entries.filter(isKeystoreEntry);
+  if (valid.length !== entries.length) {
     throw new X402Error(
       ExitCode.GENERIC,
-      `cannot read keystore ${path}: ${(err as Error).message}`,
+      `cannot read keystore ${path}: ${entries.length - valid.length} entry(s) are not ` +
+        'in the scrypt/aes-256-gcm format this CLI writes. Nothing was changed.',
     );
   }
+  return { version: 1, entries: valid };
 }
 
 export function writeKeystore(store: KeystoreFile, file?: string): void {

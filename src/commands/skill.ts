@@ -1,7 +1,7 @@
 import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { X402Error, ExitCode } from '../core/errors.js';
+import { X402Error, ExitCode, messageOf } from '../core/errors.js';
 import { writeJson, isTty } from '../core/output.js';
 import { type ParsedArgs } from '../core/args.js';
 
@@ -24,10 +24,9 @@ export function skillCommand(parsed: ParsedArgs): number {
   try {
     text = readFileSync(file, 'utf8');
   } catch (err) {
-    // SAFETY: `.message` off a non-Error is `undefined`, not a throw.
     throw new X402Error(
       ExitCode.GENERIC,
-      `cannot read SKILL.md from the installed package (${file}): ${(err as Error).message}`,
+      `cannot read SKILL.md from the installed package (${file}): ${messageOf(err)}`,
     );
   }
 

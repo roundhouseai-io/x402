@@ -1,4 +1,12 @@
-import { X402Error, ExitCode } from './errors.js';
+import { X402Error, ExitCode, messageOf } from './errors.js';
+import {
+  isJsonObject,
+  isNumber,
+  isString,
+  parseJson,
+  type JsonObject,
+  type JsonValue,
+} from './json.js';
 import { ASSETS, CHAINS, caip2, findAsset, findChain, formatUnits, parseUnits } from './assets.js';
 
 export interface PaymentOption {
@@ -21,7 +29,7 @@ export interface PaymentOption {
   maxTimeoutSeconds: number;
   /** EIP-712 domain name/version for the token contract. */
   eip712: { name: string; version: string };
-  raw: Record<string, unknown>;
+  raw: JsonObject;
 }
 
 export interface PaymentRequired {
@@ -32,13 +40,13 @@ export interface PaymentRequired {
    * The v2 top-level `resource` object, echoed back in the payment payload.
    * Absent on v1, which carries the resource per option.
    */
-  resource: Json | undefined;
+  resource: JsonObject | undefined;
   /**
    * The v2 `extensions` map. The client must echo back at least what it was
    * sent (spec 5.1.2), so it is carried here rather than dropped.
    */
-  extensions: Json | undefined;
-  raw: unknown;
+  extensions: JsonObject | undefined;
+  raw: JsonValue | undefined;
 }
 
 /**
@@ -49,7 +57,7 @@ export interface PaymentRequired {
  * an authorization this client cannot address correctly is money at risk for a
  * call that cannot succeed.
  */
-export const SUPPORTED_X402_VERSIONS: readonly number[] = [1, 2];
+export const SUPPORTED_X402_VERSIONS = [1, 2];
 
 export function assertSupportedVersion(version: number): void {
   if (SUPPORTED_X402_VERSIONS.includes(version)) return;
@@ -61,12 +69,8 @@ export function assertSupportedVersion(version: number): void {
   );
 }
 
-type Json = Record<string, unknown>;
-
-const isObj = (v: unknown): v is Json => typeof v === 'object' && v !== null && !Array.isArray(v);
-
 /** First present key, tolerating the naming drift seen across live providers. */
-function pick(obj: Json, keys: string[]): unknown {
+function pick(obj: JsonObject, keys: string[]): JsonValue | undefined {
   for (const k of keys) {
     if (obj[k] !== undefined && obj[k] !== null && obj[k] !== '') return obj[k];
   }
@@ -87,21 +91,25 @@ const A_SCHEME = ['scheme', 'type'];
  * reading both spellings is the difference between the domain allowlist
  * applying to a v2 quote and being silently skipped.
  */
-function resourceUrlOf(value: unknown): string | undefined {
-  if (typeof value === 'string' && value !== '') return value;
-  if (isObj(value) && typeof value.url === 'string' && value.url !== '') return value.url;
+function resourceUrlOf(value: JsonValue | undefined): string | undefined {
+  if (isString(value) && value !== '') return value;
+  if (isJsonObject(value) && isString(value.url) && value.url !== '') return value.url;
   return undefined;
 }
 
-function normalizeOption(input: unknown, index: number, resource?: unknown): PaymentOption {
-  if (!isObj(input)) {
+function normalizeOption(
+  input: JsonValue,
+  index: number,
+  resource: JsonObject | undefined,
+): PaymentOption {
+  if (!isJsonObject(input)) {
     throw new X402Error(ExitCode.INVALID_402, `payment option ${index} is not an object`);
   }
 
   const scheme = String(pick(input, A_SCHEME) ?? 'exact');
 
   const rawNetwork = pick(input, A_NETWORK);
-  const chain = findChain(rawNetwork as string | number | undefined);
+  const chain = findChain(isString(rawNetwork) || isNumber(rawNetwork) ? rawNetwork : undefined);
   if (!chain) {
     throw new X402Error(
       ExitCode.INVALID_402,
@@ -125,13 +133,13 @@ function normalizeOption(input: unknown, index: number, resource?: unknown): Pay
   }
 
   const payTo = pick(input, A_PAYTO);
-  if (typeof payTo !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(payTo)) {
+  if (!isString(payTo) || !/^0x[0-9a-fA-F]{40}$/.test(payTo)) {
     throw new X402Error(ExitCode.INVALID_402, `missing or malformed payTo in 402 payload`);
   }
 
-  const extra = isObj(input.extra) ? input.extra : {};
+  const extra = isJsonObject(input.extra) ? input.extra : {};
   const assetRaw = pick(input, A_ASSET);
-  const known = findAsset(typeof assetRaw === 'string' ? assetRaw : undefined, chain.chainId);
+  const known = findAsset(isString(assetRaw) ? assetRaw : undefined, chain.chainId);
   if (assetRaw === undefined || assetRaw === '') {
     throw new X402Error(ExitCode.INVALID_402, `missing asset address in 402 payload`, {
       asset: assetRaw ?? null,
@@ -189,7 +197,7 @@ function normalizeOption(input: unknown, index: number, resource?: unknown): Pay
   } catch (err) {
     throw new X402Error(
       ExitCode.INVALID_402,
-      `unparseable amount "${amountStr}": ${(err as Error).message}`,
+      `unparseable amount "${amountStr}": ${messageOf(err)}`,
     );
   }
   if (amountAtomic < 0n)
@@ -201,7 +209,7 @@ function normalizeOption(input: unknown, index: number, resource?: unknown): Pay
 
   return {
     scheme,
-    network: typeof rawNetwork === 'string' ? rawNetwork : chain.network,
+    network: isString(rawNetwork) ? rawNetwork : chain.network,
     chainId: chain.chainId,
     chain: caip2(chain.chainId),
     asset: assetAddr,
@@ -211,7 +219,7 @@ function normalizeOption(input: unknown, index: number, resource?: unknown): Pay
     amount: formatUnits(amountAtomic, decimals),
     payTo,
     resource: resourceUrlOf(input.resource) ?? resourceUrlOf(resource),
-    description: typeof input.description === 'string' ? input.description : undefined,
+    description: isString(input.description) ? input.description : undefined,
     maxTimeoutSeconds: Number.isFinite(timeout) && timeout > 0 ? Math.floor(timeout) : 60,
     // From the table too. `extra` is the provider describing a contract it does
     // not own; the table's values were read from the contract itself.
@@ -234,7 +242,7 @@ function normalizeOption(input: unknown, index: number, resource?: unknown): Pay
  * Returns undefined when neither header carries a decodable payload, leaving the
  * body as the v1 path.
  */
-export function requirementsFromHeaders(headers: Record<string, string>): unknown | undefined {
+export function requirementsFromHeaders(headers: Record<string, string>): JsonValue | undefined {
   const candidates: string[] = [];
 
   const direct = headers['payment-required'];
@@ -250,9 +258,9 @@ export function requirementsFromHeaders(headers: Record<string, string>): unknow
   for (const raw of candidates) {
     try {
       const json = Buffer.from(raw, 'base64').toString('utf8');
-      const parsed: unknown = JSON.parse(json);
+      const parsed = parseJson(json);
       // A payload with no options is no better than the body; let the body try.
-      if (isObj(parsed) || Array.isArray(parsed)) return parsed;
+      if (isJsonObject(parsed) || Array.isArray(parsed)) return parsed;
     } catch {
       // Not decodable — fall through to the next candidate, then to the body.
     }
@@ -273,7 +281,7 @@ export function requirementsFromHeaders(headers: Record<string, string>): unknow
  *   - a whole header line, `PAYMENT-REQUIRED: <base64>`
  *   - any of the above with the line breaks a copy-paste leaves behind
  */
-export function decodeQuote(input: string): unknown {
+export function decodeQuote(input: string): JsonValue {
   const text = input.trim();
   if (text === '') {
     throw new X402Error(ExitCode.INVALID_402, 'empty 402 payload');
@@ -283,16 +291,16 @@ export function decodeQuote(input: string): unknown {
 
   if (withoutHeader.startsWith('{') || withoutHeader.startsWith('[')) {
     try {
-      return JSON.parse(withoutHeader);
+      return parseJson(withoutHeader);
     } catch (err) {
-      throw new X402Error(ExitCode.INVALID_402, `not JSON: ${(err as Error).message}`);
+      throw new X402Error(ExitCode.INVALID_402, `not JSON: ${messageOf(err)}`);
     }
   }
 
   const compact = withoutHeader.replace(/\s+/g, '');
   if (/^[A-Za-z0-9+/_=-]+$/.test(compact)) {
     try {
-      return JSON.parse(Buffer.from(compact, 'base64').toString('utf8'));
+      return parseJson(Buffer.from(compact, 'base64').toString('utf8'));
     } catch {
       throw new X402Error(
         ExitCode.INVALID_402,
@@ -312,24 +320,24 @@ export function decodeQuote(input: string): unknown {
  * envelope, a bare requirements object, or a bare array of options — the three
  * shapes live providers actually emit today.
  */
-export function parsePaymentRequired(body: unknown): PaymentRequired {
-  let candidates: unknown[];
+export function parsePaymentRequired(body: JsonValue | undefined): PaymentRequired {
+  let candidates: JsonValue[];
   let version = 1;
   let error: string | undefined;
-  let resource: Json | undefined;
-  let extensions: Json | undefined;
+  let resource: JsonObject | undefined;
+  let extensions: JsonObject | undefined;
 
   if (Array.isArray(body)) {
     candidates = body;
-  } else if (isObj(body)) {
+  } else if (isJsonObject(body)) {
     version = Number(body.x402Version ?? body.version ?? 1);
-    error = typeof body.error === 'string' ? body.error : undefined;
-    if (isObj(body.resource)) resource = body.resource;
-    else if (typeof body.resource === 'string') resource = { url: body.resource };
-    if (isObj(body.extensions)) extensions = body.extensions;
+    error = isString(body.error) ? body.error : undefined;
+    if (isJsonObject(body.resource)) resource = body.resource;
+    else if (isString(body.resource)) resource = { url: body.resource };
+    if (isJsonObject(body.extensions)) extensions = body.extensions;
     const accepts = pick(body, ['accepts', 'paymentRequirements', 'options', 'requirements']);
     if (Array.isArray(accepts)) candidates = accepts;
-    else if (isObj(accepts)) candidates = [accepts];
+    else if (isJsonObject(accepts)) candidates = [accepts];
     else candidates = [body];
   } else {
     throw new X402Error(ExitCode.INVALID_402, 'response body is not a 402 payment payload');
@@ -345,7 +353,7 @@ export function parsePaymentRequired(body: unknown): PaymentRequired {
     try {
       options.push(normalizeOption(c, i, resource));
     } catch (err) {
-      problems.push((err as Error).message);
+      problems.push(messageOf(err));
     }
   }
   if (options.length === 0) {

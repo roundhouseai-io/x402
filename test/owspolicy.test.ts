@@ -167,8 +167,13 @@ describe('the credential the backend signs with', () => {
     accounts: [{ chainId: 'eip155:8453', address: ADDRESS }],
   };
 
+  interface CredentialSpy {
+    core: OwsCoreModule;
+    seen: (string | undefined)[];
+  }
+
   /** Records which credential OWS was handed, which is the whole question. */
-  const spy = (): { core: OwsCoreModule; seen: (string | undefined)[] } => {
+  const spy = (): CredentialSpy => {
     const seen: (string | undefined)[] = [];
     return {
       seen,

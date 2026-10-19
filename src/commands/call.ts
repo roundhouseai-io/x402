@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { X402Error, ExitCode } from '../core/errors.js';
 import { decodeQuote, parsePaymentRequired } from '../core/x402.js';
 import { buildData } from '../core/data.js';
+import { stringField, type JsonObject } from '../core/json.js';
 import { emitCallResult, writeJson, isTty } from '../core/output.js';
 import { bool, str, list, parseHeaders, type ParsedArgs } from '../core/args.js';
 import { buildContext, callOptionsFrom } from './context.js';
@@ -35,7 +36,7 @@ function targetFromQuote(target: string, stdin: string | undefined): string {
 
   const requirements = parsePaymentRequired(decodeQuote(raw));
   const url =
-    (typeof requirements.resource?.url === 'string' ? requirements.resource.url : undefined) ??
+    (requirements.resource ? stringField(requirements.resource, 'url') : undefined) ??
     requirements.options.find((o) => o.resource !== undefined)?.resource;
   if (!url || !/^https?:\/\//i.test(url)) {
     throw new X402Error(
@@ -69,7 +70,7 @@ export async function callCommand(parsed: ParsedArgs): Promise<number> {
     dataFlags: parsed.dataFlags,
     json: str(parsed.flags, 'json'),
     // stdin held the quote, not request data.
-    ...(quoteTarget ? {} : { stdin }),
+    stdin: quoteTarget ? undefined : stdin,
     strings: bool(parsed.flags, 'data-strings'),
   });
 
@@ -110,7 +111,7 @@ export async function probeCommand(parsed: ParsedArgs): Promise<number> {
   const { data } = buildData({
     dataFlags: parsed.dataFlags,
     json: str(parsed.flags, 'json'),
-    ...(quoteTarget ? {} : { stdin }),
+    stdin: quoteTarget ? undefined : stdin,
     strings: bool(parsed.flags, 'data-strings'),
   });
 
@@ -122,42 +123,41 @@ export async function probeCommand(parsed: ParsedArgs): Promise<number> {
     ...callOptionsFrom(parsed),
   });
 
-  const payload = {
+  const payload: JsonObject = {
     ok: true,
     url: probe.url,
     status: probe.status,
     paymentRequired: probe.status === 402,
-    ...(probe.capability ? { capability: probe.capability, provider: probe.provider?.url } : {}),
-    ...(probe.selected
-      ? {
-          selected: {
-            scheme: probe.selected.scheme,
-            network: probe.selected.network,
-            chain: probe.selected.chain,
-            asset: probe.selected.assetSymbol,
-            assetAddress: probe.selected.asset,
-            amount: probe.selected.amount,
-            amountAtomic: probe.selected.amountAtomic.toString(),
-            payTo: probe.selected.payTo,
-            maxTimeoutSeconds: probe.selected.maxTimeoutSeconds,
-            description: probe.selected.description,
-          },
-        }
-      : {}),
-    ...(probe.requirements
-      ? {
-          options: probe.requirements.options.map((o) => ({
-            scheme: o.scheme,
-            network: o.network,
-            asset: o.assetSymbol,
-            amount: o.amount,
-            payTo: o.payTo,
-          })),
-          x402Version: probe.requirements.x402Version,
-        }
-      : {}),
-    ...(probe.body !== undefined && probe.status !== 402 ? { body: probe.body } : {}),
   };
+  if (probe.capability) {
+    payload.capability = probe.capability;
+    payload.provider = probe.provider?.url;
+  }
+  if (probe.selected) {
+    payload.selected = {
+      scheme: probe.selected.scheme,
+      network: probe.selected.network,
+      chain: probe.selected.chain,
+      asset: probe.selected.assetSymbol,
+      assetAddress: probe.selected.asset,
+      amount: probe.selected.amount,
+      amountAtomic: probe.selected.amountAtomic.toString(),
+      payTo: probe.selected.payTo,
+      maxTimeoutSeconds: probe.selected.maxTimeoutSeconds,
+      description: probe.selected.description,
+    };
+  }
+  if (probe.requirements) {
+    payload.options = probe.requirements.options.map((o) => ({
+      scheme: o.scheme,
+      network: o.network,
+      asset: o.assetSymbol,
+      amount: o.amount,
+      payTo: o.payTo,
+    }));
+    payload.x402Version = probe.requirements.x402Version;
+  }
+  if (probe.body !== undefined && probe.status !== 402) payload.body = probe.body;
 
   if (isTty() && probe.selected) {
     const o = probe.selected;

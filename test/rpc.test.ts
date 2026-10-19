@@ -5,6 +5,7 @@ import { bypassesProxy, proxyFromEnv } from '../src/core/proxy.js';
 import { findChain, findAsset } from '../src/core/assets.js';
 import { parsePaymentRequired } from '../src/core/x402.js';
 import { ExitCode, X402Error } from '../src/core/errors.js';
+import type { JsonValue } from '../src/core/json.js';
 
 const ADDRESS = '0x2D43136FfBbbe0ED5CBaaB2E8B2b8c968059114C';
 
@@ -16,12 +17,19 @@ const word = (value: bigint) => `0x${value.toString(16).padStart(64, '0')}`;
  * mis-encoded `balanceOf` returns someone else's balance rather than an error,
  * which is the kind of wrong that looks right.
  */
-function stubRpc(handler: (method: string, params: unknown[]) => unknown): {
-  calls: { method: string; params: unknown[] }[];
-} {
-  const calls: { method: string; params: unknown[] }[] = [];
+interface RpcCall {
+  method: string;
+  params: JsonValue[];
+}
+
+interface RpcStub {
+  calls: RpcCall[];
+}
+
+function stubRpc(handler: (method: string, params: JsonValue[]) => JsonValue): RpcStub {
+  const calls: RpcCall[] = [];
   vi.stubGlobal('fetch', async (_url: string, init: { body: string }) => {
-    const req = JSON.parse(init.body) as { method: string; params: unknown[] };
+    const req = JSON.parse(init.body) as RpcCall;
     calls.push({ method: req.method, params: req.params });
     const result = handler(req.method, req.params);
     return {

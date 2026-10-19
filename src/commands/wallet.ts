@@ -3,13 +3,20 @@ import { writeJson, isTty, writeErr } from '../core/output.js';
 import { bool, str, list, type ParsedArgs } from '../core/args.js';
 import { parseUnits, formatUnits } from '../core/assets.js';
 import { parseDuration } from '../core/duration.js';
-import { waitForBalance } from '../core/fundwait.js';
+import { waitForBalance, type WaitResult } from '../core/fundwait.js';
 import { DEFAULT_MIN_BALANCE, DEFAULT_FUND_TIMEOUT } from '../core/status.js';
 import { buildContext } from './context.js';
 
-import { runSetup, writeConfig, unsetConfig, type ConfigValue } from '../core/setup.js';
-import { grantPolicyKey } from '../core/owspolicy.js';
-import { readBalances } from '../core/rpc.js';
+import {
+  runSetup,
+  writeConfig,
+  unsetConfig,
+  type ConfigEntries,
+  type SetupOptions,
+} from '../core/setup.js';
+import { grantPolicyKey, type GrantOptions } from '../core/owspolicy.js';
+import { readBalances, type BalanceOptions } from '../core/rpc.js';
+import type { JsonObject } from '../core/json.js';
 
 /** Wallet queries against the active signer backend, plus the guided setup. */
 export async function walletCommand(parsed: ParsedArgs): Promise<number> {
@@ -93,13 +100,10 @@ export async function walletCommand(parsed: ParsedArgs): Promise<number> {
     }
 
     const results = [];
+    const balanceOptions: BalanceOptions = { rpc: ctx.config.rpc };
+    if (symbol) balanceOptions.symbol = symbol;
     for (const chain of wanted) {
-      results.push(
-        await readBalances(address, chain, {
-          rpc: ctx.config.rpc,
-          ...(symbol ? { symbol } : {}),
-        }),
-      );
+      results.push(await readBalances(address, chain, balanceOptions));
     }
 
     if (isTty()) {
@@ -127,6 +131,18 @@ export async function walletCommand(parsed: ParsedArgs): Promise<number> {
     ExitCode.GENERIC,
     `usage: rh-x402 wallet <create|policy|list|balance|address|forget|restore>`,
   );
+}
+
+/** The `detail` of a `wallet balance --wait` timeout. */
+function waitTimeoutDetail(result: WaitResult, minimum: string, chain: string): JsonObject {
+  const detail: JsonObject = {
+    amount: result.amount,
+    minimum,
+    chain,
+    polls: result.polls,
+  };
+  if (result.lastError) detail.lastError = result.lastError;
+  return detail;
 }
 
 /**
@@ -197,13 +213,7 @@ async function balanceFloor(
           : `; it holds ${result.amount} USDC`) +
         (result.lastError ? ` (last read error: ${result.lastError})` : '') +
         '. Check the address and that the transfer went out on the right chain.',
-      {
-        amount: result.amount,
-        minimum: formatUnits(minAtomic, 6),
-        chain,
-        polls: result.polls,
-        ...(result.lastError ? { lastError: result.lastError } : {}),
-      },
+      waitTimeoutDetail(result, formatUnits(minAtomic, 6), chain),
     );
   }
   emitFloor(
@@ -245,23 +255,32 @@ function emitFloor(
 
 /** Guided setup: pick how the key is held, create the wallet, write config. */
 async function walletCreate(parsed: ParsedArgs): Promise<number> {
-  const result = await runSetup({
-    ...pick('path', str(parsed.flags, 'path')),
-    ...pick('name', str(parsed.flags, 'name')),
-    ...pick('vaultPath', str(parsed.flags, 'vault')),
-    ...pick('keyFile', str(parsed.flags, 'key-file')),
-    ...pick('keystore', str(parsed.flags, 'keystore')),
+  const options: SetupOptions = {
     install: bool(parsed.flags, 'install') || bool(parsed.flags, 'install-global'),
     installGlobal: bool(parsed.flags, 'install-global'),
     replace: bool(parsed.flags, 'replace'),
-    // Only force the answer when the caller said something. Left alone, the
-    // guided path asks and the non-interactive path defaults to no policy
-    // rather than minting a key nobody asked for.
-    ...(bool(parsed.flags, 'policy') ? { policy: true } : {}),
-    ...(bool(parsed.flags, 'no-policy') ? { policy: false } : {}),
-    ...(list(parsed.flags, 'chain').length > 0 ? { chains: list(parsed.flags, 'chain') } : {}),
-    ...(str(parsed.flags, 'expires') ? { expires: str(parsed.flags, 'expires')! } : {}),
-  });
+  };
+  // An absent flag is omitted rather than passed as `undefined`.
+  const path = str(parsed.flags, 'path');
+  if (path !== undefined) options.path = path;
+  const name = str(parsed.flags, 'name');
+  if (name !== undefined) options.name = name;
+  const vaultPath = str(parsed.flags, 'vault');
+  if (vaultPath !== undefined) options.vaultPath = vaultPath;
+  const keyFile = str(parsed.flags, 'key-file');
+  if (keyFile !== undefined) options.keyFile = keyFile;
+  const keystore = str(parsed.flags, 'keystore');
+  if (keystore !== undefined) options.keystore = keystore;
+  // Only force the answer when the caller said something. Left alone, the
+  // guided path asks and the non-interactive path defaults to no policy
+  // rather than minting a key nobody asked for.
+  if (bool(parsed.flags, 'policy')) options.policy = true;
+  if (bool(parsed.flags, 'no-policy')) options.policy = false;
+  const chains = list(parsed.flags, 'chain');
+  if (chains.length > 0) options.chains = chains;
+  const expires = str(parsed.flags, 'expires');
+  if (expires) options.expires = expires;
+  const result = await runSetup(options);
 
   if (isTty()) {
     process.stdout.write(
@@ -284,11 +303,6 @@ async function walletCreate(parsed: ParsedArgs): Promise<number> {
   // and this is the step people skip.
   writeErr(`fund ${result.address} with USDC on Base before calling a paid endpoint`);
   return ExitCode.OK;
-}
-
-/** Omit an absent flag rather than passing `undefined` into an optional field. */
-function pick<K extends string>(key: K, value: string | undefined): Record<K, string> | object {
-  return value === undefined ? {} : ({ [key]: value } as Record<K, string>);
 }
 
 /**
@@ -319,13 +333,15 @@ async function walletPolicy(parsed: ParsedArgs): Promise<number> {
 
   const core = ctx.config.wallet.backends['ows-core'] ?? {};
   const chains = list(parsed.flags, 'chain');
-  const grant = await grantPolicyKey({
+  const grantOptions: GrantOptions = {
     wallet,
     chains: chains.length > 0 ? chains : [ctx.config.defaults.chain],
-    ...(str(parsed.flags, 'expires') ? { expires: str(parsed.flags, 'expires')! } : {}),
-    ...(core.vaultPath ? { vaultPath: core.vaultPath } : {}),
-    ...(core.passphrase ? { passphrase: core.passphrase } : {}),
-  });
+  };
+  const expires = str(parsed.flags, 'expires');
+  if (expires) grantOptions.expires = expires;
+  if (core.vaultPath) grantOptions.vaultPath = core.vaultPath;
+  if (core.passphrase) grantOptions.passphrase = core.passphrase;
+  const grant = await grantPolicyKey(grantOptions);
 
   // The token is a secret, so it follows the same rule as every other secret
   // here: config stores an `env:` indirection and never the value. OWS shows
@@ -378,7 +394,7 @@ async function walletVisibility(parsed: ParsedArgs, sub: 'forget' | 'restore'): 
   if (sub === 'forget') hidden.add(name);
   else hidden.delete(name);
 
-  const entries: Record<string, ConfigValue> = { 'wallet.hidden': [...hidden] };
+  const entries: ConfigEntries = { 'wallet.hidden': [...hidden] };
   // A hidden wallet must not stay the default, or every later command resolves
   // to something this CLI is pretending not to see.
   const clearedDefault = sub === 'forget' && ctx.config.wallet.default === name;

@@ -90,21 +90,18 @@ export async function discoverCommand(parsed: ParsedArgs): Promise<number> {
       // and the cheapest here is not necessarily the cheapest that exists.
       truncated: market.truncated ?? false,
       indexSurface: market.from,
-      ...(policy
-        ? {
-            policy: {
-              applied: true,
-              rules: {
-                live: true,
-                minPayers30d: 1,
-                maxPriceVsSpot: policy.factor,
-              },
-              spot: policy.spot,
-              priceRule: policy.priceRule,
-              rejected: policy.rejected.map((r) => ({ ...r.provider, reasons: r.reasons })),
-            },
-          }
-        : {}),
+      // Absent (and so omitted from the JSON) without --policy.
+      policy: policy && {
+        applied: true,
+        rules: {
+          live: true,
+          minPayers30d: 1,
+          maxPriceVsSpot: policy.factor,
+        },
+        spot: policy.spot,
+        priceRule: policy.priceRule,
+        rejected: policy.rejected.map((r) => ({ ...r.provider, reasons: r.reasons })),
+      },
       providers,
     });
   }

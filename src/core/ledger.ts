@@ -1,5 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { paths, appendPrivate } from './paths.js';
+import type { SettlementResponse } from './eip3009.js';
+import { isJsonObject, isString, parseJson, type JsonValue } from './json.js';
 
 export interface LedgerRecord {
   id: string;
@@ -14,7 +16,7 @@ export interface LedgerRecord {
   request: {
     dataHash?: string;
     dataKeys?: string[];
-    data?: unknown;
+    data?: JsonValue | undefined;
     headersHash?: string;
     headerNames?: string[];
     bytes: number;
@@ -39,12 +41,12 @@ export interface LedgerRecord {
     scheme?: string;
     authHash?: string;
     cacheHit?: boolean;
-    settlement?: unknown;
+    settlement?: SettlementResponse | undefined;
   };
   response: {
     status: number | null;
     bodyHash?: string;
-    body?: unknown;
+    body?: JsonValue | undefined;
     bytes: number;
     latencyMs: number;
     paymentLatencyMs?: number;
@@ -58,6 +60,24 @@ export function appendRecord(record: LedgerRecord, file = paths.ledger()): void 
   appendPrivate(file, `${JSON.stringify(record)}\n`);
 }
 
+/**
+ * A parsed ledger line carrying the fields every reader dereferences.
+ *
+ * Lines are written by {@link appendRecord} alone, so a line that fails this is
+ * a hand edit or a torn write; it is skipped like any other unreadable line.
+ */
+export function isLedgerRecord<T>(value: T): value is T & LedgerRecord {
+  return (
+    isJsonObject(value) &&
+    isString(value.id) &&
+    isString(value.ts) &&
+    isString(value.url) &&
+    isJsonObject(value.request) &&
+    isJsonObject(value.payment) &&
+    isJsonObject(value.response)
+  );
+}
+
 export function readRecords(file = paths.ledger()): LedgerRecord[] {
   if (!existsSync(file)) return [];
   const out: LedgerRecord[] = [];
@@ -65,7 +85,8 @@ export function readRecords(file = paths.ledger()): LedgerRecord[] {
     const trimmed = line.trim();
     if (trimmed === '') continue;
     try {
-      out.push(JSON.parse(trimmed) as LedgerRecord);
+      const parsed = parseJson(trimmed);
+      if (isLedgerRecord(parsed)) out.push(parsed);
     } catch {
       // A truncated final line (process killed mid-write) must not break history.
     }
@@ -128,6 +149,10 @@ export const GROUP_KEYS: GroupKey[] = [
   'day',
   'capability',
 ];
+
+export function isGroupKey(name: string): name is GroupKey {
+  return GROUP_KEYS.some((key) => key === name);
+}
 
 function groupValue(r: LedgerRecord, by: GroupKey): string {
   switch (by) {

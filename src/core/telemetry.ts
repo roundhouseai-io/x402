@@ -2,9 +2,10 @@ import { readdirSync, readFileSync, existsSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { paths, ensureDir, writePrivate } from './paths.js';
 import { tagged, ulid } from './ids.js';
-import { request } from './http.js';
+import { request, type HeaderMap } from './http.js';
+import { isJsonObject, parseJson, type JsonValue } from './json.js';
 import type { PayloadLevel, X402Config } from './config.js';
-import type { LedgerRecord } from './ledger.js';
+import { isLedgerRecord, type LedgerRecord } from './ledger.js';
 
 /**
  * Header names that are redacted at every payload level. Only their presence is
@@ -50,11 +51,8 @@ export function summarizeHeaders(headers: Record<string, string>): HeaderSummary
   return { headerNames: names, headersHash: tagged(safe.join('\n')) };
 }
 
-const isObj = (v: unknown): v is Record<string, unknown> =>
-  typeof v === 'object' && v !== null && !Array.isArray(v);
-
 /** Deep-clone `value`, replacing every configured dot path with a marker. */
-export function maskPaths(value: unknown, dotPaths: string[]): unknown {
+export function maskPaths(value: JsonValue | undefined, dotPaths: string[]): JsonValue | undefined {
   if (dotPaths.length === 0) return value;
   const clone = structuredClone(value);
   for (const path of dotPaths) {
@@ -64,14 +62,14 @@ export function maskPaths(value: unknown, dotPaths: string[]): unknown {
   return clone;
 }
 
-function applyMask(node: unknown, segments: string[]): void {
+function applyMask(node: JsonValue | undefined, segments: string[]): void {
   const [head, ...rest] = segments;
   if (head === undefined) return;
   if (Array.isArray(node)) {
     for (const item of node) applyMask(item, segments);
     return;
   }
-  if (!isObj(node)) return;
+  if (!isJsonObject(node)) return;
   if (rest.length === 0) {
     if (head in node) node[head] = '[redacted]';
     return;
@@ -86,7 +84,7 @@ function applyMask(node: unknown, segments: string[]): void {
 export interface PayloadSummary {
   hash?: string;
   keys?: string[];
-  body?: unknown;
+  body?: JsonValue | undefined;
   bytes: number;
 }
 
@@ -97,19 +95,18 @@ export interface PayloadSummary {
  */
 export function summarizePayload(
   raw: string,
-  parsed: unknown,
+  parsed: JsonValue | undefined,
   level: PayloadLevel,
   redactKeys: string[] = [],
 ): PayloadSummary {
   const bytes = Buffer.byteLength(raw ?? '');
   if (level === 'none') return { bytes };
-  const keys = isObj(parsed) ? Object.keys(parsed).sort() : undefined;
-  if (level === 'hash') {
-    return { hash: tagged(raw ?? ''), ...(keys ? { keys } : {}), bytes };
-  }
-  const body =
+  const summary: PayloadSummary = { hash: tagged(raw ?? ''), bytes };
+  if (isJsonObject(parsed)) summary.keys = Object.keys(parsed).sort();
+  if (level === 'hash') return summary;
+  summary.body =
     parsed === undefined ? (raw === '' ? undefined : raw) : maskPaths(parsed, redactKeys);
-  return { hash: tagged(raw ?? ''), ...(keys ? { keys } : {}), body, bytes };
+  return summary;
 }
 
 /** Values the ledger records for the calling agent. */
@@ -174,7 +171,7 @@ export class TelemetrySink {
 
   private async post(records: LedgerRecord[]): Promise<boolean> {
     const sink = this.config.telemetry.sink;
-    const headers: Record<string, string> = { 'content-type': 'application/json' };
+    const headers: HeaderMap = { 'content-type': 'application/json' };
     if (sink.token) headers.authorization = `Bearer ${sink.token}`;
     try {
       const res = await request({
@@ -226,7 +223,8 @@ export function readOutbox(dir = paths.outbox()): LedgerRecord[] {
     for (const line of readFileSync(join(dir, name), 'utf8').split('\n')) {
       if (line.trim() === '') continue;
       try {
-        out.push(JSON.parse(line) as LedgerRecord);
+        const parsed = parseJson(line);
+        if (isLedgerRecord(parsed)) out.push(parsed);
       } catch {
         /* skip corrupt line */
       }

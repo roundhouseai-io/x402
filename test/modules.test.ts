@@ -15,7 +15,7 @@ import type { CallResult } from '../src/core/engine.js';
 
 const ADDRESS = '0x2D43136FfBbbe0ED5CBaaB2E8B2b8c968059114C';
 
-function jsonResponse(status: number, body: unknown) {
+function jsonResponse<T>(status: number, body: T) {
   return new Response(JSON.stringify(body), {
     status,
     headers: { 'content-type': 'application/json', 'X-Mixed-Case': 'yes' },

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { parsePath, coerce, buildData, toQueryParams, setDeep } from '../src/core/data.js';
+import type { JsonObject } from '../src/core/json.js';
 
 describe('parsePath', () => {
   it('splits objects and array indexes', () => {
@@ -95,7 +96,7 @@ describe('toQueryParams', () => {
 
 describe('setDeep', () => {
   it('creates arrays for numeric segments and objects otherwise', () => {
-    const root: Record<string, unknown> = {};
+    const root: JsonObject = {};
     setDeep(root, ['a', 0, 'b'], 'x');
     expect(root).toEqual({ a: [{ b: 'x' }] });
   });

@@ -18,6 +18,7 @@ import { readRecords } from '../src/core/ledger.js';
 import { decodePaymentHeader } from '../src/core/eip3009.js';
 import { testUrlFor } from '../src/commands/setup.js';
 import { VERSION } from '../src/version.js';
+import type { JsonObject } from '../src/core/json.js';
 
 const ADDRESS = '0x2D43136FfBbbe0ED5CBaaB2E8B2b8c968059114C';
 const PAY_TO = '0x1831f336585a6C67B6A954d28f3E07F44C4EEBbd';
@@ -42,7 +43,7 @@ const quote = (amountAtomic = '2000') => ({
   ],
 });
 
-function jsonResponse(status: number, body: unknown, headers: Record<string, string> = {}) {
+function jsonResponse<T>(status: number, body: T, headers: Record<string, string> = {}) {
   return new Response(JSON.stringify(body), {
     status,
     headers: { 'content-type': 'application/json', ...headers },
@@ -57,13 +58,16 @@ interface Seen {
 /** Route `fetch` by URL. Anything unrouted throws, so nothing leaks to the network. */
 function stubFetch(route: (url: string, headers: Record<string, string>) => Response): Seen[] {
   const seen: Seen[] = [];
-  vi.stubGlobal('fetch', async (input: unknown, init?: { headers?: Record<string, string> }) => {
-    const url = String(input instanceof Request ? input.url : input);
-    const headers: Record<string, string> = {};
-    for (const [k, v] of Object.entries(init?.headers ?? {})) headers[k.toLowerCase()] = v;
-    seen.push({ url, headers });
-    return route(url, headers);
-  });
+  vi.stubGlobal(
+    'fetch',
+    async (input: string | URL | Request, init?: { headers?: Record<string, string> }) => {
+      const url = String(input instanceof Request ? input.url : input);
+      const headers: Record<string, string> = {};
+      for (const [k, v] of Object.entries(init?.headers ?? {})) headers[k.toLowerCase()] = v;
+      seen.push({ url, headers });
+      return route(url, headers);
+    },
+  );
   return seen;
 }
 
@@ -103,7 +107,7 @@ else process.stdout.write(JSON.stringify({ error: { code: 'unsupported', message
   return path;
 }
 
-function writeUserConfig(extra: Record<string, unknown> = {}): void {
+function writeUserConfig(extra: JsonObject = {}): void {
   const config = {
     wallet: {
       backend: 'exec',

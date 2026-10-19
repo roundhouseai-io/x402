@@ -1,4 +1,5 @@
-import { X402Error, ExitCode } from './errors.js';
+import { X402Error, ExitCode, messageOf } from './errors.js';
+import { isJsonObject, objectField, parseJson, stringField, type JsonValue } from './json.js';
 import { request, proxyHint } from './http.js';
 import { bypassesProxy, proxyFromEnv } from './proxy.js';
 import {
@@ -27,11 +28,6 @@ import {
 /** `balanceOf(address)` */
 const BALANCE_OF = '0x70a08231';
 
-interface RpcResponse {
-  result?: string;
-  error?: { code?: number; message?: string };
-}
-
 function rpcUrlFor(chain: ChainInfo, overrides: Record<string, string>): string {
   return overrides[chain.network] ?? chain.rpcUrl;
 }
@@ -47,33 +43,35 @@ async function rpcCall(url: string, method: string, params: unknown[]): Promise<
       timeoutMs: 15_000,
     });
   } catch (err) {
-    // SAFETY: `.message` off a non-Error is `undefined`, not a throw.
     throw new X402Error(
       ExitCode.GENERIC,
-      `RPC ${url} unreachable: ${(err as Error).message}. Set a different endpoint with ` +
+      `RPC ${url} unreachable: ${messageOf(err)}. Set a different endpoint with ` +
         '`rh-x402 config set rpc.<chain> <url>`.',
     );
   }
-  let body: RpcResponse;
+  let parsed: JsonValue;
   try {
-    body = JSON.parse(res.body) as RpcResponse;
+    parsed = parseJson(res.body);
   } catch {
     throw new X402Error(
       ExitCode.GENERIC,
       `RPC ${url} returned ${res.status}, not JSON.${proxyHint(usedProxy(url))}`,
     );
   }
-  if (body.error) {
+  const body = isJsonObject(parsed) ? parsed : {};
+  const error = objectField(body, 'error');
+  if (error) {
     throw new X402Error(
       ExitCode.GENERIC,
-      `RPC ${url} refused ${method}: ${body.error.message ?? 'unknown error'}. ` +
+      `RPC ${url} refused ${method}: ${stringField(error, 'message') ?? 'unknown error'}. ` +
         'Public endpoints rate-limit; set your own with `rh-x402 config set rpc.<chain> <url>`.',
     );
   }
-  if (typeof body.result !== 'string') {
+  const result = stringField(body, 'result');
+  if (result === undefined) {
     throw new X402Error(ExitCode.GENERIC, `RPC ${url} returned no result for ${method}`);
   }
-  return body.result;
+  return result;
 }
 
 /** Hex quantity → bigint. An empty result means the call reverted or hit nothing. */

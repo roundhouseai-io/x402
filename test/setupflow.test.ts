@@ -32,6 +32,13 @@ const TEST_URL = 'https://api.roundhouseai.io/v0/test/x402';
  * ledger. `status` is the REAL `collectStatus` reading it, so the flow and the
  * report that decides which steps to skip are tested together.
  */
+/** Scripted replies to the prompts, consumed in order. */
+interface ScriptedAnswers {
+  select?: string;
+  ask?: string[];
+  confirm?: boolean[];
+}
+
 class World {
   raw: Json = {};
   env: NodeJS.ProcessEnv = {};
@@ -50,7 +57,7 @@ class World {
   fault: { at: string; error?: Error; result?: Partial<TestCall> } | undefined;
   interactive = false;
   nodeVersion = '22.1.0';
-  answers: { select?: string; ask?: string[]; confirm?: boolean[] } = {};
+  answers: ScriptedAnswers = {};
   keyRecognised: 'recognised' | 'rejected' | 'unknown' = 'recognised';
 
   config(): X402Config {
@@ -146,8 +153,8 @@ class World {
           address: ADDRESS,
           configured: {},
           nextSteps: [],
-          ...(opts.policy ? { policy: { id: 'pol', keyId: 'key', token: POLICY_TOKEN } } : {}),
         };
+        if (opts.policy) result.policy = { id: 'pol', keyId: 'key', token: POLICY_TOKEN };
         return result;
       },
       globalInstallWritable: () => true,

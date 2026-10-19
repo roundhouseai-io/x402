@@ -1,7 +1,7 @@
 import { X402Error, ExitCode } from '../errors.js';
 import { decryptEntry, keystorePath, findEntry } from '../keystore.js';
 import type { LocalBackendConfig } from '../config.js';
-import type { TypedData } from '../eip3009.js';
+import type { TypedData, TypedDataTypes } from '../eip3009.js';
 import type { SignerAccount, SignerBackend, SignerCapabilities } from '../signer.js';
 import { readKeystore } from '../keystore.js';
 
@@ -9,7 +9,7 @@ interface EthersWallet {
   address: string;
   signTypedData(
     domain: TypedData['domain'],
-    types: Record<string, unknown>,
+    types: TypedDataTypes,
     message: TypedData['message'],
   ): Promise<string>;
 }
@@ -29,17 +29,31 @@ export const ETHERS_INSTALL_HINT =
  * install of this CLI carries no signing code at all — only the `local`
  * backend needs it, and only when it actually signs.
  */
-export async function loadEthers(): Promise<{ Wallet: new (key: string) => EthersWallet }> {
+export interface EthersModule {
+  Wallet: new (key: string) => EthersWallet;
+}
+
+/** Whether a loaded module exports the `Wallet` constructor this backend signs with. */
+function isEthersModule<T extends object>(mod: T): mod is T & EthersModule {
+  return 'Wallet' in mod && typeof mod.Wallet === 'function';
+}
+
+export async function loadEthers(): Promise<EthersModule> {
   // A non-literal specifier keeps ethers out of the compile graph.
   const specifier = 'ethers';
   try {
-    return (await import(specifier)) as unknown as { Wallet: new (key: string) => EthersWallet };
+    const mod: object = await import(specifier);
+    if (isEthersModule(mod)) return mod;
   } catch {
     throw new X402Error(
       ExitCode.OWS_UNREACHABLE,
       `the local signer backend needs the optional peer dependency \`ethers\`: ${ETHERS_INSTALL_HINT}`,
     );
   }
+  throw new X402Error(
+    ExitCode.OWS_UNREACHABLE,
+    `the installed \`ethers\` exports no Wallet; this backend needs ethers v6: ${ETHERS_INSTALL_HINT}`,
+  );
 }
 
 /** Whether `ethers` resolves from here, without throwing. */

@@ -1,5 +1,13 @@
 import { X402Error, ExitCode } from './errors.js';
 import { request, parseJsonBody } from './http.js';
+import {
+  isBoolean,
+  isJsonObject,
+  isNumber,
+  isString,
+  type JsonObject,
+  type JsonValue,
+} from './json.js';
 import { domainAllowed } from './gates.js';
 import { findChain, findAsset } from './assets.js';
 import type { X402Config } from './config.js';
@@ -81,24 +89,21 @@ export interface Market {
   from: 'unified' | 'endpoints';
 }
 
-const isObj = (v: unknown): v is Record<string, unknown> =>
-  typeof v === 'object' && v !== null && !Array.isArray(v);
-
 const priceOf = (p: Provider): number => {
   const n = Number(p.price);
   return Number.isFinite(n) ? n : Number.POSITIVE_INFINITY;
 };
 
-const numOrUndef = (v: unknown): number | undefined => {
-  if (typeof v === 'number') return Number.isFinite(v) ? v : undefined;
-  if (typeof v === 'string' && v.trim() !== '') {
+const numOrUndef = (v: JsonValue | undefined): number | undefined => {
+  if (isNumber(v)) return Number.isFinite(v) ? v : undefined;
+  if (isString(v) && v.trim() !== '') {
     const n = Number(v);
     return Number.isFinite(n) ? n : undefined;
   }
   return undefined;
 };
 
-const strOrUndef = (v: unknown): string | undefined =>
+const strOrUndef = (v: JsonValue | undefined): string | undefined =>
   v === undefined || v === null ? undefined : String(v);
 
 /** Dead endpoints sort last; within a liveness class, cheapest first. */
@@ -113,7 +118,7 @@ export function capabilityOf(target: string): string | undefined {
   return m ? m[1] : undefined;
 }
 
-const mapProvider = (p: Record<string, unknown>, capability: string): Provider => {
+const mapProvider = (p: JsonObject, capability: string): Provider => {
   // The index states the chain as CAIP-2 (`eip155:8453`) and the asset as a
   // contract address. Normalise both through the tables so a listing reads in
   // the same vocabulary `--chain` and `--asset` accept. These are informational:
@@ -131,31 +136,31 @@ const mapProvider = (p: Record<string, unknown>, capability: string): Provider =
     payTo: strOrUndef(p.payTo ?? p.pay_to),
     successRate: numOrUndef(p.successRate ?? p.success_rate),
     latencyMsP50: numOrUndef(p.latencyMsP50 ?? p.latency_ms_p50),
-    updatedAt: typeof p.updatedAt === 'string' ? p.updatedAt : strOrUndef(p.updated_at),
-    live: typeof p.is_live === 'boolean' ? p.is_live : undefined,
+    updatedAt: isString(p.updatedAt) ? p.updatedAt : strOrUndef(p.updated_at),
+    live: isBoolean(p.is_live) ? p.is_live : undefined,
     calls30d: numOrUndef(p.l30_total_calls ?? p.calls30d),
     payers30d: numOrUndef(p.l30_unique_payers ?? p.payers30d),
     lastCalledAt: strOrUndef(p.last_called_at ?? p.lastCalledAt),
     confidence: strOrUndef(p.confidence),
-    gateway: typeof p.gateway === 'boolean' ? p.gateway : undefined,
+    gateway: isBoolean(p.gateway) ? p.gateway : undefined,
     source: 'index',
   };
 };
 
-const providersFrom = (body: unknown, capability: string): Provider[] => {
+const providersFrom = (body: JsonValue | undefined, capability: string): Provider[] => {
   const items = Array.isArray(body)
     ? body
-    : isObj(body) && Array.isArray(body.offers)
+    : isJsonObject(body) && Array.isArray(body.offers)
       ? body.offers
-      : isObj(body) && Array.isArray(body.endpoints)
+      : isJsonObject(body) && Array.isArray(body.endpoints)
         ? body.endpoints
-        : isObj(body) && Array.isArray(body.providers)
+        : isJsonObject(body) && Array.isArray(body.providers)
           ? body.providers
-          : isObj(body) && Array.isArray(body.results)
+          : isJsonObject(body) && Array.isArray(body.results)
             ? body.results
             : [];
   return items
-    .filter(isObj)
+    .filter(isJsonObject)
     .map((p) => mapProvider(p, capability))
     .filter((p) => p.url !== '')
     .sort(byLivenessThenPrice);
@@ -170,10 +175,10 @@ const providersFrom = (body: unknown, capability: string): Provider[] => {
  * Read both — a caller pointing `discover.unifiedUrl` at the old surface should
  * still get stats rather than a silently empty market.
  */
-const statsFrom = (body: unknown): MarketStats | undefined => {
-  if (!isObj(body)) return undefined;
-  const s = isObj(body.stats) ? body.stats : {};
-  const price = isObj(body.price) ? body.price : isObj(s.price) ? s.price : undefined;
+const statsFrom = (body: JsonValue | undefined): MarketStats | undefined => {
+  if (!isJsonObject(body)) return undefined;
+  const s = isJsonObject(body.stats) ? body.stats : {};
+  const price = isJsonObject(body.price) ? body.price : isJsonObject(s.price) ? s.price : undefined;
   if (!price && Object.keys(s).length === 0) return undefined;
   const p = price ?? {};
   return {
@@ -238,9 +243,9 @@ export async function discoverMarket(
     timeoutMs,
   });
   const body = res.status < 400 ? parseJsonBody(res.body) : undefined;
-  const known = isObj(body) && Array.isArray(body.offers);
+  const known = isJsonObject(body) && Array.isArray(body.offers);
   if (known) {
-    const cap = isObj(body.capability) ? body.capability : {};
+    const cap = isJsonObject(body.capability) ? body.capability : {};
     const providers = providersFrom(body, capability);
     const stats = statsFrom(body);
     return {

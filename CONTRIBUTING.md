@@ -23,22 +23,23 @@ npm run format:check   # prettier
 npm run dev -- probe https://example.com/thing   # run from source via tsx
 ```
 
-Run `npm run typecheck && npm test && npm run format:check` before pushing. CI runs exactly that, on Node 20 and 22, plus the quality gates below.
+Run `npm run typecheck && npm run lint:slop && npm test && npm run format:check` before pushing. CI runs exactly that (lint on Node 22, the rest on Node 20 and 22), plus the quality gates below.
 
 ### Quality gates
 
 `.github/workflows/quality-gates.yml` runs on every PR, alongside `ci.yml`:
 
-| Gate              | Run it locally                                      | Fails when                                                     |
-| ----------------- | --------------------------------------------------- | -------------------------------------------------------------- |
-| Coverage          | `npm run test:coverage`                             | coverage drops below the floors in `vitest.config.ts`          |
-| Secret scan       | `gitleaks git --log-opts=--all -c .gitleaks.toml .` | gitleaks finds a credential anywhere in history or the tree    |
-| Unicode safety    | `npm run check:unicode`                             | a zero-width, Tag-block or bidi-control character is committed |
-| No personal paths | `npm run check:paths`                               | a `/Users/<name>` or `/home/<name>` path is committed          |
-| Workflow security | `npm run check:workflows`                           | a workflow lacks `permissions:` or interpolates untrusted text |
-| Markdown          | `npx markdownlint-cli2 "**/*.md"`                   | a doc breaks `.markdownlint.json`                              |
+| Gate                 | Run it locally                                      | Fails when                                                     |
+| -------------------- | --------------------------------------------------- | -------------------------------------------------------------- |
+| Coverage             | `npm run test:coverage`                             | coverage drops below the floors in `vitest.config.ts`          |
+| Secret scan          | `gitleaks git --log-opts=--all -c .gitleaks.toml .` | gitleaks finds a credential anywhere in history or the tree    |
+| Unicode safety       | `npm run check:unicode`                             | a zero-width, Tag-block or bidi-control character is committed |
+| No personal paths    | `npm run check:paths`                               | a `/Users/<name>` or `/home/<name>` path is committed          |
+| Workflow security    | `npm run check:workflows`                           | a workflow lacks `permissions:` or interpolates untrusted text |
+| Markdown             | `npx markdownlint-cli2 "**/*.md"`                   | a doc breaks `.markdownlint.json`                              |
+| Anti-slop (`ci.yml`) | `npm run lint:slop`                                 | any anti-slop finding in `src/`, `test/` or `scripts/`         |
 
-`npm run check` runs the three local scripts in one go. `npm run lint` (anti-slop) needs Node 22.
+`npm run check` runs the three local scripts in one go. `npm run lint:slop` (anti-slop, zero findings, needs Node 22) also runs from the pre-commit hook that `npm install` enables; see [docs/linting.md](docs/linting.md).
 
 ## The rules that are not negotiable
 

@@ -1,6 +1,7 @@
 import { writeFileSync } from 'node:fs';
 import { ExitCodeName } from './errors.js';
 import type { CallResult, PaymentState } from './engine.js';
+import { isBigInt, isString, type JsonValue } from './json.js';
 
 export const isTty = (): boolean => process.stdout.isTTY === true;
 
@@ -19,7 +20,7 @@ export interface Envelope {
   provider?: string;
   cacheHit?: boolean;
   dryRun?: boolean;
-  body?: unknown;
+  body?: JsonValue;
   errorCode?: number;
   error?: string;
   errorName?: string;
@@ -50,17 +51,22 @@ export function toEnvelope(result: CallResult): Envelope {
   return env;
 }
 
-export function writeJson(value: unknown): void {
+/**
+ * Print one result object as JSON on stdout. Generic rather than `JsonValue`:
+ * results are typed records (amounts as bigint, options, receipts) and
+ * {@link jsonSafe} is what makes them serializable.
+ */
+export function writeJson<T extends object>(value: T): void {
   process.stdout.write(`${JSON.stringify(value, jsonSafe, 2)}\n`);
 }
 
-export function writeCompactJson(value: unknown): void {
+export function writeCompactJson<T extends object>(value: T): void {
   process.stdout.write(`${JSON.stringify(value, jsonSafe)}\n`);
 }
 
 /** BigInt is unavoidable in payment amounts; serialize it as a decimal string. */
-function jsonSafe(_key: string, value: unknown): unknown {
-  return typeof value === 'bigint' ? value.toString() : value;
+export function jsonSafe<T>(_key: string, value: T): T | string {
+  return isBigInt(value) ? value.toString() : value;
 }
 
 export function writeErr(message: string): void {
@@ -80,7 +86,7 @@ export function emitCallResult(result: CallResult, opts: EmitOptions = {}): void
     result.rawBody ??
     (result.body === undefined
       ? ''
-      : typeof result.body === 'string'
+      : isString(result.body)
         ? result.body
         : JSON.stringify(result.body, jsonSafe, 2));
 

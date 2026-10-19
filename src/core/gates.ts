@@ -1,4 +1,4 @@
-import { X402Error, ExitCode } from './errors.js';
+import { X402Error, ExitCode, messageOf } from './errors.js';
 import { parseUnits } from './assets.js';
 import type { PaymentOption } from './x402.js';
 
@@ -54,7 +54,7 @@ export function runGates(input: GateInput): void {
     try {
       cap = parseUnits(input.maxPerCall, option.decimals);
     } catch (err) {
-      throw new X402Error(ExitCode.GENERIC, `invalid --max value: ${(err as Error).message}`);
+      throw new X402Error(ExitCode.GENERIC, `invalid --max value: ${messageOf(err)}`);
     }
     if (option.amountAtomic > cap) {
       throw new X402Error(

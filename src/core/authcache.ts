@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { paths, ensureDir, writePrivate } from './paths.js';
 import { sha256 } from './ids.js';
 import type { TypedData } from './eip3009.js';
+import { isJsonObject, isNumber, isString, parseJson } from './json.js';
 
 /**
  * Cached signed authorization.
@@ -34,6 +35,49 @@ export interface AuthCacheEntry {
   headerName: string;
   header: string;
   createdAt: string;
+}
+
+const ENTRY_STRINGS = [
+  'key',
+  'url',
+  'method',
+  'wallet',
+  'backend',
+  'payTo',
+  'amountAtomic',
+  'asset',
+  'chain',
+  'scheme',
+  'network',
+  'nonce',
+  'signature',
+  'headerName',
+  'header',
+  'createdAt',
+];
+
+/**
+ * A cache file holding a whole entry. An entry is replayed as a payment
+ * header, so one missing a field is treated as a miss, never sent.
+ */
+export function isAuthCacheEntry<T>(value: T): value is T & AuthCacheEntry {
+  if (!isJsonObject(value)) return false;
+  const { typedData } = value;
+  return (
+    ENTRY_STRINGS.every((key) => isString(value[key])) &&
+    isNumber(value.validBefore) &&
+    isNumber(value.x402Version) &&
+    isJsonObject(typedData) &&
+    isJsonObject(typedData.domain) &&
+    isJsonObject(typedData.message) &&
+    isJsonObject(typedData.types)
+  );
+}
+
+/** Read one cache file; undefined when it is unreadable or not a whole entry. */
+function readEntry(path: string): AuthCacheEntry | undefined {
+  const parsed = parseJson(readFileSync(path, 'utf8'));
+  return isAuthCacheEntry(parsed) ? parsed : undefined;
 }
 
 export interface AuthKeyInput {
@@ -73,7 +117,8 @@ export function readAuth(key: string, now = Date.now()): AuthCacheEntry | undefi
   const path = file(key);
   if (!existsSync(path)) return undefined;
   try {
-    const entry = JSON.parse(readFileSync(path, 'utf8')) as AuthCacheEntry;
+    const entry = readEntry(path);
+    if (!entry) return undefined;
     if (entry.validBefore * 1000 <= now) {
       unlinkSync(path);
       return undefined;
@@ -102,8 +147,8 @@ export function pruneAuthCache(now = Date.now()): number {
   for (const name of readdirSync(dir)) {
     if (!name.endsWith('.json')) continue;
     try {
-      const entry = JSON.parse(readFileSync(join(dir, name), 'utf8')) as AuthCacheEntry;
-      if (entry.validBefore * 1000 <= now) {
+      const entry = readEntry(join(dir, name));
+      if (!entry || entry.validBefore * 1000 <= now) {
         unlinkSync(join(dir, name));
         removed++;
       }

@@ -2,16 +2,27 @@ import { spawnSync } from 'node:child_process';
 import { accessSync, constants } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join, sep } from 'node:path';
-import { X402Error, ExitCode } from './errors.js';
+import { X402Error, ExitCode, errnoCode, messageOf } from './errors.js';
 import { readRawConfig, writeRawConfig, setPath, unsetPath } from './config.js';
 
 /** What the guided setup and `wallet forget` write into config.json. */
 export type ConfigValue = string | boolean | string[];
-import { addEntry, generatePrivateKey, readKeyFile, keystorePath } from './keystore.js';
+
+/** Dotted config key -> the value written there. */
+export interface ConfigEntries {
+  [key: string]: ConfigValue;
+}
+import {
+  addEntry,
+  generatePrivateKey,
+  readKeyFile,
+  keystorePath,
+  type AddEntryInput,
+} from './keystore.js';
 import { ETHERS_INSTALL_HINT, ethersAvailable, loadEthers } from './signers/local.js';
 import { loadOwsCore, type OwsCoreModule, type OwsWallet } from './signers/owscore.js';
 import { ask, confirm, interactive, secretTwice, select } from './prompt.js';
-import { grantPolicyKey } from './owspolicy.js';
+import { grantPolicyKey, type GrantOptions } from './owspolicy.js';
 
 /**
  * The guided wallet setup behind `rh-x402 wallet create`.
@@ -50,7 +61,7 @@ export interface SetupResult {
   wallet: string;
   address: string;
   /** Dotted config keys this wrote, so the caller can show its work. */
-  configured: Record<string, ConfigValue>;
+  configured: ConfigEntries;
   /** Things the operator still has to do; never empty for a funded wallet. */
   nextSteps: string[];
   installed?: string;
@@ -59,13 +70,11 @@ export interface SetupResult {
 }
 
 function isKeyPath(value: string): value is KeyPath {
-  // SAFETY: widening the literal tuple to string[] only to ask whether it
-  // contains `value`; the predicate is what narrows, and `includes` is the check.
-  return (KEY_PATHS as readonly string[]).includes(value);
+  return KEY_PATHS.some((path) => path === value);
 }
 
 /** Config is written key by key, the same way `config set` writes it. */
-export function writeConfig(entries: Record<string, ConfigValue>): void {
+export function writeConfig(entries: ConfigEntries): void {
   let raw = readRawConfig();
   for (const [key, value] of Object.entries(entries)) {
     raw = setPath(raw, key, value);
@@ -168,9 +177,8 @@ export function globalRootWritable(
       accessSync(dir, constants.W_OK);
       return true;
     } catch (err) {
-      // SAFETY: `code` is read off whatever accessSync threw; on a non-system
-      // error it is undefined and the walk ends as "not writable".
-      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') return false;
+      // Anything but "does not exist yet" ends the walk as "not writable".
+      if (errnoCode(err) !== 'ENOENT') return false;
       const parent = dirname(dir);
       if (parent === dir) return false;
       dir = parent;
@@ -256,8 +264,7 @@ async function requireOws(opts: SetupOptions): Promise<{ ows: OwsCoreModule; ins
     } catch (err) {
       throw new X402Error(
         ExitCode.OWS_UNREACHABLE,
-        // SAFETY: `.message` off a non-Error is `undefined`, not a throw.
-        `${OWS_PACKAGE} still does not load after installing: ${(err as Error).message}. ` +
+        `${OWS_PACKAGE} still does not load after installing: ${messageOf(err)}. ` +
           'It ships prebuilt bindings for macOS and Linux on x64 and arm64 only.',
       );
     }
@@ -337,13 +344,14 @@ async function maybeGrantPolicy(
       )));
   if (!wanted) return undefined;
 
-  const grant = await grantPolicyKey({
+  const grantOptions: GrantOptions = {
     wallet,
     chains: opts.chains && opts.chains.length > 0 ? opts.chains : ['base'],
-    ...(opts.expires ? { expires: opts.expires } : {}),
-    ...(opts.vaultPath ? { vaultPath: opts.vaultPath } : {}),
-    ...(passphrase ? { passphrase } : {}),
-  });
+  };
+  if (opts.expires) grantOptions.expires = opts.expires;
+  if (opts.vaultPath) grantOptions.vaultPath = opts.vaultPath;
+  if (passphrase) grantOptions.passphrase = passphrase;
+  const grant = await grantPolicyKey(grantOptions);
   return { id: grant.policy.id, keyId: grant.keyId, token: grant.token };
 }
 
@@ -356,7 +364,7 @@ function finishOws(
   hasPassphrase: boolean,
   policy: SetupResult['policy'],
 ): SetupResult {
-  const configured: Record<string, ConfigValue> = {
+  const configured: ConfigEntries = {
     'wallet.backend': 'ows-core',
     'wallet.default': name,
     'wallet.path': 'ows',
@@ -379,14 +387,12 @@ function finishOws(
   writeConfig(configured);
 
   const address = evmAddress(wallet);
-  return {
+  const result: SetupResult = {
     path: 'ows',
     backend: 'ows-core',
     wallet: name,
     address,
     configured,
-    ...(installed ? { installed } : {}),
-    ...(policy ? { policy } : {}),
     nextSteps: [
       ...(policy
         ? [
@@ -412,6 +418,9 @@ function finishOws(
       created ? 'Check it: rh-x402 signer check' : 'Existing wallet adopted; nothing was changed.',
     ],
   };
+  if (installed) result.installed = installed;
+  if (policy) result.policy = policy;
+  return result;
 }
 
 async function setupKeystore(
@@ -480,16 +489,17 @@ async function setupKeystore(
   // the user believes failed.
   const { Wallet } = await loadEthers();
   const address = new Wallet(privateKey).address;
-  const entry = addEntry({
+  const entryInput: AddEntryInput = {
     name,
     privateKey,
     address,
     passphrase,
-    ...(opts.keystore ? { file: opts.keystore } : {}),
     replace: opts.replace === true,
-  });
+  };
+  if (opts.keystore) entryInput.file = opts.keystore;
+  const entry = addEntry(entryInput);
 
-  const configured: Record<string, string> = {
+  const configured: ConfigEntries = {
     'wallet.backend': 'local',
     'wallet.default': name,
     'wallet.path': path,

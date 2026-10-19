@@ -1,9 +1,4 @@
-import {
-  loadConfig,
-  type X402Config,
-  type PayloadLevel,
-  type OwsBackendConfig,
-} from '../core/config.js';
+import { loadConfig, type X402Config, type PayloadLevel } from '../core/config.js';
 import { X402Error, ExitCode } from '../core/errors.js';
 import { Engine } from '../core/engine.js';
 import { SessionBudget } from '../core/gates.js';
@@ -13,6 +8,7 @@ import { signerFactory } from '../core/signers/index.js';
 import { parseUnits } from '../core/assets.js';
 import { bool, num, str, type ParsedArgs } from '../core/args.js';
 import type { SignerFactory } from '../core/signer.js';
+import type { JsonObject } from '../core/json.js';
 
 export interface Context {
   config: X402Config;
@@ -38,14 +34,14 @@ function payloadLevelOf(value: string | undefined): PayloadLevel | undefined {
 
 /** Assemble config, signer backend, engine and telemetry from parsed flags. */
 export function buildContext(parsed: ParsedArgs): Context {
-  const overrides: Record<string, unknown> = {};
+  const overrides: JsonObject = {};
   const chain = str(parsed.flags, 'chain');
   const timeout = num(parsed.flags, 'timeout');
   if (chain || timeout !== undefined) {
-    overrides.defaults = {
-      ...(chain ? { chain } : {}),
-      ...(timeout !== undefined ? { timeout } : {}),
-    };
+    const defaults: JsonObject = {};
+    if (chain) defaults.chain = chain;
+    if (timeout !== undefined) defaults.timeout = timeout;
+    overrides.defaults = defaults;
   }
   const level = payloadLevelOf(str(parsed.flags, 'telemetry-payload'));
   if (level) overrides.telemetry = { payload: level };
@@ -53,7 +49,7 @@ export function buildContext(parsed: ParsedArgs): Context {
   const backendFlag = str(parsed.flags, 'signer');
   const walletFlag = str(parsed.flags, 'wallet');
   const keystoreFlag = str(parsed.flags, 'keystore');
-  const wallet: Record<string, unknown> = {};
+  const wallet: JsonObject = {};
   if (backendFlag) wallet.backend = backendFlag;
   if (walletFlag) wallet.default = walletFlag;
   if (keystoreFlag) wallet.backends = { local: { keystore: keystoreFlag } };
@@ -66,11 +62,12 @@ export function buildContext(parsed: ParsedArgs): Context {
 
   const backendName = config.wallet.backend;
   const walletName = config.wallet.default;
-  const owsConfig = (config.wallet.backends.ows ?? {}) as OwsBackendConfig;
+  const owsConfig = config.wallet.backends.ows;
   const ows = new OwsClient({
     endpoint: owsConfig.endpoint,
     apiKey: owsConfig.apiKey,
-    ...(owsConfig.timeoutMs ? { timeoutMs: owsConfig.timeoutMs } : {}),
+    // 0 means "not set" here, as it always has: the client's default applies.
+    timeoutMs: owsConfig.timeoutMs || undefined,
   });
 
   const signer = signerFactory(config);

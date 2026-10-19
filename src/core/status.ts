@@ -1,5 +1,6 @@
 import { VERSION } from '../version.js';
 import { messageOf } from './errors.js';
+import { isString } from './json.js';
 import { loadConfig, readRawConfig, getPath, type Json, type X402Config } from './config.js';
 import { resolveSigner } from './signers/index.js';
 import { readBalances, type WalletBalances } from './rpc.js';
@@ -227,7 +228,7 @@ export async function collectStatus(opts: StatusOptions = {}): Promise<Status> {
 
   const keyEnvironment = deps.env[API_KEY_ENV];
   const apiKeyValue = getPath(effective, 'auth.apiKey');
-  const apiKeySet = typeof apiKeyValue === 'string' && apiKeyValue !== '';
+  const apiKeySet = isString(apiKeyValue) && apiKeyValue !== '';
   const keyRef = rawKeyReference(deps);
   if (!apiKeySet && keyRef) {
     warnings.push(
@@ -255,20 +256,23 @@ export async function collectStatus(opts: StatusOptions = {}): Promise<Status> {
     apiKeySet,
   };
 
+  const balanceReport: Status['balance'] = {
+    usdc: balance.amount,
+    chain: effective.defaults.chain,
+  };
+  if (balance.error) balanceReport.error = balance.error;
+  const auth: Status['auth'] = { apiKey: apiKeySet ? 'set' : 'unset' };
+  if (apiKeySet) auth.source = keyRef ? 'env' : 'config';
+  const configReport: Status['config'] = { ok: configError === undefined };
+  if (configError) configReport.error = configError;
+
   return {
     cli: { version: VERSION },
     node: { version: deps.nodeVersion, ok: nodeOk },
     signer: signer.report,
-    balance: {
-      usdc: balance.amount,
-      chain: effective.defaults.chain,
-      ...(balance.error ? { error: balance.error } : {}),
-    },
+    balance: balanceReport,
     limits: { maxPerCall, dailyCap },
-    auth: {
-      apiKey: apiKeySet ? 'set' : 'unset',
-      ...(apiKeySet ? { source: keyRef ? ('env' as const) : ('config' as const) } : {}),
-    },
+    auth,
     telemetry: { enabled: effective.telemetry.sink.enabled === true },
     spend: {
       today: today.amount,
@@ -276,7 +280,7 @@ export async function collectStatus(opts: StatusOptions = {}): Promise<Status> {
     },
     next: nextStep(facts),
     warnings,
-    config: { ok: configError === undefined, ...(configError ? { error: configError } : {}) },
+    config: configReport,
   };
 }
 
@@ -392,18 +396,15 @@ async function readSigner(
     }
   }
 
-  return {
-    report: {
-      ...base,
-      address,
-      typedData,
-      policy: policyOf(config, policyActive),
-      policyKey: policyKeyMissing ? 'missing' : core?.apiKey ? 'set' : 'n/a',
-      ...(error ? { error } : {}),
-    },
+  const report: Status['signer'] = {
+    ...base,
     address,
     typedData,
+    policy: policyOf(config, policyActive),
+    policyKey: policyKeyMissing ? 'missing' : core?.apiKey ? 'set' : 'n/a',
   };
+  if (error) report.error = error;
+  return { report, address, typedData };
 }
 
 function policyOf(config: X402Config, active: boolean): 'active' | 'none' | 'n/a' {
@@ -437,10 +438,12 @@ function readLedger(deps: StatusDeps, warnings: string[]): LedgerRecord[] {
   }
 }
 
-function spentTodayDecimal(
-  records: LedgerRecord[],
-  now: number,
-): { amount: string; calls: number } {
+interface SpentToday {
+  amount: string;
+  calls: number;
+}
+
+function spentTodayDecimal(records: LedgerRecord[], now: number): SpentToday {
   const dayStart = new Date(now);
   dayStart.setUTCHours(0, 0, 0, 0);
   const calls = records.filter(
@@ -459,7 +462,7 @@ function spentTodayDecimal(
 function rawKeyReference(deps: StatusDeps): string | undefined {
   try {
     const raw = getPath(deps.readRawConfig(), 'auth.apiKey');
-    return typeof raw === 'string' && raw.startsWith('env:') ? raw : undefined;
+    return isString(raw) && raw.startsWith('env:') ? raw : undefined;
   } catch {
     return undefined;
   }

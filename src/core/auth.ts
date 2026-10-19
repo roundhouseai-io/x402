@@ -1,4 +1,5 @@
 import type { X402Config } from './config.js';
+import type { HeaderMap } from './http.js';
 
 /**
  * The Roundhouse API key: where it may be sent, and how it is kept out of output.
@@ -32,8 +33,8 @@ export function isRoundhouseUrl(url: string): boolean {
 export function authHeaders(
   url: string,
   config: Pick<X402Config, 'auth'>,
-  explicit: Record<string, string> = {},
-): Record<string, string> {
+  explicit: HeaderMap = {},
+): HeaderMap {
   const key = config.auth.apiKey;
   if (!key || !isRoundhouseUrl(url)) return {};
   if (Object.keys(explicit).some((name) => name.toLowerCase() === 'authorization')) return {};

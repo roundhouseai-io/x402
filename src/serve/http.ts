@@ -1,6 +1,8 @@
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from 'node:http';
 import { X402Error, ExitCode, ExitCodeName, exitCodeOf, messageOf } from '../core/errors.js';
-import { toEnvelope, type Envelope } from '../core/output.js';
+import { jsonSafe, toEnvelope, type Envelope } from '../core/output.js';
+import { isJsonObject, parseJson, type JsonObject, type JsonValue } from '../core/json.js';
+import type { HeaderMap } from '../core/http.js';
 import { capabilityOf, discoverMarket, filterByAllowlist } from '../core/discover.js';
 import {
   readRecords,
@@ -8,6 +10,7 @@ import {
   sumRecords,
   spentToday,
   GROUP_KEYS,
+  isGroupKey,
   type GroupKey,
 } from '../core/ledger.js';
 import { parseUnits, formatUnits } from '../core/assets.js';
@@ -226,8 +229,12 @@ export function createServeServer(deps: ServeDeps): Server {
 
   function handleHistory(res: ServerResponse, url: URL, token: CallerToken | undefined): void {
     const byRaw = url.searchParams.get('by');
-    if (byRaw && !GROUP_KEYS.includes(byRaw as GroupKey)) {
-      throw new X402Error(ExitCode.GENERIC, `by must be one of ${GROUP_KEYS.join('|')}`);
+    let groupBy: GroupKey | undefined;
+    if (byRaw) {
+      if (!isGroupKey(byRaw)) {
+        throw new X402Error(ExitCode.GENERIC, `by must be one of ${GROUP_KEYS.join('|')}`);
+      }
+      groupBy = byRaw;
     }
     const records = queryRecords(readRecords(), {
       since: url.searchParams.get('since') ?? undefined,
@@ -241,7 +248,7 @@ export function createServeServer(deps: ServeDeps): Server {
       sendJson(res, 200, {
         ok: true,
         groupedBy: byRaw ?? null,
-        rows: sumRecords(records, (byRaw as GroupKey) ?? undefined),
+        rows: sumRecords(records, groupBy),
       });
       return;
     }
@@ -331,38 +338,40 @@ function header(req: IncomingMessage, name: string): string | undefined {
   return Array.isArray(value) ? value[0] : value;
 }
 
-function normalizeHeaders(input: unknown): Record<string, string> | undefined {
-  if (typeof input !== 'object' || input === null) return undefined;
-  const out: Record<string, string> = {};
-  for (const [k, v] of Object.entries(input as Record<string, unknown>)) out[k] = String(v);
+/** A `headers` object from a request body, every value stringified. */
+function normalizeHeaders(input: JsonValue | undefined): HeaderMap | undefined {
+  if (!isJsonObject(input)) return undefined;
+  const out: HeaderMap = {};
+  for (const [k, v] of Object.entries(input)) out[k] = String(v);
   return out;
 }
 
-async function readJsonBody(
-  req: IncomingMessage,
-  limitBytes = 1_000_000,
-): Promise<Record<string, any>> {
+async function readJsonBody(req: IncomingMessage, limitBytes = 1_000_000): Promise<JsonObject> {
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req) {
-    size += (chunk as Buffer).length;
+    // No encoding is set on a request, so chunks are Buffers.
+    const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk), 'utf8');
+    size += buf.length;
     if (size > limitBytes) throw new X402Error(ExitCode.GENERIC, 'request body too large');
-    chunks.push(chunk as Buffer);
+    chunks.push(buf);
   }
   const text = Buffer.concat(chunks).toString('utf8');
   if (text.trim() === '') return {};
+  let parsed: JsonValue;
   try {
-    const parsed = JSON.parse(text);
-    if (typeof parsed !== 'object' || parsed === null)
-      throw new Error('body must be a JSON object');
-    return parsed as Record<string, any>;
+    parsed = parseJson(text);
   } catch (err) {
-    throw new X402Error(ExitCode.GENERIC, `invalid JSON body: ${(err as Error).message}`);
+    throw new X402Error(ExitCode.GENERIC, `invalid JSON body: ${messageOf(err)}`);
   }
+  if (!isJsonObject(parsed)) {
+    throw new X402Error(ExitCode.GENERIC, 'invalid JSON body: body must be a JSON object');
+  }
+  return parsed;
 }
 
-function sendJson(res: ServerResponse, status: number, payload: unknown): void {
-  const body = JSON.stringify(payload, (_k, v) => (typeof v === 'bigint' ? v.toString() : v));
+function sendJson<T extends object>(res: ServerResponse, status: number, payload: T): void {
+  const body = JSON.stringify(payload, jsonSafe);
   res.writeHead(status, {
     'content-type': 'application/json',
     'cache-control': 'no-store',

@@ -1,5 +1,7 @@
 import { ExitCode, ExitCodeName, exitCodeOf, messageOf } from './errors.js';
 import { parseUnits, formatUnits } from './assets.js';
+import { isJsonObject, isString, type JsonValue } from './json.js';
+import type { PaymentOption } from './x402.js';
 import type { Json } from './config.js';
 import { getPath } from './config.js';
 import { API_KEY_ENV, MIN_NODE, nodeMeetsMinimum, type Status } from './status.js';
@@ -40,8 +42,19 @@ export interface StepEvent {
   step: StepName;
   result: StepResult;
   message: string;
-  /** Step-specific fields, spread into the JSON object. Never carries the API key. */
-  [field: string]: unknown;
+  /** On a failed step: how to pick up again. */
+  resume?: string;
+  /** On `store-key`, only when the operator asked to see it. */
+  apiKey?: string;
+  /** On `summary` (and the `status` step): the status report. */
+  report?: Status;
+  /** On `summary`: commands worth running next. */
+  commands?: readonly string[];
+  /**
+   * Other step-specific fields, spread into the JSON object. Never carries the
+   * API key except as `apiKey` above.
+   */
+  [field: string]: JsonValue | readonly string[] | PaymentOption | Status | Decisions | undefined;
 }
 
 export interface SetupFlags {
@@ -75,7 +88,7 @@ export interface TestCall {
   asset?: string | undefined;
   receiptId: string;
   /** The paid response body. Read for `api_key` and never printed. */
-  body?: unknown;
+  body?: JsonValue | undefined;
   /** What a dry run says it would pay. */
   selected?: { amount: string; assetSymbol: string; payTo: string; network: string } | undefined;
   errorCode?: number | undefined;
@@ -513,13 +526,14 @@ async function walletStep(
     path: decisions.custody,
     install: flags.install || flags.yes,
     replace: flags.replace,
-    ...(flags.name ? { name: flags.name } : {}),
-    ...(flags.vaultPath ? { vaultPath: flags.vaultPath } : {}),
-    ...(flags.keyFile ? { keyFile: flags.keyFile } : {}),
-    ...(flags.keystore ? { keystore: flags.keystore } : {}),
-    ...(flags.expires ? { expires: flags.expires } : {}),
-    ...(flags.policy !== undefined ? { policy: flags.policy } : flags.yes ? { policy: true } : {}),
   };
+  if (flags.name) opts.name = flags.name;
+  if (flags.vaultPath) opts.vaultPath = flags.vaultPath;
+  if (flags.keyFile) opts.keyFile = flags.keyFile;
+  if (flags.keystore) opts.keystore = flags.keystore;
+  if (flags.expires) opts.expires = flags.expires;
+  if (flags.policy !== undefined) opts.policy = flags.policy;
+  else if (flags.yes) opts.policy = true;
 
   let result: SetupResult;
   try {
@@ -541,18 +555,14 @@ async function walletStep(
     address: result.address,
     backend: result.backend,
     configured: result.configured,
-    ...(result.policy
-      ? {
-          policy: {
-            id: result.policy.id,
-            keyId: result.policy.keyId,
-            // Shown once by OWS and never recoverable. The operator must export it
-            // in every shell that will pay, or the wallet will refuse to sign.
-            token: result.policy.token,
-            export: `export OWS_X402_KEY=${result.policy.token}`,
-          },
-        }
-      : {}),
+    policy: result.policy && {
+      id: result.policy.id,
+      keyId: result.policy.keyId,
+      // Shown once by OWS and never recoverable. The operator must export it
+      // in every shell that will pay, or the wallet will refuse to sign.
+      token: result.policy.token,
+      export: `export OWS_X402_KEY=${result.policy.token}`,
+    },
     nextSteps: result.nextSteps,
   });
   if (result.policy) {
@@ -686,10 +696,9 @@ interface Minted {
   key: string;
 }
 
-function apiKeyOf(body: unknown): string | undefined {
-  const holder = body as { api_key?: unknown } | null | undefined;
-  const key = holder?.api_key;
-  return typeof key === 'string' && key !== '' ? key : undefined;
+function apiKeyOf(body: JsonValue | undefined): string | undefined {
+  const key = isJsonObject(body) ? body.api_key : undefined;
+  return isString(key) && key !== '' ? key : undefined;
 }
 
 async function firstPaymentStep(
@@ -757,7 +766,7 @@ async function firstPaymentStep(
       ? `dry run passed every gate: would pay ${would.amount} ${would.assetSymbol} to ${would.payTo} on ${would.network} at ${deps.testUrl}`
       : `dry run passed every gate at ${deps.testUrl}`,
     dryRun: true,
-    ...(would ? { selected: would } : {}),
+    selected: would,
   });
   if (flags.dryRun) return undefined;
 
@@ -830,7 +839,7 @@ async function storeKeyStep(
         'stored as auth.apiKey in ~/.x402/config.json (mode 0600). It is not shown. ' +
         '`--print-key` shows it once, and `--key-env NAME` keeps it in the environment instead.',
       source: 'config',
-      ...(flags.printKey ? { apiKey: minted.key } : {}),
+      apiKey: flags.printKey ? minted.key : undefined,
     });
     return;
   }

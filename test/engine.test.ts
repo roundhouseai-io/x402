@@ -10,6 +10,7 @@ import { decodePaymentHeader } from '../src/core/eip3009.js';
 import { readRecords } from '../src/core/ledger.js';
 import type { SignerBackend } from '../src/core/signer.js';
 import type { TypedData } from '../src/core/eip3009.js';
+import type { JsonValue } from '../src/core/json.js';
 
 const PAY_TO = '0x1831f336585a6C67B6A954d28f3E07F44C4EEBbd';
 const USDC_BASE = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
@@ -65,7 +66,7 @@ const paymentRequiredHeader = (payload: RequirementsV2) => ({
 
 function jsonResponse(
   status: number,
-  body: unknown,
+  body: JsonValue | RequirementsV2,
   headers: Record<string, string> = {},
 ): Response {
   return new Response(JSON.stringify(body), {

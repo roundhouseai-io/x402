@@ -17,13 +17,19 @@ import {
   endpointEnvLayer,
   ENDPOINT_ENV,
 } from '../src/core/config.js';
-import { authKey, readAuth, writeAuth, pruneAuthCache } from '../src/core/authcache.js';
+import {
+  authKey,
+  readAuth,
+  writeAuth,
+  pruneAuthCache,
+  type AuthCacheEntry,
+} from '../src/core/authcache.js';
 import { mapOwsError } from '../src/core/ows.js';
 import { domainAllowed, runGates, SessionBudget } from '../src/core/gates.js';
 import { parsePaymentRequired } from '../src/core/x402.js';
 import { ExitCode, X402Error } from '../src/core/errors.js';
 import { paths } from '../src/core/paths.js';
-import type { TypedData } from '../src/core/eip3009.js';
+import { TRANSFER_WITH_AUTHORIZATION_TYPES } from '../src/core/eip3009.js';
 
 let home: string;
 let cwd: string;
@@ -229,7 +235,7 @@ describe('authorization cache', () => {
   });
 
   it('expires entries at validBefore and prunes them', () => {
-    const entry = {
+    const entry: AuthCacheEntry = {
       key: key(),
       url: 'https://api.example.com/v1/lei',
       method: 'GET',
@@ -244,7 +250,24 @@ describe('authorization cache', () => {
       nonce: '0x00',
       validBefore: Math.floor(Date.now() / 1000) + 60,
       signature: '0xabc',
-      typedData: {} as TypedData,
+      typedData: {
+        types: TRANSFER_WITH_AUTHORIZATION_TYPES,
+        primaryType: 'TransferWithAuthorization',
+        domain: {
+          name: 'USD Coin',
+          version: '2',
+          chainId: 8453,
+          verifyingContract: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+        },
+        message: {
+          from: '0x0000000000000000000000000000000000000001',
+          to: '0x1831f336585a6C67B6A954d28f3E07F44C4EEBbd',
+          value: '2000',
+          validAfter: '0',
+          validBefore: '1',
+          nonce: '0x00',
+        },
+      },
       x402Version: 1,
       headerName: 'x-payment',
       header: 'base64',

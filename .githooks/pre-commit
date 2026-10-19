@@ -1,0 +1,29 @@
+#!/bin/sh
+# Anti-slop lint gate (oxlint.config.ts) on the staged JS/TS files. Every rule
+# is `error` and the package is at zero, so any finding blocks the commit.
+# CI (ci.yml, anti-slop job) runs the same gate over the whole tree.
+# Bypass for a genuine emergency with: git commit --no-verify
+
+files=$(git diff --cached --name-only --diff-filter=ACMR |
+  grep -E '\.(ts|tsx|js|jsx|mjs|cjs)$' |
+  grep -v '^tools/oxlint/anti-slop/' |
+  grep -v '^\.claude/')
+
+[ -z "$files" ] && exit 0
+
+# oxlint.config.ts is loaded through Node's type stripping, which needs Node 22.
+# The package supports Node 20, so a contributor on 20 is told, not blocked;
+# CI enforces the gate either way.
+major=$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)
+if [ "$major" -lt 22 ]; then
+  echo "pre-commit: anti-slop needs Node 22 (found $(node -v 2>/dev/null || echo none)); skipped here, CI will run it."
+  exit 0
+fi
+
+# shellcheck disable=SC2086 -- paths come from git, one per line, no spaces in this repo
+if ! npx --no-install oxlint --config oxlint.config.ts --deny-warnings $files; then
+  echo ""
+  echo "pre-commit: anti-slop found findings in staged files (see above)."
+  echo "Fix them (docs/linting.md has the patterns), or bypass a false positive with: git commit --no-verify"
+  exit 1
+fi

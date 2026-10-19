@@ -66,9 +66,13 @@ describe('discover sends the key to Roundhouse and nowhere else', () => {
     vi.unstubAllGlobals();
   });
 
-  function stubIndex(): { headers: Record<string, string>[] } {
-    const seen: { headers: Record<string, string>[] } = { headers: [] };
-    vi.stubGlobal('fetch', async (_url: unknown, init?: { headers?: Record<string, string> }) => {
+  interface SeenHeaders {
+    headers: Record<string, string>[];
+  }
+
+  function stubIndex(): SeenHeaders {
+    const seen: SeenHeaders = { headers: [] };
+    vi.stubGlobal('fetch', async (_url: string, init?: { headers?: Record<string, string> }) => {
       seen.headers.push(init?.headers ?? {});
       return new Response(JSON.stringify({ offers: [] }), { status: 200 });
     });

@@ -1,4 +1,4 @@
-import { X402Error, ExitCode, type ExitCodeValue } from '../errors.js';
+import { X402Error, ExitCode, messageOf, type ExitCodeValue } from '../errors.js';
 import { findChain } from '../assets.js';
 import type { TypedData } from '../eip3009.js';
 import type { SignerAccount, SignerBackend, SignerCapabilities } from '../signer.js';
@@ -69,16 +69,34 @@ export interface OwsCoreModule {
   ): OwsSignResult;
 }
 
+/**
+ * Whether a loaded module exports every binding {@link OwsCoreModule} names, as
+ * a function. Checked on load, so a release that moved one fails before signing.
+ */
+function isOwsCoreModule<T extends object>(mod: T): mod is T & OwsCoreModule {
+  return (
+    'listWallets' in mod &&
+    typeof mod.listWallets === 'function' &&
+    'getWallet' in mod &&
+    typeof mod.getWallet === 'function' &&
+    'createWallet' in mod &&
+    typeof mod.createWallet === 'function' &&
+    'createPolicy' in mod &&
+    typeof mod.createPolicy === 'function' &&
+    'createApiKey' in mod &&
+    typeof mod.createApiKey === 'function' &&
+    'signTypedData' in mod &&
+    typeof mod.signTypedData === 'function'
+  );
+}
+
 /** Load the bindings on demand, mapping absence onto the usual exit 47. */
 export async function loadOwsCore(): Promise<OwsCoreModule> {
   // A non-literal specifier keeps the native module out of the compile graph.
   const specifier = '@open-wallet-standard/core';
   try {
-    // SAFETY: a dynamic import is typed `any` because the specifier is not a
-    // literal. The shape is asserted, not checked — a version of the package
-    // that moved these functions surfaces as a TypeError from the call site,
-    // which the callers below map onto exit 47 rather than paying with.
-    return (await import(specifier)) as unknown as OwsCoreModule;
+    const mod: object = await import(specifier);
+    if (isOwsCoreModule(mod)) return mod;
   } catch {
     throw new X402Error(
       ExitCode.OWS_UNREACHABLE,
@@ -87,6 +105,12 @@ export async function loadOwsCore(): Promise<OwsCoreModule> {
         'It ships prebuilt bindings for macOS and Linux on x64 and arm64 only.',
     );
   }
+  throw new X402Error(
+    ExitCode.OWS_UNREACHABLE,
+    'the installed @open-wallet-standard/core is missing a binding this CLI calls ' +
+      '(listWallets, getWallet, createWallet, createPolicy, createApiKey, signTypedData); ' +
+      'upgrade it (npm i @open-wallet-standard/core@latest).',
+  );
 }
 
 /**
@@ -241,11 +265,9 @@ export class OwsCoreSigner implements SignerBackend {
     try {
       wallet = ows.getWallet(this.wallet, this.config.vaultPath);
     } catch (err) {
-      // SAFETY: `err` is whatever the bindings threw. Only `.message` is read,
-      // and reading it off a non-Error yields `undefined`, not a throw.
       throw new X402Error(
         ExitCode.OWS_UNREACHABLE,
-        `ows-core has no wallet "${this.wallet}": ${(err as Error).message}`,
+        `ows-core has no wallet "${this.wallet}": ${messageOf(err)}`,
       );
     }
     // Outside the try: a wallet that exists but has no EVM account carries its
@@ -270,9 +292,7 @@ export class OwsCoreSigner implements SignerBackend {
         this.config.vaultPath,
       );
     } catch (err) {
-      // SAFETY: as above — `.message` off a non-Error is `undefined`, and the
-      // `??` falls back to the stringified value rather than losing the reason.
-      const message = (err as Error).message ?? String(err);
+      const message = messageOf(err);
       throw new X402Error(
         exitCodeForOwsCoreError(message),
         `ows-core refused to sign: ${explainOwsCoreError(message)}`,

@@ -3,23 +3,33 @@ import { OwsClient, OwsSigner } from '../ows.js';
 import { LocalSigner } from './local.js';
 import { OwsCoreSigner } from './owscore.js';
 import { ExecSigner } from './exec.js';
-import type {
-  ExecBackendConfig,
-  LocalBackendConfig,
-  OwsBackendConfig,
-  OwsCoreBackendConfig,
-  X402Config,
-} from '../config.js';
+import type { X402Config } from '../config.js';
+import type { JsonValue } from '../json.js';
 import type { SignerBackend, SignerFactory, SignerSelector } from '../signer.js';
 
 export const BUILTIN_BACKENDS = ['ows', 'ows-core', 'local', 'exec'] as const;
 export type BuiltinBackend = (typeof BUILTIN_BACKENDS)[number];
 
+export function isBuiltinBackend(name: string): name is BuiltinBackend {
+  return BUILTIN_BACKENDS.some((builtin) => builtin === name);
+}
+
 /** Third-party backends live in `x402-signer-<name>` packages. */
 export const thirdPartyPackage = (backend: string) => `x402-signer-${backend}`;
 
+export interface ThirdPartySignerInput {
+  /** `wallet.backends.<name>` from config, as written there. */
+  config: JsonValue | undefined;
+  wallet: string;
+}
+
 interface ThirdPartyModule {
-  createSigner(input: { config: unknown; wallet: string }): SignerBackend | Promise<SignerBackend>;
+  createSigner(input: ThirdPartySignerInput): SignerBackend | Promise<SignerBackend>;
+}
+
+/** Whether a loaded backend package exports the `createSigner` entry point. */
+function isThirdPartyModule<T extends object>(mod: T): mod is T & ThirdPartyModule {
+  return 'createSigner' in mod && typeof mod.createSigner === 'function';
 }
 
 function requireWallet(backend: string, wallet: string | undefined): string {
@@ -42,32 +52,29 @@ async function construct(
 
   switch (backend) {
     case 'ows': {
-      const ows = (backends.ows ?? {}) as OwsBackendConfig;
+      const ows = backends.ows;
       const client = new OwsClient({
         endpoint: ows.endpoint,
         apiKey: ows.apiKey,
-        ...(ows.timeoutMs ? { timeoutMs: ows.timeoutMs } : {}),
+        timeoutMs: ows.timeoutMs || undefined,
       });
       return new OwsSigner(client, requireWallet(backend, wallet));
     }
     case 'ows-core': {
-      const core = (backends['ows-core'] ?? {}) as OwsCoreBackendConfig;
-      return new OwsCoreSigner(requireWallet(backend, wallet), core);
+      return new OwsCoreSigner(requireWallet(backend, wallet), backends['ows-core'] ?? {});
     }
     case 'local': {
-      const local = (backends.local ?? {}) as LocalBackendConfig;
-      return new LocalSigner(requireWallet(backend, wallet), local);
+      return new LocalSigner(requireWallet(backend, wallet), backends.local);
     }
     case 'exec': {
-      const exec = (backends.exec ?? {}) as ExecBackendConfig;
-      return new ExecSigner(requireWallet(backend, wallet), exec);
+      return new ExecSigner(requireWallet(backend, wallet), backends.exec ?? { command: '' });
     }
     default: {
       // Auto-discover a published backend rather than failing on an unknown name.
       const specifier = thirdPartyPackage(backend);
-      let mod: ThirdPartyModule;
+      let mod: object;
       try {
-        mod = (await import(specifier)) as unknown as ThirdPartyModule;
+        mod = await import(specifier);
       } catch {
         throw new X402Error(
           ExitCode.OWS_UNREACHABLE,
@@ -75,7 +82,7 @@ async function construct(
             `and ${specifier} is not installed`,
         );
       }
-      if (typeof mod.createSigner !== 'function') {
+      if (!isThirdPartyModule(mod)) {
         throw new X402Error(
           ExitCode.OWS_UNREACHABLE,
           `${specifier} does not export createSigner({ config, wallet })`,

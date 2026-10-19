@@ -1,3 +1,5 @@
+import { isString, type JsonObject } from './json.js';
+
 /**
  * Exit codes are a stability contract from v1. Agents branch on them.
  * Never renumber; only append.
@@ -30,7 +32,12 @@ export const ExitCode = {
 export type ExitCodeValue = (typeof ExitCode)[keyof typeof ExitCode];
 
 /** Stable machine-readable slug per exit code, surfaced as `error` in the envelope. */
-export const ExitCodeName: Record<number, string> = {
+/** Exit code -> its stable slug. */
+export interface ExitCodeNames {
+  [code: number]: string;
+}
+
+export const ExitCodeName: ExitCodeNames = {
   0: 'ok',
   1: 'error',
   40: 'invalid_402',
@@ -144,9 +151,10 @@ export function exitCodesText(): string {
 
 export class X402Error extends Error {
   readonly code: ExitCodeValue;
-  readonly detail: Record<string, unknown> | undefined;
+  /** Machine-readable context, printed as `detail` in the JSON error envelope. */
+  readonly detail: JsonObject | undefined;
 
-  constructor(code: ExitCodeValue, message: string, detail?: Record<string, unknown>) {
+  constructor(code: ExitCodeValue, message: string, detail?: JsonObject) {
     super(message);
     this.name = 'X402Error';
     this.code = code;
@@ -158,14 +166,21 @@ export class X402Error extends Error {
   }
 }
 
-export const fail = (code: ExitCodeValue, message: string, detail?: Record<string, unknown>) =>
+export const fail = (code: ExitCodeValue, message: string, detail?: JsonObject) =>
   new X402Error(code, message, detail);
 
-export function exitCodeOf(err: unknown): ExitCodeValue {
-  return err instanceof X402Error ? err.code : ExitCode.GENERIC;
+// `cause` is a caught exception or a rejection reason, which really can be
+// any value; these two are what every `catch` hands it to.
+export function exitCodeOf(cause: unknown): ExitCodeValue {
+  return cause instanceof X402Error ? cause.code : ExitCode.GENERIC;
 }
 
-export function messageOf(err: unknown): string {
-  if (err instanceof Error) return err.message;
-  return String(err);
+/** The `code` of a Node system error (`ENOENT`, `EACCES`), when it has one. */
+export function errnoCode(cause: unknown): string | undefined {
+  return cause instanceof Error && 'code' in cause && isString(cause.code) ? cause.code : undefined;
+}
+
+export function messageOf(cause: unknown): string {
+  if (cause instanceof Error) return cause.message;
+  return String(cause);
 }

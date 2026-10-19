@@ -1,6 +1,11 @@
 import { X402Error, ExitCode } from './errors.js';
 
-const UNIT_MS = { ms: 1, s: 1_000, m: 60_000, h: 3_600_000 } as const;
+const UNIT_MS = new Map([
+  ['ms', 1],
+  ['s', 1_000],
+  ['m', 60_000],
+  ['h', 3_600_000],
+]);
 
 /**
  * `90`, `90s`, `30m`, `2h` or `1500ms` as milliseconds.
@@ -18,8 +23,9 @@ export function parseDuration(input: string): number {
       `cannot read "${input}" as a duration: use a number of seconds or 30s, 30m, 2h`,
     );
   }
-  const unit = (match[2] ?? 's') as keyof typeof UNIT_MS;
-  return Math.round(Number(match[1]) * UNIT_MS[unit]);
+  // The regex admits only the units in the table.
+  const unitMs = UNIT_MS.get(match[2] ?? 's') ?? 1_000;
+  return Math.round(Number(match[1]) * unitMs);
 }
 
 /** `1h 5m`, `4m 30s`, `45s`: for progress lines, not for parsing back. */

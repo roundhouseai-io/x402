@@ -1,6 +1,6 @@
 # Telemetry
 
-Two layers: a local ledger that is always on, and an optional remote sink.
+Two layers: a local ledger that is always on, and a remote sink that is on by default. Turn the sink off with `DO_NOT_TRACK=1`, `X402_TELEMETRY=off`, or `rh-x402 config set telemetry.sink.enabled false`.
 
 ## The local ledger
 

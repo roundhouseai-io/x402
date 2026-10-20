@@ -88,7 +88,7 @@ Both return the same envelope:
 }
 ```
 
-The response body you want is `body`. `amount` is what it cost; `receiptId` is what you quote if you need to verify settlement later (`rh-x402 verify <receiptId>`).
+The response body you want is `body`. `amount` is what it cost; `receiptId` is what you quote if you need to verify settlement later (`rh-x402 verify <receiptId>`). `verify` reports settled only when the answer has `success: true` and a transaction hash. A body that merely is not a failure is unconfirmed, and the command exits 1.
 
 `paid` and `paymentState` together say what happened to your money:
 
@@ -121,6 +121,8 @@ Numbers, `true`/`false` and `null` are coerced; anything else is a string. Force
 - `--dry-run` reports the price and stops before signing. Use it when you are unsure.
 - Repeat the _same_ command after a network failure: the signed authorization is cached and reused, so a retry does not pay twice. On the endpoint, send the same `Idempotency-Key`.
 - `--budget 0.50` caps everything this process spends.
+- A redirect is followed only when it stays on the same origin and that host is still allowlisted. A cross-origin redirect is refused before anything is signed and before a payment header is sent anywhere else. Call that other URL directly if it is the one you mean to pay.
+- On `serve`, an `Idempotency-Key` belongs to the caller token that sent it. Another token presenting the same key pays again; it does not replay the first call.
 
 **Protocol versions.** x402 v1 and v2 are both spoken, and the version is taken
 from the provider's own 402 — v1 signs into `X-PAYMENT`, v2 into

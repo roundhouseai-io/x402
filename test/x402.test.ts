@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   assertSupportedVersion,
   decodeQuote,
+  MAX_AUTH_WINDOW_SECONDS,
   parsePaymentRequired,
   requirementsFromHeaders,
   selectOption,
@@ -89,6 +90,37 @@ describe('parsePaymentRequired', () => {
         accepts: [{ network: 'base', amount: '1', payTo: 'not-an-address' }],
       }),
     ).toThrow(/no usable payment option/);
+  });
+
+  it('rejects the zero address as payTo', () => {
+    expect(() =>
+      parsePaymentRequired({
+        accepts: [
+          {
+            network: 'base',
+            amount: '1',
+            payTo: '0x0000000000000000000000000000000000000000',
+            asset: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+          },
+        ],
+      }),
+    ).toThrow(/zero-address payTo/);
+  });
+
+  it('caps the authorization window at five minutes', () => {
+    const parsed = parsePaymentRequired({
+      ...canonical,
+      accepts: [{ ...canonical.accepts[0], maxTimeoutSeconds: 86_400 }],
+    });
+    expect(parsed.options[0]!.maxTimeoutSeconds).toBe(MAX_AUTH_WINDOW_SECONDS);
+    const now = 1_700_000_000;
+    const auth = buildAuthorization({
+      option: parsed.options[0]!,
+      from: '0x000000000000000000000000000000000000dEaD',
+      validForSeconds: 86_400,
+      now,
+    });
+    expect(auth.validBefore - now).toBe(MAX_AUTH_WINDOW_SECONDS);
   });
 });
 

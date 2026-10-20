@@ -7,7 +7,7 @@ import { parsePaymentRequired } from '../src/core/x402.js';
 import { ExitCode, X402Error } from '../src/core/errors.js';
 import type { JsonValue } from '../src/core/json.js';
 
-const ADDRESS = '0x2D43136FfBbbe0ED5CBaaB2E8B2b8c968059114C';
+const ADDRESS = '0x000000000000000000000000000000000000dEaD';
 
 /** Hex-encode a uint256 the way an RPC returns one. */
 const word = (value: bigint) => `0x${value.toString(16).padStart(64, '0')}`;

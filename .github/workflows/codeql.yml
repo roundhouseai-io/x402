@@ -23,7 +23,7 @@ jobs:
       security-events: write
       actions: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       # Code scanning needs Code Security enabled, which is free on public
       # repositories and part of GitHub Advanced Security on private ones.
@@ -43,10 +43,10 @@ jobs:
           fi
 
       - if: steps.probe.outputs.enabled == 'true'
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@ce5e7eeac396d720fe2d802714996c8ce561e311 # v3
         with:
           languages: javascript-typescript
           queries: security-extended
 
       - if: steps.probe.outputs.enabled == 'true'
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@ce5e7eeac396d720fe2d802714996c8ce561e311 # v3

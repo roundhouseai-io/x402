@@ -32,7 +32,7 @@ Paying for an HTTP call from an agent normally means gluing together a 402 parse
 - **Wallet-agnostic, no raw private keys.** Signing goes through a pluggable backend — [OWS](https://github.com/open-wallet-standard) is the reference, not a dependency, and any wallet that can produce an EIP-712 signature plugs in. Keys never appear in argv, env vars, or logs.
 - **Idempotent retries.** Signed authorizations are cached and reused, so a timed-out retry does not become a second payment.
 - **Spend limits that fail fast.** Per-call, per-session and per-day caps, plus payTo and domain allowlists, all checked before anything is signed.
-- **Every call observable.** An append-only local ledger, always on, hashed by default. Optional remote sink for fleet telemetry.
+- **Every call observable.** An append-only local ledger, always on, hashed by default. A remote telemetry sink is on by default (no request or response body leaves the machine at the `hash` level); turn it off with `DO_NOT_TRACK=1`, `X402_TELEMETRY=off`, or `rh-x402 config set telemetry.sink.enabled false`.
 - **Stable exit codes.** `44` is always "over your `--max`". Agents can branch on failure without parsing prose.
 - **Zero runtime dependencies.** It is a payments tool; the supply-chain surface is the attack surface.
 
@@ -106,13 +106,13 @@ rh-x402 wallet list
 ```bash
 rh-x402 wallet balance                       # the active wallet, on defaults.chain
 rh-x402 wallet balance --chain base --chain ethereum
-rh-x402 wallet balance --address 0x2D43…14C  # any address
+rh-x402 wallet balance --address 0x000…dEaD  # any address
 ```
 
 ```
-base (0x2D43136FfBbbe0ED5CBaaB2E8B2b8c968059114C)
+base (0x000000000000000000000000000000000000dEaD)
   0                        ETH  (gas)
-  0.928                    USDC
+  1.000                    USDC
   can pay x402 here: yes (x402 needs no ETH; the facilitator pays the gas)
 ```
 
@@ -248,9 +248,9 @@ rh-x402 wallet balance
 ```
 
 ```
-base (0x2D43136FfBbbe0ED5CBaaB2E8B2b8c968059114C)
+base (0x000000000000000000000000000000000000dEaD)
   0                        ETH  (gas)
-  0.928                    USDC
+  1.000                    USDC
   can pay x402 here: yes (x402 needs no ETH; the facilitator pays the gas)
 ```
 
@@ -259,7 +259,7 @@ base (0x2D43136FfBbbe0ED5CBaaB2E8B2b8c968059114C)
 ```bash
 rh-x402 signer check
 # {"ok":true,"backend":"ows-core","capabilities":{"typedData":true,"policies":true,…},
-#  "address":"0x2D43…14C"}
+#  "address":"0x000…dEaD"}
 ```
 
 `typedData: true` is the one that matters — a backend that cannot sign EIP-712 fails here, at config time, rather than halfway through a payment. `policies: true` means a signature cannot bypass your OWS policy.
@@ -314,7 +314,7 @@ The payload is exactly this, and nothing else reaches your signer:
   "primaryType": "TransferWithAuthorization",
   "domain": { "name": "USD Coin", "version": "2", "chainId": 8453,
               "verifyingContract": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" },
-  "message": { "from": "0x2D43…", "to": "0x1831…", "value": "11000",
+  "message": { "from": "0x000…dEaD", "to": "0x1831…", "value": "11000",
                "validAfter": "0", "validBefore": "1787903518",
                "nonce": "0x0f42b251…" } }
 ```
@@ -339,7 +339,7 @@ rh-x402 pay @402.json
   "payload": { "x402Version": 2,
                "accepted": { "scheme": "exact", "network": "eip155:8453", … },
                "payload": { "signature": "0x67b9b0bf…1b", "authorization": { … } } },
-  "receipt": { "id": "01M13M…", "backend": "ows-core", "from": "0x2D43…" } }
+  "receipt": { "id": "01M13M…", "backend": "ows-core", "from": "0x000…dEaD" } }
 ```
 
 Send `header` under the name in `headerName` on your own request and the provider can settle it. That name follows the quote's protocol version — `X-PAYMENT` for x402 v1, `PAYMENT-SIGNATURE` for v2 — and so does the payload shape. The payment is authorised at that point, not settled: settlement is the facilitator's on-chain submission, which `rh-x402 verify <receiptId>` confirms.

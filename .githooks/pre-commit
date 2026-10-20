@@ -1,6 +1,7 @@
 #!/bin/sh
-# Anti-slop lint gate (oxlint.config.ts) on the staged JS/TS files. Every rule
-# is `error` and the package is at zero, so any finding blocks the commit.
+# Anti-slop lint gate (oxlint.config.ts) on the staged JS/TS files. This is
+# `pnpm lint:slop` / `npm run lint:slop`: every rule is `error`, warnings are
+# denied, and the package is at zero, so any finding blocks the commit.
 # CI (ci.yml, anti-slop job) runs the same gate over the whole tree.
 # Bypass for a genuine emergency with: git commit --no-verify
 

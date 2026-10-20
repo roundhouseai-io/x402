@@ -46,7 +46,7 @@ Never add `--no-cache` to "clear a stuck state" after a 50. That is the double-p
 
 ## The unified endpoint
 
-`rh-x402 serve` shares this cache, and adds request-level replay: send an `Idempotency-Key` header and a replay within the authorization's validity window returns the original receipt without touching the provider.
+`rh-x402 serve` shares this cache, and adds request-level replay: send an `Idempotency-Key` header and a replay within the authorization's validity window returns the original receipt without touching the provider. The key is scoped to the caller token (or to the unauthenticated caller, when serve is open), so one token cannot replay another token's payment by reusing its key.
 
 Response bodies are only replayable when `telemetry.payload` is `full` — at `hash` (the default) the body was never stored, so the replay returns the receipt with `bodyReplay: false`. That is the deliberate trade: not keeping a plaintext copy of every paid response beats being able to replay it.
 

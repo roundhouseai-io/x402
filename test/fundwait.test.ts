@@ -4,7 +4,7 @@ import { waitForBalance, type BalanceReading } from '../src/core/fundwait.js';
 import { main } from '../src/cli.js';
 import { ExitCode } from '../src/core/errors.js';
 
-const ADDRESS = '0x2D43136FfBbbe0ED5CBaaB2E8B2b8c968059114C';
+const ADDRESS = '0x000000000000000000000000000000000000dEaD';
 
 describe('durations', () => {
   it('reads a bare number as seconds and the usual suffixes', () => {

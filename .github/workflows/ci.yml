@@ -22,14 +22,14 @@ jobs:
       matrix:
         node: ['20', '22']
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
       - run: npm run format:check
-      # `npm run lint` is deliberately not here. oxlint loads its TypeScript
+      # `npm run lint:slop` is deliberately not here. oxlint loads its TypeScript
       # config through Node's type stripping, which Node 20 does not have, and
       # lint findings do not vary by Node version anyway. The `anti-slop` job
       # runs it once on Node 22. See docs/linting.md.
@@ -44,8 +44,8 @@ jobs:
     name: package contents
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
           cache: npm
@@ -85,35 +85,33 @@ jobs:
     name: anti-slop
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
           cache: npm
       - run: npm ci
-      # Enforced rules fail the job. Everything else is reported, and the
-      # counts go to the step summary so a PR can be judged on whether it
-      # moved them rather than on whether it happened to touch a linted file.
-      - name: Lint src and test
+      # The anti-slop gate: every rule is `error`, warnings are denied, and the
+      # package is at zero findings, so any finding fails the job. The counts go
+      # to the step summary either way. See docs/linting.md.
+      - name: lint:slop (src, test, scripts)
         run: |
           set -uo pipefail
           STATUS=0
-          npm run lint 2>&1 | tee lint.log || STATUS=$?
-          # grep exits 1 on no matches, which is the clean case, not a failure —
-          # so every count below tolerates it and only STATUS decides the job.
-          ERRORS=$(grep -c 'error anti-slop' lint.log || true)
-          WARNINGS=$(grep -c 'warning anti-slop' lint.log || true)
+          npm run lint:slop 2>&1 | tee lint.log || STATUS=$?
+          # grep exits 1 on no matches, which is the clean case, not a failure.
+          FINDINGS=$(grep -cE '(error|warning) anti-slop' lint.log || true)
           {
             echo "### anti-slop"
             echo
-            echo "${ERRORS:-0} enforced, ${WARNINGS:-0} outstanding."
+            echo "${FINDINGS:-0} finding(s)."
             echo
-            echo '| count | rule | level |'
-            echo '| ----: | ---- | ----- |'
+            echo '| count | rule |'
+            echo '| ----: | ---- |'
             grep -oE '(error|warning) anti-slop\([^)]+\)' lint.log \
-              | sed -E 's/^(error|warning) anti-slop\((.+)\)$/\2 \1/' \
+              | sed -E 's/^(error|warning) anti-slop\((.+)\)$/\2/' \
               | sort | uniq -c | sort -rn \
-              | awk '{ printf "| %s | `%s` | %s |\n", $1, $2, $3 }' || true
+              | awk '{ printf "| %s | `%s` |\n", $1, $2 }' || true
           } >> "$GITHUB_STEP_SUMMARY"
           exit "$STATUS"
 
@@ -127,8 +125,8 @@ jobs:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
           cache: npm
@@ -145,8 +143,8 @@ jobs:
     name: install from tarball
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
           cache: npm

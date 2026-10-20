@@ -19,7 +19,7 @@ import type { SignerBackend } from '../src/core/signer.js';
 import type { WalletBalances } from '../src/core/rpc.js';
 import type { JsonObject } from '../src/core/json.js';
 
-const ADDRESS = '0x2D43136FfBbbe0ED5CBaaB2E8B2b8c968059114C';
+const ADDRESS = '0x000000000000000000000000000000000000dEaD';
 const NOW = Date.parse('2026-10-02T12:00:00Z');
 
 let home: string;

@@ -5,8 +5,9 @@ import { defineConfig } from 'oxlint';
 // tools/oxlint/anti-slop and maintained here rather than tracked as a
 // dependency, which is how it is meant to be used. The policy is the one the
 // Roundhouse monorepo runs: every rule is `error`, and the package is at zero.
-// Runs via `npm run lint:slop`, in CI (ci.yml, anti-slop job) and from
-// .githooks/pre-commit on staged files. docs/linting.md has the fix patterns.
+// Runs via `pnpm lint:slop` / `npm run lint:slop` (`--deny-warnings`), in CI
+// (ci.yml, anti-slop job) and from .githooks/pre-commit on staged files.
+// docs/linting.md has the fix patterns.
 //
 // Adding a blanket "warn" or a new override to land code is a regression, not a
 // fix. The one exception is documented at the override itself.

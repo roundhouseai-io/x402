@@ -9,6 +9,15 @@ import {
 } from './json.js';
 import { ASSETS, CHAINS, caip2, findAsset, findChain, formatUnits, parseUnits } from './assets.js';
 
+/**
+ * Longest EIP-3009 window this CLI will sign, in seconds.
+ *
+ * `maxTimeoutSeconds` is the seller's number. A day-long authorization is a
+ * day-long blank cheque the facilitator can submit whenever it likes, so a
+ * quote that asks for longer is capped here rather than honoured.
+ */
+export const MAX_AUTH_WINDOW_SECONDS = 300;
+
 export interface PaymentOption {
   scheme: string;
   /** Network name as the provider spelled it. */
@@ -136,6 +145,9 @@ function normalizeOption(
   if (!isString(payTo) || !/^0x[0-9a-fA-F]{40}$/.test(payTo)) {
     throw new X402Error(ExitCode.INVALID_402, `missing or malformed payTo in 402 payload`);
   }
+  if (/^0x0{40}$/i.test(payTo)) {
+    throw new X402Error(ExitCode.INVALID_402, 'refusing zero-address payTo');
+  }
 
   const extra = isJsonObject(input.extra) ? input.extra : {};
   const assetRaw = pick(input, A_ASSET);
@@ -203,9 +215,10 @@ function normalizeOption(
   if (amountAtomic < 0n)
     throw new X402Error(ExitCode.INVALID_402, 'negative amount in 402 payload');
 
-  const timeout = Number(
+  const rawTimeout = Number(
     pick(input, ['maxTimeoutSeconds', 'timeoutSeconds', 'validForSeconds']) ?? 60,
   );
+  const timeout = Number.isFinite(rawTimeout) && rawTimeout > 0 ? Math.floor(rawTimeout) : 60;
 
   return {
     scheme,
@@ -220,7 +233,7 @@ function normalizeOption(
     payTo,
     resource: resourceUrlOf(input.resource) ?? resourceUrlOf(resource),
     description: isString(input.description) ? input.description : undefined,
-    maxTimeoutSeconds: Number.isFinite(timeout) && timeout > 0 ? Math.floor(timeout) : 60,
+    maxTimeoutSeconds: Math.min(timeout, MAX_AUTH_WINDOW_SECONDS),
     // From the table too. `extra` is the provider describing a contract it does
     // not own; the table's values were read from the contract itself.
     eip712: { name: known.eip712.name, version: known.eip712.version },

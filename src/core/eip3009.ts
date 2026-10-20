@@ -8,7 +8,7 @@ import {
   type JsonObject,
   type JsonValue,
 } from './json.js';
-import type { PaymentOption } from './x402.js';
+import { MAX_AUTH_WINDOW_SECONDS, type PaymentOption } from './x402.js';
 
 export interface TypedDataField {
   name: string;
@@ -77,9 +77,10 @@ export interface Authorization {
 export function buildAuthorization(input: BuildAuthorizationInput): Authorization {
   const now = input.now ?? Math.floor(Date.now() / 1000);
   const skew = input.skewSeconds ?? 60;
-  const validFor = input.validForSeconds ?? input.option.maxTimeoutSeconds;
+  const requested = input.validForSeconds ?? input.option.maxTimeoutSeconds;
+  const validFor = Math.min(MAX_AUTH_WINDOW_SECONDS, Math.max(1, Math.floor(requested)));
   const validAfter = Math.max(0, now - skew);
-  const validBefore = now + Math.max(1, validFor);
+  const validBefore = now + validFor;
   const nonce = input.nonce ?? randomNonce();
 
   return {

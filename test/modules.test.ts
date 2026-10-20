@@ -11,9 +11,10 @@ import { OwsClient, OwsSigner, noDaemonHint } from '../src/core/ows.js';
 import { request, parseJsonBody, isJsonResponse, proxyHint } from '../src/core/http.js';
 import { emitCallResult, toEnvelope } from '../src/core/output.js';
 import { ExitCode, X402Error } from '../src/core/errors.js';
+import { isString } from '../src/core/json.js';
 import type { CallResult } from '../src/core/engine.js';
 
-const ADDRESS = '0x2D43136FfBbbe0ED5CBaaB2E8B2b8c968059114C';
+const ADDRESS = '0x000000000000000000000000000000000000dEaD';
 
 function jsonResponse<T>(status: number, body: T) {
   return new Response(JSON.stringify(body), {
@@ -153,6 +154,132 @@ describe('request', () => {
       ExitCode.GENERIC,
     );
     expect(err.message).toContain('network error');
+  });
+
+  it('follows a same-origin redirect and reports the final URL', async () => {
+    const seen: { url: string; method: string; body: string | undefined }[] = [];
+    vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
+      seen.push({
+        url,
+        method: init.method ?? '',
+        body: isString(init.body) ? init.body : undefined,
+      });
+      if (seen.length === 1) {
+        return new Response('', { status: 302, headers: { location: '/next' } });
+      }
+      return jsonResponse(200, { a: 1 });
+    });
+    const res = await request({
+      url: 'https://x.example/start',
+      method: 'POST',
+      headers: { 'content-type': 'application/json', accept: 'application/json' },
+      body: '{"a":1}',
+      timeoutMs: 1000,
+    });
+    expect(res.status).toBe(200);
+    expect(res.url).toBe('https://x.example/next');
+    expect(res.method).toBe('GET');
+    expect(seen[1]).toMatchObject({ url: 'https://x.example/next', method: 'GET' });
+    expect(seen[1]!.body).toBeUndefined();
+  });
+
+  it('keeps the method and body across a 307', async () => {
+    const seen: { method: string; body: string | undefined }[] = [];
+    vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
+      seen.push({
+        method: init.method ?? '',
+        body: isString(init.body) ? init.body : undefined,
+      });
+      if (seen.length === 1) {
+        return new Response('', { status: 307, headers: { location: '/next' } });
+      }
+      return jsonResponse(200, { a: 1 });
+    });
+    const res = await request({
+      url: 'https://x.example/start',
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{"a":1}',
+      timeoutMs: 1000,
+    });
+    expect(res.method).toBe('POST');
+    expect(seen[1]).toEqual({ method: 'POST', body: '{"a":1}' });
+  });
+
+  it('refuses a cross-origin redirect without requesting the target', async () => {
+    const seen: string[] = [];
+    vi.stubGlobal('fetch', async (url: string) => {
+      seen.push(url);
+      return new Response('', {
+        status: 302,
+        headers: { location: 'https://evil.example/pay' },
+      });
+    });
+    const err = await expectCode(
+      request({
+        url: 'https://x.example/start',
+        method: 'GET',
+        headers: { 'x-payment': 'secret' },
+        timeoutMs: 1000,
+        allowDomains: ['evil.example'],
+      }),
+      ExitCode.GENERIC,
+    );
+    expect(err.message).toContain('cross-origin redirect');
+    expect(seen).toEqual(['https://x.example/start']);
+  });
+
+  it('denies a cross-origin redirect whose host is outside the allowlist', async () => {
+    vi.stubGlobal('fetch', async () => {
+      return new Response('', {
+        status: 302,
+        headers: { location: 'https://evil.example/pay' },
+      });
+    });
+    const err = await expectCode(
+      request({
+        url: 'https://x.example/start',
+        method: 'GET',
+        headers: {},
+        timeoutMs: 1000,
+        allowDomains: ['x.example'],
+      }),
+      ExitCode.ALLOWLIST_DENIED,
+    );
+    expect(err.message).toContain('evil.example');
+  });
+
+  it('denies a same-origin redirect when the host is outside the allowlist', async () => {
+    const seen: string[] = [];
+    vi.stubGlobal('fetch', async (url: string) => {
+      seen.push(url);
+      return new Response('', { status: 307, headers: { location: '/next' } });
+    });
+    await expectCode(
+      request({
+        url: 'https://x.example/start',
+        method: 'GET',
+        headers: {},
+        timeoutMs: 1000,
+        allowDomains: ['trusted.example'],
+      }),
+      ExitCode.ALLOWLIST_DENIED,
+    );
+    expect(seen).toEqual(['https://x.example/start']);
+  });
+
+  it('stops after five redirects', async () => {
+    let hops = 0;
+    vi.stubGlobal('fetch', async () => {
+      hops += 1;
+      return new Response('', { status: 302, headers: { location: `/h${hops}` } });
+    });
+    const err = await expectCode(
+      request({ url: 'https://x.example/start', method: 'GET', headers: {}, timeoutMs: 1000 }),
+      ExitCode.GENERIC,
+    );
+    expect(err.message).toContain('stopped after 5 redirects');
+    expect(hops).toBe(6);
   });
 
   it('parses JSON bodies leniently and gives no proxy hint without a proxy', () => {

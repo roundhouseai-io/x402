@@ -3,7 +3,8 @@
 [anti-slop](https://github.com/dmmulroy/anti-slop) is a set of Oxlint rules that reject low-evidence TypeScript: `unknown` in contracts, ad hoc `typeof` narrowing, undocumented type assertions, module mocking in tests. This package runs it under the same policy as the Roundhouse monorepo: **every rule is `error`, and `src/`, `test/` and `scripts/` are at zero findings.**
 
 ```bash
-npm run lint:slop     # the gate: what CI and the pre-commit hook run (warnings denied)
+pnpm lint:slop        # the gate: warnings are errors, so a finding fails the command
+npm run lint:slop     # the same script
 npm run lint          # the same rules, without --deny-warnings
 ```
 
@@ -11,7 +12,7 @@ The gate runs in three places:
 
 - **CI**: the `anti-slop` job in `.github/workflows/ci.yml` runs `npm run lint:slop` over the whole tree and fails on any finding.
 - **Pre-commit**: `.githooks/pre-commit` lints the staged JS/TS files. `npm install` points git at `.githooks/` (`scripts/install-hooks.mjs`, run from `prepare`; it does nothing outside the root of a git checkout). Bypass a genuine false positive with `git commit --no-verify`, and say why in the PR.
-- **Locally**: `npm run lint:slop`.
+- **Locally**: `pnpm lint:slop` or `npm run lint:slop`.
 
 **Linting needs Node 22.** `oxlint.config.ts` is TypeScript, loaded through Node's type stripping, which Node 20 does not have. The package still supports Node 20 and CI still tests on it; lint runs once, on Node 22. On Node 20 the pre-commit hook says so and skips, and CI enforces the gate.
 

@@ -50,6 +50,20 @@ function isReceiptLike<T>(value: T): value is T & ReceiptLike {
   );
 }
 
+/**
+ * A settlement this command will call confirmed: explicit success, and a
+ * transaction hash to point at. `success` absent, or a body that is merely
+ * not `{ success: false }`, is not a settlement.
+ */
+function settlementConfirmed(value: JsonValue | undefined): boolean {
+  return (
+    isSettlementResponse(value) &&
+    value.success === true &&
+    isString(value.transaction) &&
+    value.transaction.trim() !== ''
+  );
+}
+
 function parseReceipt(text: string, label: string): ReceiptLike {
   const parsed = parseJson(text);
   if (!isReceiptLike(parsed)) {
@@ -88,10 +102,10 @@ export async function verifyCommand(parsed: ParsedArgs): Promise<number> {
       timeoutMs: 15_000,
     });
     detail = parseJsonBody(res.body) ?? res.body;
-    verified = res.status < 400 && !(isJsonObject(detail) && detail.success === false);
+    verified = res.status >= 200 && res.status < 300 && settlementConfirmed(detail);
     source = 'facilitator';
   } else if (receipt.settlement) {
-    verified = receipt.settlement.success === true;
+    verified = settlementConfirmed(receipt.settlement);
     source = 'receipt';
     detail = receipt.settlement;
   }

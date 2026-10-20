@@ -510,6 +510,63 @@ describe('Engine.call', () => {
     expect(record.request.data).toBeUndefined();
   });
 
+  it('follows a same-origin redirect and pays the URL that answered', async () => {
+    fetchMock
+      .mockResolvedValueOnce(new Response(null, { status: 307, headers: { location: '/v1/lei' } }))
+      .mockResolvedValueOnce(jsonResponse(402, requirements()))
+      .mockResolvedValueOnce(jsonResponse(200, { lei: 'X' }));
+    const signer = new FakeSigner();
+    const result = await makeEngine({}, signer).call({ target: 'https://api.example.com/old' });
+
+    expect(result.ok).toBe(true);
+    expect(result.paid).toBe(true);
+    expect(result.url).toBe('https://api.example.com/v1/lei');
+    expect(signer.signed).toHaveLength(1);
+    const urls = fetchMock.mock.calls.map((call) => call[0]);
+    expect(urls).toEqual([
+      'https://api.example.com/old',
+      'https://api.example.com/v1/lei',
+      'https://api.example.com/v1/lei',
+    ]);
+    const paid = fetchMock.mock.calls[2]![1] as { headers: Record<string, string> };
+    expect(paid.headers['x-payment']).toBeTruthy();
+    expect(urls.some((url) => String(url).includes('evil.example'))).toBe(false);
+  });
+
+  it('refuses a cross-origin redirect before signing or paying', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(null, {
+        status: 302,
+        headers: { location: 'https://evil.example/pay' },
+      }),
+    );
+    const signer = new FakeSigner();
+    const result = await makeEngine({}, signer).call({
+      target: 'https://api.example.com/v1/lei',
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.paid).toBe(false);
+    expect(result.paymentState).toBe('none');
+    expect(result.error).toContain('cross-origin redirect');
+    expect(signer.signed).toHaveLength(0);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]![0]).toBe('https://api.example.com/v1/lei');
+  });
+
+  it('re-checks a same-origin redirect against the domain allowlist', async () => {
+    fetchMock.mockResolvedValueOnce(
+      new Response(null, { status: 307, headers: { location: '/v1/lei' } }),
+    );
+    const result = await makeEngine({
+      allowlist: { payTo: [], domains: ['trusted.example'] },
+    }).call({ target: 'https://api.example.com/old' });
+
+    expect(result.errorCode).toBe(ExitCode.ALLOWLIST_DENIED);
+    expect(result.paid).toBe(false);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it('stores plaintext only at payload level full', async () => {
     fetchMock.mockResolvedValueOnce(jsonResponse(200, { ok: true }));
     await makeEngine({

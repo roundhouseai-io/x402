@@ -164,6 +164,30 @@ export interface PreparedRequest {
   body: string | undefined;
 }
 
+/**
+ * The request the response actually answered, after same-origin redirects.
+ *
+ * A 301/302/303 of a POST becomes a GET and drops the body, the same way
+ * `fetch` would. The paid retry has to repeat that request, or it pays for a
+ * different one than the quote was for.
+ */
+function requestThatLanded(prepared: PreparedRequest, res: HttpResponse): PreparedRequest {
+  const method = res.method.toUpperCase();
+  if (res.url === prepared.url && method === prepared.method.toUpperCase()) return prepared;
+  if (method === 'GET' || method === 'HEAD') {
+    const headers: HeaderMap = {};
+    for (const [name, value] of Object.entries(prepared.headers)) {
+      const lower = name.toLowerCase();
+      if (lower === 'content-type' || lower === 'content-length' || lower === 'transfer-encoding') {
+        continue;
+      }
+      headers[name] = value;
+    }
+    return { url: res.url, method, headers, body: undefined };
+  }
+  return { ...prepared, url: res.url, method };
+}
+
 export interface PlacementOptions {
   method?: string | undefined;
   headers?: HeaderMap;
@@ -293,10 +317,11 @@ export class Engine {
     const res = await request({
       ...prepared,
       timeoutMs: (opts.timeoutSeconds ?? this.config.defaults.timeout) * 1000,
+      allowDomains: this.config.allowlist.domains,
     });
     if (res.status !== 402) {
       return {
-        url: prepared.url,
+        url: res.url,
         status: res.status,
         provider: resolved.provider,
         capability: resolved.capability,
@@ -311,7 +336,7 @@ export class Engine {
       preferChain: this.config.defaults.chain,
     });
     return {
-      url: prepared.url,
+      url: res.url,
       status: res.status,
       requirements,
       selected,
@@ -349,6 +374,7 @@ export class Engine {
     }
 
     const timeoutMs = (opts.timeoutSeconds ?? this.config.defaults.timeout) * 1000;
+    const allowDomains = this.config.allowlist.domains;
     const record = this.baseRecord({
       id,
       url: prepared.url,
@@ -365,7 +391,7 @@ export class Engine {
     // 1. Unpaid attempt.
     let first: HttpResponse;
     try {
-      first = await request({ ...prepared, timeoutMs });
+      first = await request({ ...prepared, timeoutMs, allowDomains });
     } catch (err) {
       record.exitCode = exitCodeOf(err);
       record.error = messageOf(err);
@@ -373,6 +399,12 @@ export class Engine {
       this.commit(record);
       return this.errorResult(record, err);
     }
+
+    // Same-origin redirects are already followed. Pay, gate and cache against
+    // the URL that actually answered, which is the only one a payment may name.
+    prepared = requestThatLanded(prepared, first);
+    record.url = prepared.url;
+    record.method = prepared.method;
 
     // 2. Not a 402: done, logged with amount 0.
     if (first.status !== 402) {
@@ -503,7 +535,7 @@ export class Engine {
     const paidHeaders = { ...prepared.headers, [auth.headerName]: auth.header };
     let second: HttpResponse;
     try {
-      second = await request({ ...prepared, headers: paidHeaders, timeoutMs });
+      second = await request({ ...prepared, headers: paidHeaders, timeoutMs, allowDomains });
     } catch (err) {
       // The authorization may already be settled: log the receipt, exit 50, and
       // keep the cache entry so a re-run reuses it instead of paying twice.

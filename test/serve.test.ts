@@ -296,6 +296,51 @@ describe('serve HTTP API', () => {
       expect(fetchMock).toHaveBeenCalledTimes(2);
     });
   });
+
+  it('does not replay one caller token under another token idempotency key', async () => {
+    const firstToken = createToken({ name: 'agent-a' });
+    const secondToken = createToken({ name: 'agent-b' });
+    const quote = () =>
+      new Response(JSON.stringify(requirements()), {
+        status: 402,
+        headers: { 'content-type': 'application/json' },
+      });
+    const paid = () =>
+      new Response(JSON.stringify({ lei: 'X' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    fetchMock
+      .mockResolvedValueOnce(quote())
+      .mockResolvedValueOnce(paid())
+      .mockResolvedValueOnce(quote())
+      .mockResolvedValueOnce(paid());
+
+    await withServer(async (base) => {
+      const headersFor = (token: string) => ({
+        authorization: `Bearer ${token}`,
+        'idempotency-key': 'shared-key',
+      });
+      const first = await post(
+        base,
+        '/v1/call',
+        { url: 'https://api.example.com/v1/lei' },
+        headersFor(firstToken.plaintext),
+      );
+      const second = await post(
+        base,
+        '/v1/call',
+        { url: 'https://api.example.com/v1/lei' },
+        headersFor(secondToken.plaintext),
+      );
+      expect(first.json.paid).toBe(true);
+      expect(first.json.replayed).toBeUndefined();
+      expect(second.json.paid).toBe(true);
+      expect(second.json.replayed).toBeUndefined();
+      expect(second.json.receiptId).not.toBe(first.json.receiptId);
+      expect(fetchMock).toHaveBeenCalledTimes(4);
+    });
+  });
 });
 
 describe('MCP server', () => {

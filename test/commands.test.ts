@@ -20,7 +20,7 @@ import { testUrlFor } from '../src/commands/setup.js';
 import { VERSION } from '../src/version.js';
 import type { JsonObject } from '../src/core/json.js';
 
-const ADDRESS = '0x2D43136FfBbbe0ED5CBaaB2E8B2b8c968059114C';
+const ADDRESS = '0x000000000000000000000000000000000000dEaD';
 const PAY_TO = '0x1831f336585a6C67B6A954d28f3E07F44C4EEBbd';
 const USDC_BASE = '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913';
 const SIGNATURE = `0x${'ef'.repeat(65)}`;
@@ -331,7 +331,9 @@ describe('verify', () => {
       facilitator: { url: 'https://facilitator.example/', token: 'env:TEST_FACILITATOR_TOKEN' },
     });
     process.env.TEST_FACILITATOR_TOKEN = 'test-token';
-    const seen = stubFetch(() => jsonResponse(200, { success: true }));
+    const seen = stubFetch(() =>
+      jsonResponse(200, { success: true, transaction: '0xabc', network: 'base' }),
+    );
     try {
       const receipt = { id: 'r1', settlement: { success: true, transaction: '0xabc' } };
       const res = await run('verify', JSON.stringify(receipt));
@@ -341,6 +343,24 @@ describe('verify', () => {
     } finally {
       delete process.env.TEST_FACILITATOR_TOKEN;
     }
+  });
+
+  it('does not treat a facilitator body without a transaction as settled', async () => {
+    writeUserConfig({ facilitator: { url: 'https://facilitator.example/' } });
+    stubFetch(() => jsonResponse(200, { success: true }));
+    const receipt = { id: 'r1', settlement: { success: true, transaction: '0xabc' } };
+    const res = await run('verify', JSON.stringify(receipt));
+    expect(res.code).toBe(ExitCode.GENERIC);
+    expect(res.json).toMatchObject({ verified: false, source: 'facilitator', trusted: true });
+  });
+
+  it('does not treat success: false as settled', async () => {
+    writeUserConfig({ facilitator: { url: 'https://facilitator.example/' } });
+    stubFetch(() => jsonResponse(200, { success: false, transaction: '0xabc' }));
+    const receipt = { id: 'r1', settlement: { success: true, transaction: '0xabc' } };
+    const res = await run('verify', JSON.stringify(receipt));
+    expect(res.json.verified).toBe(false);
+    expect(res.code).toBe(ExitCode.GENERIC);
   });
 
   it('exits 1 with no settlement information', async () => {

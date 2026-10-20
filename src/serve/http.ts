@@ -120,8 +120,15 @@ export function createServeServer(deps: ServeDeps): Server {
     }
 
     const idempotencyKey = header(req, 'idempotency-key');
-    if (idempotencyKey) {
-      const hit = idempotency.get(idempotencyKey);
+    // Scoped to the caller. Two tokens that reuse a key must not replay each
+    // other's paid response, and an unauthenticated caller must not replay a
+    // token's either.
+    const replayKey =
+      idempotencyKey === undefined
+        ? undefined
+        : `${token?.hash ?? 'unauthenticated'}:${idempotencyKey}`;
+    if (replayKey) {
+      const hit = idempotency.get(replayKey);
       if (hit && hit.expiresAt > Date.now()) {
         sendJson(res, 200, { ...hit.envelope, replayed: true, bodyReplay: hit.bodyReplay });
         return;
@@ -157,9 +164,9 @@ export function createServeServer(deps: ServeDeps): Server {
     });
 
     const envelope = toEnvelope(result);
-    if (idempotencyKey && result.receipt) {
+    if (replayKey && result.receipt) {
       const replayable = deps.config.telemetry.payload === 'full';
-      idempotency.set(idempotencyKey, {
+      idempotency.set(replayKey, {
         expiresAt: result.receipt.validBefore * 1000,
         envelope: replayable ? envelope : { ...envelope, body: undefined },
         bodyReplay: replayable,

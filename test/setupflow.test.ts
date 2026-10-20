@@ -22,7 +22,7 @@ import type { LedgerRecord } from '../src/core/ledger.js';
 import type { SignerBackend } from '../src/core/signer.js';
 import type { WalletBalances } from '../src/core/rpc.js';
 
-const ADDRESS = '0x2D43136FfBbbe0ED5CBaaB2E8B2b8c968059114C';
+const ADDRESS = '0x000000000000000000000000000000000000dEaD';
 const MINTED_KEY = 'rh_live_mintedsecret0123456789';
 const POLICY_TOKEN = 'ows_key_policytoken0123456789';
 const TEST_URL = 'https://api.roundhouseai.io/v0/test/x402';

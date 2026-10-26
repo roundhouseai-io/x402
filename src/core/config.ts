@@ -171,6 +171,15 @@ export function telemetryOptedOut(env: NodeJS.ProcessEnv = process.env): boolean
   );
 }
 
+/**
+ * Spend limits applied when the user sets none. A malicious provider can quote
+ * any price in a 402, so an unset cap meant a default install would sign for a
+ * wallet's whole balance. These are deliberately low; raise them with
+ * `config set limits.maxPerCall <amount>` or `--max`.
+ */
+export const DEFAULT_MAX_PER_CALL = '1.00';
+export const DEFAULT_DAILY_CAP = '5.00';
+
 export const DEFAULT_CONFIG: X402Config = {
   wallet: {
     backend: 'ows',
@@ -179,7 +188,7 @@ export const DEFAULT_CONFIG: X402Config = {
       local: {},
     },
   },
-  limits: {},
+  limits: { maxPerCall: DEFAULT_MAX_PER_CALL, dailyCap: DEFAULT_DAILY_CAP },
   auth: {},
   allowlist: { payTo: [], domains: [] },
   telemetry: {

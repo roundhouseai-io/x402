@@ -117,7 +117,7 @@ Numbers, `true`/`false` and `null` are coerced; anything else is a string. Force
 
 **Spending safely.**
 
-- `--max 0.01` (CLI) or `"max": "0.01"` (endpoint) refuses anything pricier. Always set it.
+- `--max 0.01` (CLI) or `"max": "0.01"` (endpoint) refuses anything pricier. Always set it. With no cap configured, a per-call limit of `1.00` USDC and a daily cap of `5.00` USDC still apply; never raise them without a human's say.
 - `--dry-run` reports the price and stops before signing. Use it when you are unsure.
 - Repeat the _same_ command after a network failure: the signed authorization is cached and reused, so a retry does not pay twice. On the endpoint, send the same `Idempotency-Key`.
 - `--budget 0.50` caps everything this process spends.

@@ -308,6 +308,27 @@ describe('Engine.call', () => {
     expect(result.errorCode).toBe(ExitCode.BUDGET_EXHAUSTED);
   });
 
+  it('refuses a quote above the default per-call cap when the user set none', async () => {
+    const signer = new FakeSigner();
+    const sign = vi.spyOn(signer, 'signTypedData');
+    fetchMock.mockResolvedValueOnce(jsonResponse(402, requirements('5000000'))); // 5.00 USDC
+    const result = await makeEngine({}, signer).call({ target: 'https://api.example.com/v1/lei' });
+    expect(result.errorCode).toBe(ExitCode.OVER_MAX);
+    expect(sign).not.toHaveBeenCalled();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('lets --max raise the default per-call cap for one call', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse(402, requirements('2000000')))
+      .mockResolvedValueOnce(jsonResponse(200, { ok: 1 }));
+    const result = await makeEngine().call({
+      target: 'https://api.example.com/v1/lei',
+      max: '2.00',
+    });
+    expect(result.paid).toBe(true);
+  });
+
   it('enforces the daily cap from the ledger', async () => {
     const engine = makeEngine({ limits: { dailyCap: '0.003' } });
     fetchMock

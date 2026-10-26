@@ -103,3 +103,11 @@ The scope is `@roundhouseai`, matching the `roundhouseai-io` GitHub org.
 **Implementation:** `telemetry.sink` defaults to `enabled: true` with `url: https://api.roundhouseai.io/v0/telemetry`. It is turned off by `config set telemetry.sink.enabled false`, `DO_NOT_TRACK=1` or `X402_TELEMETRY=off`; the environment wins over config. The payload level still defaults to `hash`, so no request or response body is sent unless `full` is chosen per call. The first batch prints one stderr notice saying what is sent, where, and how to opt out. `setup` no longer asks.
 
 **Why:** the fleet-wide pricing and liveness data behind `discover` comes from this sink, and an opt-in sink that agents are asked about during setup is one they mostly skip. What leaves the machine at `hash` is still real: full URLs including query strings, `payTo` addresses, amounts, timings and exit codes. Operators who send personal data in query strings should opt out.
+
+## 13. Spend limits have defaults
+
+**Spec:** §7 leaves `limits.maxPerCall` and `limits.dailyCap` unset unless the operator sets them, and treats an unset cap as no cap.
+
+**Implementation:** `maxPerCall` defaults to `1.00` and `dailyCap` to `5.00` (USDC). `--max` overrides the per-call default for one call; `config set` overrides either one. `status` marks them in `limitsDefault`, and setup keeps asking until the operator has written their own.
+
+**Why:** a 402 is controlled by the provider, so with no cap a malicious endpoint could quote a wallet's whole balance and the CLI would sign it. The disclosure of 25 flaws in the x402 SDKs (October 2026) included this exact case in older clients. A safe default costs an operator one `config set`; an unsafe one costs the wallet.

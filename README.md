@@ -565,13 +565,14 @@ Routes: `POST /v1/call`, `POST /v1/probe`, `GET /v1/discover`, `GET /v1/history`
 
 ## Wallets: bring your own
 
-Signing goes through a **signer backend**, which sees one EIP-712 payload and nothing else — no URL, no request body, no response body. Five ship with the CLI:
+Signing goes through a **signer backend**, which sees one EIP-712 payload (or, on Solana, one transaction message) and nothing else, no URL, no request body, no response body. Six ship with the CLI:
 
 | Backend              | What it is                                                                                                                                                                                |
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `ows`                | Open Wallet Standard agent access layer over HTTP: API-key auth, policy-gated signing. The default.                                                                                       |
 | `ows-core`           | The same vault in process, via the `@open-wallet-standard/core` bindings. No daemon to run, the key never leaves OWS, and `wallet policy` puts an OWS policy in front of every signature. |
 | `local`              | Encrypted keystore (scrypt + AES-256-GCM), `0600`, warns on every signature. **Development and CI only** — it has no policy layer.                                                        |
+| `solana-env`         | One Solana key in `X402_SOLANA_PRIVATE_KEY`, for paying on Solana. Warns on every signature. **Development and CI only**, see [`docs/signers.md`](docs/signers.md).                       |
 | `exec`               | Any executable speaking [JSON over stdio](docs/exec-signer.md), in the style of git credential helpers. A hardware bridge, an MPC service or a KMS wrapper is one small script away.      |
 | `x402-signer-<name>` | Third-party backends, auto-discovered from npm.                                                                                                                                           |
 

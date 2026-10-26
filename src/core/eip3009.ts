@@ -1,3 +1,4 @@
+import { ExitCode, X402Error } from './errors.js';
 import { randomNonce } from './ids.js';
 import type { PaymentOption } from './x402.js';
 
@@ -61,6 +62,13 @@ export interface Authorization {
  * the document to OWS `signTypedData`.
  */
 export function buildAuthorization(input: BuildAuthorizationInput): Authorization {
+  const { eip712 } = input.option;
+  if (!eip712) {
+    throw new X402Error(
+      ExitCode.INVALID_402,
+      `${input.option.network} has no EIP-3009 authorization to build`,
+    );
+  }
   const now = input.now ?? Math.floor(Date.now() / 1000);
   const skew = input.skewSeconds ?? 60;
   const validFor = input.validForSeconds ?? input.option.maxTimeoutSeconds;
@@ -75,8 +83,8 @@ export function buildAuthorization(input: BuildAuthorizationInput): Authorizatio
       types: TRANSFER_WITH_AUTHORIZATION_TYPES,
       primaryType: 'TransferWithAuthorization',
       domain: {
-        name: input.option.eip712.name,
-        version: input.option.eip712.version,
+        name: eip712.name,
+        version: eip712.version,
         chainId: input.option.chainId,
         verifyingContract: input.option.asset,
       },
@@ -92,17 +100,25 @@ export function buildAuthorization(input: BuildAuthorizationInput): Authorizatio
   };
 }
 
-interface SchemePayload {
+/** The EVM `exact` payload: an EIP-3009 authorization and its signature. */
+export interface EvmSchemePayload {
   signature: string;
   authorization: TypedData['message'];
 }
 
+/** The Solana `exact` payload: a base64 transaction, signed by the payer only. */
+export interface SvmSchemePayload {
+  transaction: string;
+}
+
+export type SchemePayload = EvmSchemePayload | SvmSchemePayload;
+
 /** The v1 payload: the chosen option is described by `scheme` + `network`. */
-export interface PaymentPayloadV1 {
+export interface PaymentPayloadV1<P extends SchemePayload = EvmSchemePayload> {
   x402Version: 1;
   scheme: string;
   network: string;
-  payload: SchemePayload;
+  payload: P;
 }
 
 /**
@@ -110,15 +126,16 @@ export interface PaymentPayloadV1 {
  * echoed back under `accepted`, alongside the resource and any extensions the
  * server declared.
  */
-export interface PaymentPayloadV2 {
+export interface PaymentPayloadV2<P extends SchemePayload = EvmSchemePayload> {
   x402Version: 2;
   resource?: Record<string, unknown>;
   accepted: Record<string, unknown>;
-  payload: SchemePayload;
+  payload: P;
   extensions?: Record<string, unknown>;
 }
 
-export type PaymentPayload = PaymentPayloadV1 | PaymentPayloadV2;
+export type PaymentPayload<P extends SchemePayload = EvmSchemePayload> =
+  PaymentPayloadV1<P> | PaymentPayloadV2<P>;
 
 /**
  * The header a payment payload travels in.
@@ -155,7 +172,9 @@ function acceptedFor(option: PaymentOption): Record<string, unknown> {
     asset: option.asset,
     payTo: option.payTo,
     maxTimeoutSeconds: option.maxTimeoutSeconds,
-    extra: { name: option.eip712.name, version: option.eip712.version },
+    extra: option.eip712
+      ? { name: option.eip712.name, version: option.eip712.version }
+      : { feePayer: option.feePayer },
   };
 }
 
@@ -174,7 +193,15 @@ export function buildPaymentPayload(
   signature: string,
   context: PaymentPayloadContext = { x402Version: 1 },
 ): PaymentPayload {
-  const payload: SchemePayload = { signature, authorization: typedData.message };
+  return wrapPaymentPayload(option, { signature, authorization: typedData.message }, context);
+}
+
+/** Put a scheme payload in the envelope the protocol version calls for. */
+export function wrapPaymentPayload<P extends SchemePayload>(
+  option: PaymentOption,
+  payload: P,
+  context: PaymentPayloadContext = { x402Version: 1 },
+): PaymentPayload<P> {
   if (context.x402Version >= 2) {
     return {
       x402Version: 2,
@@ -193,7 +220,7 @@ export function buildPaymentPayload(
 }
 
 /** The payment header value: base64 of the payment payload JSON. */
-export function encodePaymentHeader(payload: PaymentPayload): string {
+export function encodePaymentHeader(payload: PaymentPayload<SchemePayload>): string {
   return Buffer.from(JSON.stringify(payload), 'utf8').toString('base64');
 }
 

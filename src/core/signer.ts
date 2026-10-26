@@ -23,8 +23,14 @@ export interface SignerBalance {
 }
 
 export interface SignerCapabilities {
-  /** EIP-712 typed-data signing. Required for the x402 `exact` scheme. */
+  /** EIP-712 typed-data signing. Required for the x402 `exact` scheme on EVM chains. */
   typedData: boolean;
+  /**
+   * Signs a Solana transaction message with ed25519, for the x402 `exact` scheme
+   * on Solana. Optional so a backend that predates Solana still satisfies the
+   * interface; absent means false.
+   */
+  svm?: boolean;
   /** The backend enforces its own spend policies and may refuse to sign. */
   policies: boolean;
   /** The backend can report balances, enabling the pre-flight check. */
@@ -48,6 +54,13 @@ export interface SignerBackend {
   getAccounts(): Promise<SignerAccount[]>;
   getAddress(chain?: string): Promise<string>;
   signTypedData(typedData: TypedData): Promise<string>;
+  /**
+   * Optional: present only when `capabilities().svm` is true. Receives the
+   * serialized message of the transaction to pay with, and returns the 64-byte
+   * ed25519 signature. Like `signTypedData`, it is given nothing else: no URL,
+   * no request body, no response body.
+   */
+  signSvmMessage?(message: Uint8Array): Promise<Uint8Array>;
   /** Optional: absent when `capabilities().balances` is false. */
   getBalance?(asset: string, chain: string): Promise<SignerBalance | undefined>;
 }

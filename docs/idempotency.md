@@ -58,3 +58,9 @@ jq '{payTo,amountAtomic,validBefore}' ~/.x402/authcache/*.json
 ```
 
 Deleting a file is safe: the next identical call signs again (and pays again). Deleting the directory is safe for the same reason. Neither is something an agent should do.
+
+## Solana
+
+A Solana payment has no nonce and no `validBefore`. Its lifetime is its blockhash: the transaction is dead once the blockhash is more than about 150 blocks old, roughly a minute, longer if slots run slow. The facilitator holds the transaction and may submit it at any point before then, so the cache entry is kept for **two minutes**, past the longest plausible lifetime. A retry inside that window reuses the cached transaction; after it, the old one cannot land and a new one cannot pay twice.
+
+The cache key folds case for EVM addresses and does not for Solana ones, because a base58 address is case-sensitive: folding it would let an authorization for one recipient answer a request for another.

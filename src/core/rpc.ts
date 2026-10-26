@@ -32,7 +32,7 @@ interface RpcResponse {
   error?: { code?: number; message?: string };
 }
 
-function rpcUrlFor(chain: ChainInfo, overrides: Record<string, string>): string {
+export function rpcUrlFor(chain: ChainInfo, overrides: Record<string, string>): string {
   return overrides[chain.network] ?? chain.rpcUrl;
 }
 
@@ -131,6 +131,12 @@ export async function readBalances(
       `unknown chain "${chainName}": known chains are ${CHAINS.map((c) => c.network).join(', ')}`,
     );
   }
+  if (chain.family === 'svm') {
+    throw new X402Error(
+      ExitCode.GENERIC,
+      `balance reads are EVM-only for now: ${chain.network} is not supported by \`wallet balance\``,
+    );
+  }
   if (!/^0x[0-9a-fA-F]{40}$/.test(address)) {
     throw new X402Error(ExitCode.GENERIC, `not an EVM address: ${address}`);
   }
@@ -140,7 +146,7 @@ export async function readBalances(
   const nativeAtomic = toBigInt(nativeHex, 'eth_getBalance');
 
   const assets = ASSETS.filter(
-    (a) => a.chainId === chain.chainId && (!opts.symbol || a.symbol === opts.symbol),
+    (a) => a.caip2 === chain.caip2 && (!opts.symbol || a.symbol === opts.symbol),
   );
   const tokens: Balance[] = [];
   for (const asset of assets) {

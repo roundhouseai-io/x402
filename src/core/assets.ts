@@ -1,8 +1,18 @@
 /** Chain and asset tables. v1 is Base + USDC; the shape is ready for more. */
 
+/** The signature scheme a chain settles with: EIP-3009 on EVM, a partly signed transaction on SVM. */
+export type ChainFamily = 'evm' | 'svm';
+
 export interface ChainInfo {
   /** Canonical short name used in x402 payloads. */
   network: string;
+  family: ChainFamily;
+  /** CAIP-2 identifier, the one key that is unique across families. */
+  caip2: string;
+  /**
+   * The EVM chain id. Zero on a chain that has none; compare `caip2` instead of
+   * this whenever the family is not known to be EVM.
+   */
   chainId: number;
   aliases: string[];
   /** Native currency symbol, for balance reporting. */
@@ -27,9 +37,15 @@ export interface ChainInfo {
   rpcUrl: string;
 }
 
+/** CAIP-2 for Solana: the first 32 characters of the genesis block hash. */
+export const SOLANA_MAINNET = 'solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp';
+export const SOLANA_DEVNET = 'solana:EtWTRABZaYq6iMfeYKouRu166VU2xqa1';
+
 export const CHAINS: ChainInfo[] = [
   {
     network: 'base',
+    family: 'evm',
+    caip2: 'eip155:8453',
     chainId: 8453,
     aliases: ['base', 'base-mainnet', 'eip155:8453', '8453'],
     nativeSymbol: 'ETH',
@@ -38,6 +54,8 @@ export const CHAINS: ChainInfo[] = [
   },
   {
     network: 'ethereum',
+    family: 'evm',
+    caip2: 'eip155:1',
     chainId: 1,
     aliases: ['ethereum', 'mainnet', 'eth', 'eip155:1', '1'],
     nativeSymbol: 'ETH',
@@ -46,10 +64,32 @@ export const CHAINS: ChainInfo[] = [
   },
   {
     network: 'base-sepolia',
+    family: 'evm',
+    caip2: 'eip155:84532',
     chainId: 84532,
     aliases: ['base-sepolia', 'basesepolia', 'eip155:84532', '84532'],
     nativeSymbol: 'ETH',
     rpcUrl: 'https://sepolia.base.org',
+    x402: true,
+  },
+  {
+    network: 'solana',
+    family: 'svm',
+    caip2: SOLANA_MAINNET,
+    chainId: 0,
+    aliases: ['solana', 'solana-mainnet', 'solana-mainnet-beta', SOLANA_MAINNET.toLowerCase()],
+    nativeSymbol: 'SOL',
+    rpcUrl: 'https://api.mainnet-beta.solana.com',
+    x402: true,
+  },
+  {
+    network: 'solana-devnet',
+    family: 'svm',
+    caip2: SOLANA_DEVNET,
+    chainId: 0,
+    aliases: ['solana-devnet', 'devnet', SOLANA_DEVNET.toLowerCase()],
+    nativeSymbol: 'SOL',
+    rpcUrl: 'https://api.devnet.solana.com',
     x402: true,
   },
 ];
@@ -64,11 +104,25 @@ export const caip2 = (chainId: number) => `eip155:${chainId}`;
 
 export interface AssetInfo {
   symbol: string;
+  /** Token contract on EVM, mint address on SVM. */
   address: string;
   decimals: number;
-  chainId: number;
-  /** EIP-712 domain fields for EIP-3009. */
-  eip712: { name: string; version: string };
+  /** CAIP-2 of the chain this token lives on. */
+  caip2: string;
+  /** EIP-712 domain fields for EIP-3009. EVM only. */
+  eip712?: { name: string; version: string };
+}
+
+/**
+ * Whether two addresses of this family name the same account.
+ *
+ * EVM addresses are hex and only their checksum casing varies, so they compare
+ * case-insensitively. A Solana address is base58, where case is part of the
+ * value: folding it would let `AbC...` match a different account, which would
+ * turn an allowlist entry into a match for an address nobody approved.
+ */
+export function sameAddress(family: ChainFamily, a: string, b: string): boolean {
+  return family === 'evm' ? a.toLowerCase() === b.toLowerCase() : a === b;
 }
 
 export const ASSETS: AssetInfo[] = [
@@ -76,14 +130,14 @@ export const ASSETS: AssetInfo[] = [
     symbol: 'usdc',
     address: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
     decimals: 6,
-    chainId: 8453,
+    caip2: 'eip155:8453',
     eip712: { name: 'USD Coin', version: '2' },
   },
   {
     symbol: 'usdc',
     address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48',
     decimals: 6,
-    chainId: 1,
+    caip2: 'eip155:1',
     // Read from the contract, not copied from a doc: name() "USD Coin",
     // version() "2", decimals() 6, and DOMAIN_SEPARATOR() present.
     eip712: { name: 'USD Coin', version: '2' },
@@ -92,19 +146,36 @@ export const ASSETS: AssetInfo[] = [
     symbol: 'usdc',
     address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e',
     decimals: 6,
-    chainId: 84532,
+    caip2: 'eip155:84532',
     eip712: { name: 'USDC', version: '2' },
+  },
+  {
+    symbol: 'usdc',
+    address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
+    decimals: 6,
+    caip2: SOLANA_MAINNET,
+  },
+  {
+    symbol: 'usdc',
+    address: '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU',
+    decimals: 6,
+    caip2: SOLANA_DEVNET,
   },
 ];
 
-export function findAsset(address: string | undefined, chainId?: number): AssetInfo | undefined {
+/**
+ * Find a known token on a chain. The chain is how the family is known, so the
+ * address is compared the way that family compares addresses.
+ */
+export function findAsset(address: string | undefined, chain?: ChainInfo): AssetInfo | undefined {
   if (!address) return undefined;
-  const needle = address.toLowerCase();
-  return ASSETS.find(
-    (a) =>
-      (a.address.toLowerCase() === needle || a.symbol === needle) &&
-      (chainId === undefined || a.chainId === chainId),
-  );
+  const symbol = address.toLowerCase();
+  return ASSETS.find((a) => {
+    if (chain !== undefined && a.caip2 !== chain.caip2) return false;
+    if (a.symbol === symbol) return true;
+    const family = CHAINS.find((c) => c.caip2 === a.caip2)?.family ?? 'evm';
+    return sameAddress(family, a.address, address);
+  });
 }
 
 /** Format an atomic amount as a decimal string, trimming trailing zeros. */

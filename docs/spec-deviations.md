@@ -111,3 +111,19 @@ The scope is `@roundhouseai`, matching the `roundhouseai-io` GitHub org.
 **Implementation:** `maxPerCall` defaults to `1.00` and `dailyCap` to `5.00` (USDC). `--max` overrides the per-call default for one call; `config set` overrides either one. `status` marks them in `limitsDefault`, and setup keeps asking until the operator has written their own.
 
 **Why:** a 402 is controlled by the provider, so with no cap a malicious endpoint could quote a wallet's whole balance and the CLI would sign it. The disclosure of 25 flaws in the x402 SDKs (October 2026) included this exact case in older clients. A safe default costs an operator one `config set`; an unsafe one costs the wallet.
+
+## 14. Solana, and the payment path makes one RPC call there
+
+**Spec:** the design is EIP-3009 throughout, and §5.3 says the engine hands a backend one EIP-712 payload. `core/rpc.ts` states that nothing in the payment path calls an RPC.
+
+**Implementation:** `solana` and `solana-devnet` are payable chains. The payment is a partly signed v0 transaction (compute unit limit, compute unit price, SPL `TransferChecked`) rather than an authorization. A backend that can sign it declares `capabilities().svm` and implements `signSvmMessage(message)`, which receives the serialized message and returns a 64-byte signature. The engine reads one recent blockhash from `rpc.solana` after the gates pass, because a transaction cannot be built without it. The transaction is decoded again and checked against the quote before it is released (`core/svm.ts`). `@solana/web3.js` is an optional peer dependency, loaded on demand.
+
+**Why:** the transaction has to carry a blockhash, so unlike an authorization it cannot be signed offline. The verification step exists because a Solana "payment" that moves no tokens, or the wrong amount, mint or recipient, is the failure the 2026 disclosure of x402 SDK flaws described. Invariant 7 still holds: no network call precedes a gate failure. Invariant 9 still holds: a default install has no new dependency, and `@solana/web3.js` (which brings about fifty transitive packages) is something an operator opts into.
+
+## 15. The `solana-env` backend reads a raw private key from an environment variable
+
+**Spec and invariant:** CLAUDE.md invariant 1 says keys never appear in argv, env vars or logs.
+
+**Implementation:** the `solana-env` backend reads one ed25519 key from `X402_SOLANA_PRIVATE_KEY` (or the variable named by `wallet.backends.solana-env.keyEnv`). It warns on stderr at every signature, never prints the key or quotes a malformed one, and is documented as development and CI only. The key is never read from argv and never written to config, the ledger or the authorization cache.
+
+**Why:** the operator asked for it. It is the weakest custody the CLI offers: an env var is inherited by child processes, readable from `/proc/<pid>/environ`, and easy to paste into a log. A hardware wallet or KMS behind the `exec` backend is the better answer for real funds, and a Solana backend on the encrypted keystore is open work.

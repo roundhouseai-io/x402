@@ -45,6 +45,15 @@ export interface OwsCoreBackendConfig {
   requireApiKey?: boolean;
 }
 
+/**
+ * The Solana development backend: one ed25519 key, read from the environment.
+ * Development and CI only. See docs/signers.md before using it with real funds.
+ */
+export interface SolanaEnvBackendConfig {
+  /** Name of the environment variable holding the key. Default `X402_SOLANA_PRIVATE_KEY`. */
+  keyEnv?: string;
+}
+
 export interface LocalBackendConfig {
   /** Encrypted keystore path; `~` is expanded. Defaults to `$X402_HOME/keystore.json`. */
   keystore?: string;
@@ -83,6 +92,7 @@ export interface X402Config {
       'ows-core'?: OwsCoreBackendConfig;
       local: LocalBackendConfig;
       exec?: ExecBackendConfig;
+      'solana-env'?: SolanaEnvBackendConfig;
       /** Third-party backends resolved as `x402-signer-<name>`. */
       [name: string]: unknown;
     };

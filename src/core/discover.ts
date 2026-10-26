@@ -125,8 +125,7 @@ const mapProvider = (p: Record<string, unknown>, capability: string): Provider =
     url: String(p.url ?? p.endpoint ?? p.resource ?? ''),
     capability: String(p.capability ?? p.service_name ?? capability),
     price: strOrUndef(p.price ?? p.price_usdc),
-    asset:
-      findAsset(assetRaw, chain?.chainId)?.symbol ?? assetRaw ?? (usdcPriced ? 'usdc' : undefined),
+    asset: findAsset(assetRaw, chain)?.symbol ?? assetRaw ?? (usdcPriced ? 'usdc' : undefined),
     chain: chain?.network ?? strOrUndef(p.chain ?? p.network),
     payTo: strOrUndef(p.payTo ?? p.pay_to),
     successRate: numOrUndef(p.successRate ?? p.success_rate),

@@ -1,5 +1,5 @@
 import { X402Error, ExitCode } from './errors.js';
-import { parseUnits } from './assets.js';
+import { parseUnits, sameAddress } from './assets.js';
 import type { PaymentOption } from './x402.js';
 
 export interface GateInput {
@@ -44,8 +44,13 @@ export function runGates(input: GateInput): void {
     throw new X402Error(ExitCode.ALLOWLIST_DENIED, `domain not in allowlist: ${host}`);
   }
 
-  const allowPayTo = (input.allowPayTo ?? []).map((a) => a.toLowerCase());
-  if (allowPayTo.length > 0 && !allowPayTo.includes(option.payTo.toLowerCase())) {
+  // Compared the way the chain compares addresses: a Solana address is
+  // case-sensitive, so folding case would approve an address nobody listed.
+  const allowPayTo = input.allowPayTo ?? [];
+  if (
+    allowPayTo.length > 0 &&
+    !allowPayTo.some((a) => sameAddress(option.family, a, option.payTo))
+  ) {
     throw new X402Error(ExitCode.ALLOWLIST_DENIED, `payTo not in allowlist: ${option.payTo}`);
   }
 

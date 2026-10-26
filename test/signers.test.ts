@@ -199,7 +199,7 @@ describe('keystore', () => {
 
 describe('backend resolution', () => {
   it('knows the built-in backends', () => {
-    expect(BUILTIN_BACKENDS).toEqual(['ows', 'ows-core', 'local', 'exec']);
+    expect(BUILTIN_BACKENDS).toEqual(['ows', 'ows-core', 'local', 'exec', 'solana-env']);
     expect(thirdPartyPackage('acme')).toBe('x402-signer-acme');
   });
 

@@ -119,6 +119,7 @@ Numbers, `true`/`false` and `null` are coerced; anything else is a string. Force
 
 - `--max 0.01` (CLI) or `"max": "0.01"` (endpoint) refuses anything pricier. Always set it. With no cap configured, a per-call limit of `1.00` USDC and a daily cap of `5.00` USDC still apply; never raise them without a human's say.
 - `--dry-run` reports the price and stops before signing. Use it when you are unsure.
+- **Solana.** Pass `--chain solana` (or set `defaults.chain`) and `--signer solana-env`, with the payer's key in `X402_SOLANA_PRIVATE_KEY`. Never print, log or echo that variable. The same `--max`, `--budget` and daily cap apply, and the tool refuses a transaction that does not move exactly the quoted amount of the quoted token to the quoted recipient (exit `40`). It reads one blockhash from `rpc.solana`, so a network error before signing exits `1` and nothing was paid. A missing recipient token account is the provider's fault, not yours: report it, do not retry. It needs `@solana/web3.js` installed next to the CLI, or exit `47`.
 - Repeat the _same_ command after a network failure: the signed authorization is cached and reused, so a retry does not pay twice. On the endpoint, send the same `Idempotency-Key`.
 - `--budget 0.50` caps everything this process spends.
 

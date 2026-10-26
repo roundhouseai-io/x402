@@ -14,8 +14,12 @@ import {
   buildPaymentPayload,
   encodePaymentHeader,
   paymentHeaderName,
+  wrapPaymentPayload,
   settlementFromHeaders,
   type SettlementResponse,
+  type PaymentPayload,
+  type PaymentPayloadContext,
+  type SchemePayload,
   type TypedData,
 } from './eip3009.js';
 import { authKey, readAuth, writeAuth, pruneAuthCache, type AuthCacheEntry } from './authcache.js';
@@ -23,10 +27,28 @@ import { runGates, SessionBudget } from './gates.js';
 import { appendRecord, readRecords, spentToday, type LedgerRecord } from './ledger.js';
 import { agentContext, summarizeHeaders, summarizePayload, TelemetrySink } from './telemetry.js';
 import { resolveTarget, type Provider } from './discover.js';
-import { parseUnits, formatUnits } from './assets.js';
+import { parseUnits, formatUnits, findChain } from './assets.js';
+import { rpcUrlFor } from './rpc.js';
+import {
+  attachPayerSignature,
+  buildSvmTransaction,
+  fetchLatestBlockhash,
+  verifySvmTransaction,
+} from './svm.js';
 import { ulid, tagged } from './ids.js';
 import type { PayloadLevel, X402Config } from './config.js';
 import type { SignerBackend, SignerFactory } from './signer.js';
+
+/** What signing a payment produces, whichever chain family it was for. */
+interface SignedPayment {
+  /** The EIP-3009 nonce, or the blockhash a Solana transaction is bound to. */
+  nonce: string;
+  /** Unix seconds after which the signed payment cannot settle. */
+  validBefore: number;
+  signature: string;
+  typedData?: TypedData;
+  payload: PaymentPayload<SchemePayload>;
+}
 
 export interface CallOptions {
   /** Absolute URL or `x402:<capability>`. */
@@ -639,7 +661,8 @@ export class Engine {
     const previous = this.signQueues.get(queueKey) ?? Promise.resolve();
 
     const run = previous.then(async () => {
-      const from = await signer.getAddress();
+      await this.assertCanSign(signer, option);
+      const from = await signer.getAddress(option.chain);
       const key = authKey({
         url: prepared.url,
         method: prepared.method,
@@ -648,6 +671,7 @@ export class Engine {
         amountAtomic: option.amountAtomic,
         asset: option.asset,
         chain: option.chain,
+        family: option.family,
         wallet: signer.wallet,
         backend: signer.backend,
         // A v1 header cannot be replayed against a v2 provider (different
@@ -663,17 +687,15 @@ export class Engine {
 
       await this.assertBalance(signer, option);
 
-      const built = buildAuthorization({
-        option,
-        from,
-        now: Math.floor(this.now() / 1000),
-      });
-      const signature = await signer.signTypedData(built.typedData);
-      const payload = buildPaymentPayload(option, built.typedData, signature, {
+      const context = {
         x402Version: requirements.x402Version,
         resource: requirements.resource,
         extensions: requirements.extensions,
-      });
+      };
+      const signed =
+        option.family === 'svm'
+          ? await this.signSvm(option, signer, from, context)
+          : await this.signEvm(option, signer, from, context);
       const entry: AuthCacheEntry = {
         key,
         url: prepared.url,
@@ -686,13 +708,14 @@ export class Engine {
         chain: option.chain,
         scheme: option.scheme,
         network: option.network,
-        nonce: built.nonce,
-        validBefore: built.validBefore,
-        signature,
-        typedData: built.typedData,
+        nonce: signed.nonce,
+        validBefore: signed.validBefore,
+        signature: signed.signature,
+        from,
+        ...(signed.typedData ? { typedData: signed.typedData } : {}),
         x402Version: requirements.x402Version,
         headerName: paymentHeaderName(requirements.x402Version),
-        header: encodePaymentHeader(payload),
+        header: encodePaymentHeader(signed.payload),
         createdAt: new Date(this.now()).toISOString(),
       };
       if (!opts.noCache) writeAuth(entry);
@@ -708,6 +731,71 @@ export class Engine {
       run.catch(() => undefined),
     );
     return run;
+  }
+
+  /** Refuse before signing when the backend cannot sign what this chain needs. */
+  private async assertCanSign(signer: SignerBackend, option: PaymentOption): Promise<void> {
+    const caps = await signer.capabilities();
+    const svm = option.family === 'svm';
+    const able = svm ? caps.svm === true && signer.signSvmMessage !== undefined : caps.typedData;
+    if (able) return;
+    throw new X402Error(
+      ExitCode.OWS_UNREACHABLE,
+      `signer backend "${signer.backend}" cannot sign for ${option.network}: ` +
+        `${svm ? 'a Solana transaction' : 'EIP-712 typed data'} is required. ` +
+        'Nothing was signed.',
+      { backend: signer.backend, network: option.network },
+    );
+  }
+
+  private async signEvm(
+    option: PaymentOption,
+    signer: SignerBackend,
+    from: string,
+    context: PaymentPayloadContext,
+  ): Promise<SignedPayment> {
+    const built = buildAuthorization({ option, from, now: Math.floor(this.now() / 1000) });
+    const signature = await signer.signTypedData(built.typedData);
+    return {
+      nonce: built.nonce,
+      validBefore: built.validBefore,
+      signature,
+      typedData: built.typedData,
+      payload: buildPaymentPayload(option, built.typedData, signature, context),
+    };
+  }
+
+  /**
+   * Build, sign and verify a Solana payment.
+   *
+   * The transaction is checked against the quote after signing and before it is
+   * put in the payload, so nothing that fails verification can leave the
+   * process or be cached.
+   */
+  private async signSvm(
+    option: PaymentOption,
+    signer: SignerBackend,
+    from: string,
+    context: PaymentPayloadContext,
+  ): Promise<SignedPayment> {
+    const chain = findChain(option.chain);
+    const rpcUrl = chain ? rpcUrlFor(chain, this.config.rpc) : undefined;
+    if (!rpcUrl) {
+      throw new X402Error(ExitCode.INVALID_402, `no RPC endpoint for ${option.network}`);
+    }
+    const now = Math.floor(this.now() / 1000);
+    const { blockhash } = await fetchLatestBlockhash(rpcUrl);
+    const built = await buildSvmTransaction({ option, payer: from, blockhash, now });
+    // SAFETY: `assertCanSign` has already checked this is present.
+    const signature = await signer.signSvmMessage!(built.message);
+    const transaction = await attachPayerSignature(built, from, signature);
+    await verifySvmTransaction({ option, payer: from, transaction, blockhash });
+    return {
+      nonce: blockhash,
+      validBefore: built.validBefore,
+      signature: Buffer.from(signature).toString('base64'),
+      payload: wrapPaymentPayload(option, { transaction }, context),
+    };
   }
 
   private async assertBalance(signer: SignerBackend, option: PaymentOption): Promise<void> {
@@ -751,7 +839,7 @@ export class Engine {
       amount: option.amount,
       amountAtomic: option.amountAtomic.toString(),
       payTo: option.payTo,
-      from: auth.typedData.message.from,
+      from: auth.from ?? auth.typedData?.message.from ?? '',
       nonce: auth.nonce,
       validBefore: auth.validBefore,
       authHash: tagged(auth.signature),

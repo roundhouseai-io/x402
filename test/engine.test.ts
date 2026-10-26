@@ -329,6 +329,28 @@ describe('Engine.call', () => {
     expect(result.paid).toBe(true);
   });
 
+  it('signs the payment and nothing else when a v2 quote carries a sign-in extension', async () => {
+    const signer = new FakeSigner();
+    const quote = requirementsV2();
+    fetchMock
+      .mockResolvedValueOnce(
+        jsonResponse(402, {
+          ...quote,
+          extensions: {
+            ...quote.extensions,
+            'sign-in-with-x': {
+              info: { domain: 'api.example.com', nonce: 'abc', statement: 'Sign in' },
+            },
+          },
+        }),
+      )
+      .mockResolvedValueOnce(jsonResponse(200, { ok: 1 }));
+    const result = await makeEngine({}, signer).call({ target: 'https://api.example.com/v1/lei' });
+    expect(result.paid).toBe(true);
+    expect(signer.signed).toHaveLength(1);
+    expect(signer.signed[0]!.primaryType).toBe('TransferWithAuthorization');
+  });
+
   it('enforces the daily cap from the ledger', async () => {
     const engine = makeEngine({ limits: { dailyCap: '0.003' } });
     fetchMock

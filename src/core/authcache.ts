@@ -27,7 +27,10 @@ export interface AuthCacheEntry {
   nonce: string;
   validBefore: number;
   signature: string;
-  typedData: TypedData;
+  /** The payer. Absent on entries written before Solana support; read it from `typedData` then. */
+  from?: string;
+  /** The EIP-3009 document that was signed. EVM only. */
+  typedData?: TypedData;
   /** Protocol version the cached payload was built for. */
   x402Version: number;
   /** Lowercase header the payload travels in: `x-payment` or `payment-signature`. */
@@ -48,6 +51,12 @@ export interface AuthKeyInput {
   backend: string;
   /** Protocol version: a v1 payload is not usable against a v2 provider. */
   x402Version: number;
+  /**
+   * Chain family. Case is folded only on EVM, where it is a checksum detail: a
+   * Solana address is case-sensitive, so folding it would let an authorization
+   * for one recipient answer a request for a different one.
+   */
+  family?: 'evm' | 'svm';
 }
 
 export function authKey(input: AuthKeyInput): string {
@@ -56,9 +65,9 @@ export function authKey(input: AuthKeyInput): string {
       input.method.toUpperCase(),
       input.url,
       sha256(input.body),
-      input.payTo.toLowerCase(),
+      input.family === 'svm' ? input.payTo : input.payTo.toLowerCase(),
       input.amountAtomic.toString(),
-      input.asset.toLowerCase(),
+      input.family === 'svm' ? input.asset : input.asset.toLowerCase(),
       input.chain,
       input.backend,
       input.wallet,

@@ -1,14 +1,25 @@
 import { X402Error, ExitCode } from './errors.js';
-import { ASSETS, CHAINS, caip2, findAsset, findChain, formatUnits, parseUnits } from './assets.js';
+import {
+  ASSETS,
+  CHAINS,
+  findAsset,
+  findChain,
+  formatUnits,
+  parseUnits,
+  type ChainFamily,
+} from './assets.js';
+import { isSolanaAddress } from './base58.js';
 
 export interface PaymentOption {
   scheme: string;
   /** Network name as the provider spelled it. */
   network: string;
+  family: ChainFamily;
+  /** The EVM chain id; 0 on Solana, where `chain` is the identifier to use. */
   chainId: number;
-  /** CAIP-2, e.g. eip155:8453. */
+  /** CAIP-2, e.g. eip155:8453 or solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp. */
   chain: string;
-  /** Token contract address. */
+  /** Token contract address on EVM, mint address on Solana. */
   asset: string;
   assetSymbol: string;
   decimals: number;
@@ -19,8 +30,13 @@ export interface PaymentOption {
   resource: string | undefined;
   description: string | undefined;
   maxTimeoutSeconds: number;
-  /** EIP-712 domain name/version for the token contract. */
-  eip712: { name: string; version: string };
+  /** EIP-712 domain name/version for the token contract. EVM only. */
+  eip712?: { name: string; version: string };
+  /**
+   * Who pays the network fee on Solana, as named by the 402. The facilitator
+   * adds its signature as this account, so it is part of what gets signed.
+   */
+  feePayer?: string;
   raw: Record<string, unknown>;
 }
 
@@ -93,6 +109,14 @@ function resourceUrlOf(value: unknown): string | undefined {
   return undefined;
 }
 
+/**
+ * The longest a signed EIP-3009 authorization may be left valid, whatever the
+ * 402 asks for. Providers quote 60 to 300 seconds; a quote of a year is either a
+ * mistake or an attempt to hold a signature that can be settled long after the
+ * call it was for.
+ */
+export const MAX_TIMEOUT_SECONDS = 600;
+
 function normalizeOption(input: unknown, index: number, resource?: unknown): PaymentOption {
   if (!isObj(input)) {
     throw new X402Error(ExitCode.INVALID_402, `payment option ${index} is not an object`);
@@ -125,13 +149,35 @@ function normalizeOption(input: unknown, index: number, resource?: unknown): Pay
   }
 
   const payTo = pick(input, A_PAYTO);
-  if (typeof payTo !== 'string' || !/^0x[0-9a-fA-F]{40}$/.test(payTo)) {
+  const payToValid =
+    typeof payTo === 'string' &&
+    (chain.family === 'svm' ? isSolanaAddress(payTo) : /^0x[0-9a-fA-F]{40}$/.test(payTo));
+  if (typeof payTo !== 'string' || !payToValid) {
     throw new X402Error(ExitCode.INVALID_402, `missing or malformed payTo in 402 payload`);
   }
 
   const extra = isObj(input.extra) ? input.extra : {};
+
+  // A Solana payment is a transaction the facilitator completes and submits, so
+  // it must name the account that will pay the fee, and it must be an address.
+  let feePayer: string | undefined;
+  if (chain.family === 'svm') {
+    if (scheme !== 'exact') {
+      throw new X402Error(
+        ExitCode.INVALID_402,
+        `unsupported scheme "${scheme}" on ${chain.network}`,
+      );
+    }
+    if (typeof extra.feePayer !== 'string' || !isSolanaAddress(extra.feePayer)) {
+      throw new X402Error(
+        ExitCode.INVALID_402,
+        `a ${chain.network} 402 must carry extra.feePayer as a Solana address`,
+      );
+    }
+    feePayer = extra.feePayer;
+  }
   const assetRaw = pick(input, A_ASSET);
-  const known = findAsset(typeof assetRaw === 'string' ? assetRaw : undefined, chain.chainId);
+  const known = findAsset(typeof assetRaw === 'string' ? assetRaw : undefined, chain);
   if (assetRaw === undefined || assetRaw === '') {
     throw new X402Error(ExitCode.INVALID_402, `missing asset address in 402 payload`, {
       asset: assetRaw ?? null,
@@ -152,7 +198,7 @@ function normalizeOption(input: unknown, index: number, resource?: unknown): Pay
   // Adding one is a table entry in `core/assets.ts` with the decimals and the
   // EIP-712 domain read from the contract.
   if (!known) {
-    const onChain = ASSETS.filter((a) => a.chainId === chain.chainId);
+    const onChain = ASSETS.filter((a) => a.caip2 === chain.caip2);
     throw new X402Error(
       ExitCode.INVALID_402,
       `asset ${String(assetRaw)} is not a token this CLI knows on ${chain.network}. ` +
@@ -198,12 +244,20 @@ function normalizeOption(input: unknown, index: number, resource?: unknown): Pay
   const timeout = Number(
     pick(input, ['maxTimeoutSeconds', 'timeoutSeconds', 'validForSeconds']) ?? 60,
   );
+  // The provider picks how long the signed authorization lives, and a signed
+  // authorization is a standing debit until it expires. Take their word up to a
+  // limit, not past it.
+  const validFor =
+    Number.isFinite(timeout) && timeout > 0
+      ? Math.min(Math.floor(timeout), MAX_TIMEOUT_SECONDS)
+      : 60;
 
   return {
     scheme,
     network: typeof rawNetwork === 'string' ? rawNetwork : chain.network,
+    family: chain.family,
     chainId: chain.chainId,
-    chain: caip2(chain.chainId),
+    chain: chain.caip2,
     asset: assetAddr,
     assetSymbol: known.symbol,
     decimals,
@@ -212,10 +266,11 @@ function normalizeOption(input: unknown, index: number, resource?: unknown): Pay
     payTo,
     resource: resourceUrlOf(input.resource) ?? resourceUrlOf(resource),
     description: typeof input.description === 'string' ? input.description : undefined,
-    maxTimeoutSeconds: Number.isFinite(timeout) && timeout > 0 ? Math.floor(timeout) : 60,
+    maxTimeoutSeconds: validFor,
     // From the table too. `extra` is the provider describing a contract it does
     // not own; the table's values were read from the contract itself.
-    eip712: { name: known.eip712.name, version: known.eip712.version },
+    ...(known.eip712 ? { eip712: { name: known.eip712.name, version: known.eip712.version } } : {}),
+    ...(feePayer ? { feePayer } : {}),
     raw: input,
   };
 }
@@ -389,9 +444,9 @@ export function selectOption(required: PaymentRequired, opts: SelectOptions = {}
 
   if (opts.chains && opts.chains.length > 0) {
     const allowed = new Set(
-      opts.chains.map((c) => findChain(c)?.chainId).filter((id): id is number => id !== undefined),
+      opts.chains.map((c) => findChain(c)?.caip2).filter((id): id is string => id !== undefined),
     );
-    const filtered = pool.filter((o) => allowed.has(o.chainId));
+    const filtered = pool.filter((o) => allowed.has(o.chain));
     if (filtered.length === 0) {
       throw new X402Error(
         ExitCode.INVALID_402,
@@ -401,12 +456,12 @@ export function selectOption(required: PaymentRequired, opts: SelectOptions = {}
     pool = filtered;
   }
 
-  const preferred = findChain(opts.preferChain)?.chainId;
+  const preferred = findChain(opts.preferChain)?.caip2;
   const cheapest = (list: PaymentOption[]) =>
     list.reduce((best, o) => (o.amountAtomic < best.amountAtomic ? o : best), list[0]!);
 
   if (preferred !== undefined) {
-    const onPreferred = pool.filter((o) => o.chainId === preferred);
+    const onPreferred = pool.filter((o) => o.chain === preferred);
     if (onPreferred.length > 0) return cheapest(onPreferred);
   }
   return cheapest(pool);

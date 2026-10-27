@@ -3,8 +3,10 @@ import { OwsClient, OwsSigner } from '../ows.js';
 import { LocalSigner } from './local.js';
 import { OwsCoreSigner } from './owscore.js';
 import { ExecSigner } from './exec.js';
+import { SolanaEnvSigner } from './solanaenv.js';
 import type {
   ExecBackendConfig,
+  SolanaEnvBackendConfig,
   LocalBackendConfig,
   OwsBackendConfig,
   OwsCoreBackendConfig,
@@ -12,7 +14,7 @@ import type {
 } from '../config.js';
 import type { SignerBackend, SignerFactory, SignerSelector } from '../signer.js';
 
-export const BUILTIN_BACKENDS = ['ows', 'ows-core', 'local', 'exec'] as const;
+export const BUILTIN_BACKENDS = ['ows', 'ows-core', 'local', 'exec', 'solana-env'] as const;
 export type BuiltinBackend = (typeof BUILTIN_BACKENDS)[number];
 
 /** Third-party backends live in `x402-signer-<name>` packages. */
@@ -57,6 +59,12 @@ async function construct(
     case 'local': {
       const local = (backends.local ?? {}) as LocalBackendConfig;
       return new LocalSigner(requireWallet(backend, wallet), local);
+    }
+    case 'solana-env': {
+      const solana = (backends['solana-env'] ?? {}) as SolanaEnvBackendConfig;
+      // The key is in the environment, not in a named wallet, so the wallet name
+      // is only a label for the ledger and the authorization cache.
+      return new SolanaEnvSigner(wallet ?? 'env', solana);
     }
     case 'exec': {
       const exec = (backends.exec ?? {}) as ExecBackendConfig;
@@ -103,10 +111,10 @@ export async function resolveSigner(
   const signer = await construct(backend, wallet, config);
 
   const caps = await signer.capabilities();
-  if (!caps.typedData) {
+  if (!caps.typedData && caps.svm !== true) {
     throw new X402Error(
       ExitCode.OWS_UNREACHABLE,
-      `signer backend "${backend}" cannot sign EIP-712 typed data, which the x402 exact scheme requires`,
+      `signer backend "${backend}" cannot sign EIP-712 typed data or a Solana transaction, which the x402 exact scheme requires`,
       { backend, capabilities: caps },
     );
   }

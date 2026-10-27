@@ -200,6 +200,31 @@ Every `local` signature prints a warning to stderr, for a reason worth being blu
 
 `local` needs the optional peer dependency `ethers` for secp256k1 and the EIP-712 encoding (`npm i ethers`). A default install of this CLI therefore carries **no signing code at all** — which is the point.
 
+## `solana-env`, Solana, development and CI only
+
+Pays on Solana (`--chain solana`, or `defaults.chain`). It reads one ed25519 key from the environment variable `X402_SOLANA_PRIVATE_KEY`, as base58 of the 64-byte secret key (what Phantom exports) or the JSON byte array `solana-keygen` writes. The public half is checked against the seed, so a mismatched or truncated key fails before anything is signed.
+
+```bash
+export X402_SOLANA_PRIVATE_KEY='…'        # a throwaway key; see below
+rh-x402 call <url> --chain solana --signer solana-env --max 0.05
+```
+
+```json
+"backends": { "solana-env": { "keyEnv": "X402_SOLANA_PRIVATE_KEY" } }
+```
+
+**This is the weakest custody the CLI offers, and it is here because the operator asked for it.** An environment variable is readable by every process that inherits it and by anyone who can read `/proc/<pid>/environ`, and it ends up in shell history, CI logs and crash dumps. It is a deliberate exception to the rule that keys never appear in env vars ([`spec-deviations.md`](spec-deviations.md) §15). It warns on stderr at every signature, has no policy layer, and should hold a balance you can afford to lose. Prefer an `exec` backend that reads from a KMS or a hardware wallet for anything else.
+
+Solana differs from Base in ways that matter:
+
+- **The payment is a transaction.** The CLI builds a version 0 transaction of exactly three instructions (compute unit limit, compute unit price, SPL `TransferChecked`), signs it as the payer, and sends it in the payload. The facilitator, named in the 402 as `extra.feePayer`, adds its own signature and submits it. The backend is given the serialized message and returns an ed25519 signature; nothing else.
+- **It is verified before it is sent.** The signed bytes are decoded again and checked against the quote: the mint, the amount, the decimals, the payer's own token account as source, the recipient's token account as destination, the fee payer, and a ceiling on the compute budget. A transaction that does not move exactly what was quoted is never released. See `core/svm.ts`.
+- **It needs one RPC call.** A transaction needs a recent blockhash, so a Solana payment reads one from `rpc.solana` (default `https://api.mainnet-beta.solana.com`; set your own, public endpoints rate-limit). It runs after every gate, so a call refused on price never reaches it. If it fails, nothing was signed.
+- **The recipient's token account must already exist.** The CLI does not create it, and the facilitator will reject the transaction if it is missing.
+- **It needs `@solana/web3.js`.** An optional peer dependency, like `ethers`: `npm i @roundhouseai/x402 @solana/web3.js`, or `npx -p @roundhouseai/x402 -p @solana/web3.js rh-x402 ...`. A default install carries no Solana code.
+- **Retries reuse the transaction for two minutes.** The facilitator can submit it until its blockhash expires, about a minute, so a retry inside that window reuses the cached transaction instead of building a second one that could also land. See [`idempotency.md`](idempotency.md).
+- **`wallet balance` and `wallet policy` are EVM only for now.** Fund the payer's USDC token account yourself; the payer needs no SOL, because the facilitator pays the fee.
+
 ## `exec` — any executable
 
 The escape hatch that keeps this genuinely wallet-agnostic: a hardware wallet bridge, an MPC service, a KMS wrapper or a bespoke corporate signer is one small executable away, in any language, with no change to the CLI.

@@ -2,7 +2,13 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { DEFAULT_CONFIG, loadConfig, mergeDeep, type X402Config } from '../src/core/config.js';
+import {
+  DEFAULT_CONFIG,
+  loadConfig,
+  mergeDeep,
+  type Json,
+  type X402Config,
+} from '../src/core/config.js';
 import { parseArgs } from '../src/core/args.js';
 import {
   collectStatus,
@@ -92,7 +98,7 @@ function deps(over: Partial<StatusDeps> & { config?: unknown } = {}): Partial<St
   const { config, ...rest } = over;
   return {
     loadConfig: () => ({ config: configWith(config ?? READY_CONFIG) }),
-    readRawConfig: () => ({}),
+    readRawConfig: () => (config ?? READY_CONFIG) as Json,
     resolveSigner: async () => signer(),
     readBalances: async () => balances('2', '2000000'),
     readRecords: () => [],
@@ -160,7 +166,9 @@ describe('collectStatus', () => {
     expect(s.signer.path).toBe('none');
     expect(s.signer.address).toBeNull();
     expect(s.balance.usdc).toBeNull();
-    expect(s.limits).toEqual({ maxPerCall: 'unset', dailyCap: 'unset' });
+    // Nothing written, so the shipped defaults apply and are reported as such.
+    expect(s.limits).toEqual({ maxPerCall: '1.00', dailyCap: '5.00' });
+    expect(s.limitsDefault).toEqual({ maxPerCall: true, dailyCap: true });
     expect(s.auth.apiKey).toBe('unset');
     // The sink is on by default; opting out is a config key or DO_NOT_TRACK.
     expect(s.telemetry.enabled).toBe(true);

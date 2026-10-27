@@ -19,7 +19,8 @@ src/
   version.ts             VERSION, read from package.json
   core/
     args.ts              flag table + parser (handles --data.<path>, aliases, --)
-    assets.ts            chain/asset tables, atomic ↔ decimal conversion
+    assets.ts            chain/asset tables (EVM and Solana), atomic ↔ decimal conversion
+    base58.ts            base58 and Solana address checks, no dependency
     authcache.ts         signed-authorization cache (the double-payment defence)
     config.ts            config layering, env: indirection, dotted get/set
     data.ts              dot-path flags, --json, stdin, coercion, query flattening
@@ -40,7 +41,9 @@ src/
     signers/owscore.ts   in-process OWS, via the @open-wallet-standard/core bindings
     signers/local.ts     encrypted-keystore backend (development and CI only)
     signers/exec.ts      external signer protocol, JSON over stdio
+    signers/solanaenv.ts Solana key from an env var (development and CI only, see deviation 15)
     stdin.ts             non-blocking stdin detection
+    svm.ts               Solana payment: build, verify against the quote, blockhash RPC
     telemetry.ts         payload levels, redaction, remote sink + outbox
     x402.ts              402 payload parsing (compat shim) and option selection
   commands/              one file per command surface; thin over core/
@@ -69,15 +72,18 @@ Runtime state lives outside the repo, under `~/.x402/` (override with `X402_HOME
 
 These are not preferences. Breaking one is a breaking change to the product, and a PR that does it without saying so should be rejected.
 
-1. **No raw private keys.** There is no `--private-key`. Keys never appear in argv, env vars, or logs. Development keys live only in the `local` backend's encrypted keystore, which is read from a file, refuses a group- or world-readable one, and warns on stderr at every signature. `ethers` stays an _optional_ peer dependency, so a default install carries no signing code at all.
+1. **No raw private keys.** There is no `--private-key`. Keys never appear in argv, env vars, or logs. Development keys live only in the `local` backend's encrypted keystore, which is read from a file, refuses a group- or world-readable one, and warns on stderr at every signature. `ethers` stays an _optional_ peer dependency, so a default install carries no signing code at all. **One recorded exception:** the `solana-env` backend reads a Solana key from an environment variable at the operator's request ([`docs/spec-deviations.md`](docs/spec-deviations.md) §15). It is development and CI only, warns at every signature, and must never quote, log or persist the value. Do not add a second env-var key path.
 2. **The engine never signs, and never sees a key.** All signing goes through a `SignerBackend` (`core/signer.ts`), which receives one EIP-712 payload and nothing else — no URL, no request body, no response body. A backend that declares it cannot sign typed data is rejected when the signer is resolved (exit 47), not mid-payment. If a backend denies, the call fails: no fallback signing path, and no automatic fallback to another backend.
 3. **Exit codes are a stability contract.** `src/core/errors.ts` may gain codes; it may never renumber or repurpose one. The same taxonomy is surfaced as `errorCode` on the HTTP and MCP surfaces.
 4. **Telemetry defaults to `hash`.** Plaintext payload capture (`full`) is opt-in per call. Auth-like headers (`Authorization`, `X-Api-Key`, `Cookie`, `X-PAYMENT`, …) are redacted at _every_ level; only their presence is recorded.
 5. **State files are 0600, state dirs 0700.** Use `writePrivate`/`appendPrivate`/`ensureDir` from `core/paths.ts`; never raw `writeFileSync` for anything under `~/.x402`.
 6. **The authorization cache is the double-payment defence.** Never sign without first checking it (unless `--no-cache`), and never widen its key so that a retry misses. See [`docs/idempotency.md`](docs/idempotency.md).
-7. **Gate order is fixed:** domain/payTo allowlist → `--max` → session `--budget` → daily cap → the backend's policy layer. First failure aborts, and CLI-side gates never make a network call before failing.
+7. **Gate order is fixed:** domain/payTo allowlist → `--max` → session `--budget` → daily cap → the backend's policy layer. First failure aborts, and CLI-side gates never make a network call before failing. Limits have defaults (1.00 per call, 5.00 per day) so an unset cap is never an unlimited one. A Solana payment makes one RPC call for a blockhash, after the gates and before signing.
+
+   A Solana transaction is verified against the quote after it is signed and before it is released (`core/svm.ts`): the mint, amount, decimals, source, destination, fee payer and compute budget. Addresses compare case-sensitively on Solana and case-insensitively on EVM, in the allowlist and in the authorization cache key.
+
 8. **This CLI never destroys a wallet.** `@open-wallet-standard/core` exposes `deleteWallet`, `exportWallet` and `renameWallet`; none is declared on `OwsCoreModule` and none may be referenced from `src/`, which `test/owssafety.test.ts` enforces. A wallet holds money, so "remove it from my tooling" must never mean "destroy it": `wallet forget` writes the name to `wallet.hidden` and leaves the vault alone. `exportWallet` is doubly banned — it would pull a secret out of OWS, which invariant 1 forbids.
-9. **Zero runtime dependencies.** The CLI ships with none, on purpose: it is a payments tool, and every dependency is supply-chain risk against a hot wallet. Adding one needs an issue and a maintainer's agreement first — Node 20+ built-ins cover HTTP, crypto and JSON-RPC.
+9. **Zero runtime dependencies.** The CLI ships with none, on purpose: it is a payments tool, and every dependency is supply-chain risk against a hot wallet. Adding one needs an issue and a maintainer's agreement first. `ethers`, `@open-wallet-standard/core` and `@solana/web3.js` are the optional peers, loaded on demand and absent from a default install, Node 20+ built-ins cover HTTP, crypto and JSON-RPC.
 
 ## Working here
 
@@ -85,7 +91,7 @@ These are not preferences. Breaking one is a breaking change to the product, and
 npm install
 npm run typecheck     # tsc --noEmit over src + test
 npm run lint          # oxlint + vendored anti-slop rules over src + test (needs Node 22)
-npm test              # vitest run (157 tests, no network)
+npm test              # vitest run (no network)
 npm run build         # tsc → dist/
 npm run format:check  # prettier
 node dist/cli.js --help
@@ -102,7 +108,7 @@ Tests never touch the network and never touch a real `~/.x402`: they stub `fetch
 
 - **A new command.** Add `src/commands/<name>.ts`, register it in `COMMANDS` in `core/args.ts` and in the `switch` in `cli.ts`, document it in the help text, `README.md` and `SKILL.md`. Commands parse flags and print; the logic belongs in `core/`.
 - **A new flag.** Add it to the `FLAGS` table in `core/args.ts` with the right kind, or the parser will mis-handle it (a `boolean` declared as `string` eats the next argument).
-- **A new chain or asset.** Extend `CHAINS`/`ASSETS` in `core/assets.ts`, including the EIP-712 domain name/version for the token contract. Nothing else should hard-code a chain id.
+- **A new chain or asset.** Extend `CHAINS`/`ASSETS` in `core/assets.ts`, including the EIP-712 domain name/version for the token contract on EVM. Read the decimals and mint or contract address from the chain itself (an RPC call), never from memory or a doc: a wrong address here prices a payment on the provider's word. Nothing else should hard-code a chain id.
 - **A new signer backend.** Implement `SignerBackend` in `core/signers/<name>.ts`, register it in `BUILTIN_BACKENDS` and the `construct` switch in `core/signers/index.ts`, and document it in `docs/signers.md`. Declare capabilities honestly and map failures onto 42/46/47 — that mapping is what agents act on. Out-of-tree backends need no changes here: they publish as `x402-signer-<name>` exporting `createSigner({ config, wallet })`.
 - **A provider whose 402 payload does not parse.** Add the key alias to the `A_*` lists in `core/x402.ts` and a case to `test/x402.test.ts`. File the provider under the `provider-compat` issue form so the shim stays evidence-driven.
 - **A new gate.** Put it in `core/gates.ts` in the documented order, give it an exit code, and add it to `docs/exit-codes.md`.

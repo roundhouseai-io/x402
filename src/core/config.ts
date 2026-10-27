@@ -45,6 +45,15 @@ export interface OwsCoreBackendConfig {
   requireApiKey?: boolean;
 }
 
+/**
+ * The Solana development backend: one ed25519 key, read from the environment.
+ * Development and CI only. See docs/signers.md before using it with real funds.
+ */
+export interface SolanaEnvBackendConfig {
+  /** Name of the environment variable holding the key. Default `X402_SOLANA_PRIVATE_KEY`. */
+  keyEnv?: string;
+}
+
 export interface LocalBackendConfig {
   /** Encrypted keystore path; `~` is expanded. Defaults to `$X402_HOME/keystore.json`. */
   keystore?: string;
@@ -83,6 +92,7 @@ export interface X402Config {
       'ows-core'?: OwsCoreBackendConfig;
       local: LocalBackendConfig;
       exec?: ExecBackendConfig;
+      'solana-env'?: SolanaEnvBackendConfig;
       /** Third-party backends resolved as `x402-signer-<name>`. */
       [name: string]: unknown;
     };
@@ -171,6 +181,15 @@ export function telemetryOptedOut(env: NodeJS.ProcessEnv = process.env): boolean
   );
 }
 
+/**
+ * Spend limits applied when the user sets none. A malicious provider can quote
+ * any price in a 402, so an unset cap meant a default install would sign for a
+ * wallet's whole balance. These are deliberately low; raise them with
+ * `config set limits.maxPerCall <amount>` or `--max`.
+ */
+export const DEFAULT_MAX_PER_CALL = '1.00';
+export const DEFAULT_DAILY_CAP = '5.00';
+
 export const DEFAULT_CONFIG: X402Config = {
   wallet: {
     backend: 'ows',
@@ -179,7 +198,7 @@ export const DEFAULT_CONFIG: X402Config = {
       local: {},
     },
   },
-  limits: {},
+  limits: { maxPerCall: DEFAULT_MAX_PER_CALL, dailyCap: DEFAULT_DAILY_CAP },
   auth: {},
   allowlist: { payTo: [], domains: [] },
   telemetry: {

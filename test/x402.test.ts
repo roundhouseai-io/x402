@@ -371,3 +371,29 @@ describe('decodeQuote', () => {
     }
   });
 });
+
+describe('how long a provider may ask an authorization to live', () => {
+  const quote = (maxTimeoutSeconds: unknown) => ({
+    scheme: 'exact',
+    network: 'base',
+    maxAmountRequired: '1000',
+    payTo: '0x1831f336585a6C67B6A954d28f3E07F44C4EEBbd',
+    asset: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913',
+    maxTimeoutSeconds,
+  });
+  const timeoutOf = (value: unknown) =>
+    parsePaymentRequired({ x402Version: 1, accepts: [quote(value)] }).options[0]!.maxTimeoutSeconds;
+
+  it('keeps a normal timeout as quoted', () => {
+    expect(timeoutOf(300)).toBe(300);
+  });
+
+  it('caps a timeout that would leave a signature spendable for days', () => {
+    expect(timeoutOf(31_536_000)).toBe(600);
+  });
+
+  it('falls back to 60 seconds for nonsense', () => {
+    expect(timeoutOf(-5)).toBe(60);
+    expect(timeoutOf('soon')).toBe(60);
+  });
+});

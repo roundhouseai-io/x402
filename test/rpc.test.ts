@@ -131,7 +131,8 @@ describe('reading balances from the chain', () => {
   });
 
   it('refuses an unknown chain and a non-address', async () => {
-    await expect(readBalances(ADDRESS, 'solana')).rejects.toThrow(/unknown chain "solana"/);
+    await expect(readBalances(ADDRESS, 'polygon')).rejects.toThrow(/unknown chain "polygon"/);
+    await expect(readBalances(ADDRESS, 'solana')).rejects.toThrow(/EVM-only/);
     await expect(readBalances('not-an-address', 'base')).rejects.toThrow(/not an EVM address/);
   });
 
@@ -158,9 +159,12 @@ describe('the chain table these balances come from', () => {
   it('carries the on-chain EIP-712 domain for each USDC, read from the contract', () => {
     // name() "USD Coin" and version() "2" were read from both contracts; a
     // wrong domain produces a signature no facilitator will settle.
-    expect(findAsset('usdc', 1)?.eip712).toEqual({ name: 'USD Coin', version: '2' });
-    expect(findAsset('usdc', 8453)?.eip712).toEqual({ name: 'USD Coin', version: '2' });
-    expect(findAsset('usdc', 1)?.decimals).toBe(6);
+    expect(findAsset('usdc', findChain('1'))?.eip712).toEqual({ name: 'USD Coin', version: '2' });
+    expect(findAsset('usdc', findChain('8453'))?.eip712).toEqual({
+      name: 'USD Coin',
+      version: '2',
+    });
+    expect(findAsset('usdc', findChain('1'))?.decimals).toBe(6);
   });
 
   it('gives every chain a native symbol and a default endpoint', () => {

@@ -68,6 +68,8 @@ export interface Status {
   };
   balance: { usdc: string | null; chain: string; error?: string };
   limits: { maxPerCall: string; dailyCap: string };
+  /** Which limits are the shipped defaults, because the operator set none. */
+  limitsDefault: { maxPerCall: boolean; dailyCap: boolean };
   auth: {
     apiKey: 'set' | 'unset';
     /** Where a set key comes from. Never the value itself. */
@@ -224,6 +226,12 @@ export async function collectStatus(opts: StatusOptions = {}): Promise<Status> {
 
   const maxPerCall = amountOf(effective.limits.maxPerCall);
   const dailyCap = amountOf(effective.limits.dailyCap);
+  // The shipped defaults always fill both caps, so "has the operator chosen
+  // one" has to come from what they wrote, not from the merged config.
+  const written = getPath(deps.readRawConfig(), 'limits');
+  const wrote = (key: string): boolean =>
+    typeof written === 'object' && written !== null && getPath(written as Json, key) !== undefined;
+  const limitsDefault = { maxPerCall: !wrote('maxPerCall'), dailyCap: !wrote('dailyCap') };
 
   const keyEnvironment = deps.env[API_KEY_ENV];
   const apiKeyValue = getPath(effective, 'auth.apiKey');
@@ -247,7 +255,7 @@ export async function collectStatus(opts: StatusOptions = {}): Promise<Status> {
   const facts: StepFacts = {
     nodeOk,
     signerReady,
-    capsSet: maxPerCall !== 'unset' && dailyCap !== 'unset',
+    capsSet: !limitsDefault.maxPerCall && !limitsDefault.dailyCap,
     funded,
     everPaid,
     firstPaymentDone:
@@ -265,6 +273,7 @@ export async function collectStatus(opts: StatusOptions = {}): Promise<Status> {
       ...(balance.error ? { error: balance.error } : {}),
     },
     limits: { maxPerCall, dailyCap },
+    limitsDefault,
     auth: {
       apiKey: apiKeySet ? 'set' : 'unset',
       ...(apiKeySet ? { source: keyRef ? ('env' as const) : ('config' as const) } : {}),

@@ -259,7 +259,10 @@ export function createServeServer(deps: ServeDeps): Server {
             try {
               const resolved = await deps.engine.signerFor();
               const caps = await resolved.capabilities();
-              return { ok: caps.typedData, detail: `${backend}: typedData=${caps.typedData}` };
+              return {
+                ok: caps.typedData || caps.svm === true,
+                detail: `${backend}: typedData=${caps.typedData} svm=${caps.svm === true}`,
+              };
             } catch (err) {
               return { ok: false, detail: messageOf(err) };
             }

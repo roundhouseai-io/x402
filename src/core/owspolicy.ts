@@ -1,5 +1,5 @@
 import { X402Error, ExitCode } from './errors.js';
-import { CHAINS, ASSETS, caip2, findChain } from './assets.js';
+import { CHAINS, ASSETS, findChain } from './assets.js';
 import { loadOwsCore, type OwsCoreModule } from './signers/owscore.js';
 
 /**
@@ -76,11 +76,19 @@ export function buildX402Policy(input: PolicyInput): OwsPolicy {
     throw new X402Error(ExitCode.GENERIC, 'a policy needs at least one chain');
   }
 
-  const ids = chains.map((c) => c.chainId);
+  const svm = chains.find((c) => c.family === 'svm');
+  if (svm) {
+    throw new X402Error(
+      ExitCode.GENERIC,
+      `${svm.network} is not an EVM chain: an OWS policy here constrains EIP-3009 authorizations, ` +
+        'and nothing in this CLI writes one for a Solana transaction.',
+    );
+  }
+  const ids = chains.map((c) => c.caip2);
   // Only the assets this CLI can actually build an authorization for. A
   // contract missing here would be refused by OWS at signing time, which is
   // the right way round: the allowlist is the narrow thing.
-  const contracts = ASSETS.filter((a) => ids.includes(a.chainId)).map((a) => a.address);
+  const contracts = ASSETS.filter((a) => ids.includes(a.caip2)).map((a) => a.address);
   if (contracts.length === 0) {
     throw new X402Error(
       ExitCode.GENERIC,
@@ -89,7 +97,7 @@ export function buildX402Policy(input: PolicyInput): OwsPolicy {
   }
 
   const rules: OwsPolicyRule[] = [
-    { type: 'allowed_chains', chain_ids: ids.map(caip2) },
+    { type: 'allowed_chains', chain_ids: ids },
     { type: 'allowed_typed_data_contracts', contracts },
   ];
   if (input.expiresAt) rules.push({ type: 'expires_at', timestamp: input.expiresAt });

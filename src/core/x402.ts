@@ -426,6 +426,8 @@ export interface SelectOptions {
   preferChain?: string;
   /** Schemes this build can settle. */
   schemes?: string[];
+  /** Force one scheme (`--scheme`). Absent means upto where offered, else exact. */
+  scheme?: string | undefined;
 }
 
 /**
@@ -433,8 +435,11 @@ export interface SelectOptions {
  * Ties break on the provider's own ordering, which keeps selection deterministic.
  */
 export function selectOption(required: PaymentRequired, opts: SelectOptions = {}): PaymentOption {
-  const schemes = opts.schemes ?? ['exact'];
-  let pool = required.options.filter((o) => schemes.includes(o.scheme));
+  const schemes = opts.scheme ? [opts.scheme] : (opts.schemes ?? ['exact', 'upto']);
+  // `upto` exists only in the v2 payload shape; a v1 quote cannot carry it.
+  let pool = required.options.filter(
+    (o) => schemes.includes(o.scheme) && (o.scheme !== 'upto' || required.x402Version >= 2),
+  );
   if (pool.length === 0) {
     throw new X402Error(
       ExitCode.INVALID_402,
@@ -457,8 +462,14 @@ export function selectOption(required: PaymentRequired, opts: SelectOptions = {}
   }
 
   const preferred = findChain(opts.preferChain)?.caip2;
+  // `upto` first: its amount is a ceiling the provider settles under, where an
+  // `exact` amount is taken whole. Within a scheme, the cheapest quote wins.
+  const rank = (o: PaymentOption) => (o.scheme === 'upto' ? 0 : 1);
   const cheapest = (list: PaymentOption[]) =>
-    list.reduce((best, o) => (o.amountAtomic < best.amountAtomic ? o : best), list[0]!);
+    list.reduce((best, o) => {
+      if (rank(o) !== rank(best)) return rank(o) < rank(best) ? o : best;
+      return o.amountAtomic < best.amountAtomic ? o : best;
+    }, list[0]!);
 
   if (preferred !== undefined) {
     const onPreferred = pool.filter((o) => o.chain === preferred);

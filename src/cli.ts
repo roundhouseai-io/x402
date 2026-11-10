@@ -88,6 +88,7 @@ wallet setup
   --key-file <path>                   for --path import; a 0600 file, never argv
   --policy / --no-policy              register an OWS policy and mint its key
   --chain <name>                      chains the policy allows (repeatable)
+  --allow-permit2                     also let the policy sign Permit2 (the upto scheme)
   --expires <30d|12h|ISO>             policy and key expiry
 
 balances
@@ -117,6 +118,7 @@ payment
       --max <amount>                  refuse if the quoted price exceeds this
       --budget <amount>               cumulative cap for this process
       --chain <name>                  acceptable chain (default base)
+      --scheme <exact|upto>           force a payment scheme (default: upto when offered)
       --dry-run                       show what would be paid; do not sign
       --no-cache                      force a fresh authorization
       --receipt-out <file>            write the payment receipt JSON

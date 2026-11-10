@@ -76,6 +76,11 @@ async function rpcCall(url: string, method: string, params: unknown[]): Promise<
   return body.result;
 }
 
+/** A read-only `eth_call`, returning the raw hex result. */
+export async function ethCall(url: string, to: string, data: string): Promise<string> {
+  return rpcCall(url, 'eth_call', [{ to, data }, 'latest']);
+}
+
 /** Hex quantity → bigint. An empty result means the call reverted or hit nothing. */
 function toBigInt(hex: string, what: string): bigint {
   if (!/^0x[0-9a-fA-F]*$/.test(hex) || hex === '0x') {

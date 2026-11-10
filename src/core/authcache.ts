@@ -2,7 +2,7 @@ import { readdirSync, readFileSync, existsSync, unlinkSync } from 'node:fs';
 import { join } from 'node:path';
 import { paths, ensureDir, writePrivate } from './paths.js';
 import { sha256 } from './ids.js';
-import type { TypedData } from './eip3009.js';
+import type { TypedDataDocument } from './eip3009.js';
 
 /**
  * Cached signed authorization.
@@ -30,7 +30,7 @@ export interface AuthCacheEntry {
   /** The payer. Absent on entries written before Solana support; read it from `typedData` then. */
   from?: string;
   /** The EIP-3009 document that was signed. EVM only. */
-  typedData?: TypedData;
+  typedData?: TypedDataDocument;
   /** Protocol version the cached payload was built for. */
   x402Version: number;
   /** Lowercase header the payload travels in: `x-payment` or `payment-signature`. */
@@ -51,6 +51,8 @@ export interface AuthKeyInput {
   backend: string;
   /** Protocol version: a v1 payload is not usable against a v2 provider. */
   x402Version: number;
+  /** An `exact` authorization is not an answer to an `upto` quote for the same amount. */
+  scheme?: string;
   /**
    * Chain family. Case is folded only on EVM, where it is a checksum detail: a
    * Solana address is case-sensitive, so folding it would let an authorization
@@ -72,6 +74,8 @@ export function authKey(input: AuthKeyInput): string {
       input.backend,
       input.wallet,
       `v${String(input.x402Version)}`,
+      // Left off for exact so entries cached before upto existed still hit.
+      ...(input.scheme && input.scheme !== 'exact' ? [input.scheme] : []),
     ].join('|'),
   );
 }

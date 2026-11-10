@@ -2,7 +2,7 @@ import { createPrivateKey, createPublicKey, sign as signBytes, type KeyObject } 
 import { X402Error, ExitCode } from '../errors.js';
 import { decodeBase58, encodeBase58 } from '../base58.js';
 import type { SolanaEnvBackendConfig } from '../config.js';
-import type { TypedData } from '../eip3009.js';
+import type { TypedDataDocument } from '../eip3009.js';
 import type { SignerAccount, SignerBackend, SignerCapabilities } from '../signer.js';
 
 export const SOLANA_KEY_ENV = 'X402_SOLANA_PRIVATE_KEY';
@@ -127,7 +127,7 @@ export class SolanaEnvSigner implements SignerBackend {
     return this.load().address;
   }
 
-  signTypedData(_typedData: TypedData): Promise<string> {
+  signTypedData(_typedData: TypedDataDocument): Promise<string> {
     return Promise.reject(
       new X402Error(
         ExitCode.OWS_UNREACHABLE,

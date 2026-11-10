@@ -609,6 +609,20 @@ See [`docs/configuration.md`](docs/configuration.md).
 
 ## Status
 
+### The `upto` scheme
+
+When a provider offers `upto` (a ceiling it settles under, used for metered work such as inference), the CLI pays it, and prefers it to `exact` when both are offered. Force one with `--scheme exact|upto`.
+
+```bash
+rh-x402 call https://ioi.md/v1/chat/completions \
+  --json '{"model":"deepseek/deepseek-v4.1-flash","messages":[{"role":"user","content":"hi"}],"max_tokens":64}' \
+  --max 0.01
+```
+
+- `--max` and the daily cap read the **ceiling**, the most the signature can move.
+- A wallet that has never approved Permit2 also signs a permit for the facilitator to submit, which needs two read-only RPC calls (`rpc.<chain>`). See [`docs/spec-deviations.md`](docs/spec-deviations.md) §16.
+- An OWS policy must allow Permit2: create it with `--allow-permit2` (`setup`, `wallet create --policy`, `wallet policy`). It is off by default because OWS cannot narrow it to one token.
+
 **v0.1, pre-release.** v1 targets Base + USDC, the `exact` scheme, CLI and `serve` HTTP. Five questions block v1 — the load-bearing one is whether OWS exposes EIP-712 typed-data signing at all. They are tracked as issues and summarised in [`docs/roadmap.md`](docs/roadmap.md).
 
 ## Docs

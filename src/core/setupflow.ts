@@ -51,6 +51,8 @@ export interface SetupFlags {
   keyFile?: string | undefined;
   keystore?: string | undefined;
   expires?: string | undefined;
+  /** Let the OWS policy sign Permit2 documents (the `upto` scheme). */
+  allowPermit2?: boolean | undefined;
   maxPerCall?: string | undefined;
   dailyCap?: string | undefined;
   telemetry?: string | undefined;
@@ -518,6 +520,7 @@ async function walletStep(
     ...(flags.keyFile ? { keyFile: flags.keyFile } : {}),
     ...(flags.keystore ? { keystore: flags.keystore } : {}),
     ...(flags.expires ? { expires: flags.expires } : {}),
+    ...(flags.allowPermit2 ? { allowPermit2: true } : {}),
     ...(flags.policy !== undefined ? { policy: flags.policy } : flags.yes ? { policy: true } : {}),
   };
 

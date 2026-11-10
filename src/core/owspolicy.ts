@@ -1,3 +1,4 @@
+import { PERMIT2_ADDRESS } from './permit2.js';
 import { X402Error, ExitCode } from './errors.js';
 import { CHAINS, ASSETS, findChain } from './assets.js';
 import { loadOwsCore, type OwsCoreModule } from './signers/owscore.js';
@@ -37,6 +38,12 @@ export interface PolicyInput {
   chains: string[];
   expiresAt?: string;
   now?: Date;
+  /**
+   * Also allow signing Permit2 documents, which the `upto` scheme needs. Off by
+   * default: it is a contract-level allowance that OWS cannot narrow to a token
+   * or a spender, so it is the wider grant and has to be asked for.
+   */
+  allowPermit2?: boolean;
 }
 
 /**
@@ -88,7 +95,11 @@ export function buildX402Policy(input: PolicyInput): OwsPolicy {
   // Only the assets this CLI can actually build an authorization for. A
   // contract missing here would be refused by OWS at signing time, which is
   // the right way round: the allowlist is the narrow thing.
-  const contracts = ASSETS.filter((a) => ids.includes(a.caip2)).map((a) => a.address);
+  const contracts = [
+    ...ASSETS.filter((a) => ids.includes(a.caip2)).map((a) => a.address),
+    // Permit2 only when asked for: see `allowPermit2`.
+    ...(input.allowPermit2 ? [PERMIT2_ADDRESS] : []),
+  ];
   if (contracts.length === 0) {
     throw new X402Error(
       ExitCode.GENERIC,
@@ -150,6 +161,8 @@ export interface GrantOptions {
   /** The vault passphrase; OWS needs it to bind the key to the wallet. */
   passphrase?: string;
   now?: Date;
+  /** Allow Permit2 signing, for the `upto` scheme. See PolicyInput. */
+  allowPermit2?: boolean;
 }
 
 /**
@@ -167,6 +180,7 @@ export async function grantPolicyKey(
     id,
     name: `x402 payer: ${opts.chains.join(', ')}`,
     chains: opts.chains,
+    ...(opts.allowPermit2 ? { allowPermit2: true } : {}),
     ...(opts.expires ? { expiresAt: resolveExpiry(opts.expires, opts.now) ?? '' } : {}),
     ...(opts.now ? { now: opts.now } : {}),
   });

@@ -1,6 +1,6 @@
 import { X402Error, ExitCode } from './errors.js';
 import { request, parseJsonBody } from './http.js';
-import type { TypedData } from './eip3009.js';
+import type { TypedDataDocument } from './eip3009.js';
 import type { SignerAccount, SignerBackend, SignerBalance, SignerCapabilities } from './signer.js';
 
 /**
@@ -192,7 +192,7 @@ export class OwsClient {
    * EIP-712 typed-data signature. This is the one OWS capability the whole tool
    * depends on; `signMessage` cannot substitute for it.
    */
-  async signTypedData(wallet: string, typedData: TypedData): Promise<string> {
+  async signTypedData(wallet: string, typedData: TypedDataDocument): Promise<string> {
     const body = await this.call(
       'POST',
       `/v1/wallets/${encodeURIComponent(wallet)}/sign-typed-data`,
@@ -270,7 +270,7 @@ export class OwsSigner implements SignerBackend {
     return (await this.client.getWallet(this.wallet)).address;
   }
 
-  async signTypedData(typedData: TypedData): Promise<string> {
+  async signTypedData(typedData: TypedDataDocument): Promise<string> {
     return this.client.signTypedData(this.wallet, typedData);
   }
 

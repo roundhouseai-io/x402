@@ -23,6 +23,7 @@ export const FLAGS: Record<string, { kind: FlagKind; alias?: string }> = {
   max: { kind: 'string' },
   budget: { kind: 'string' },
   chain: { kind: 'string' },
+  scheme: { kind: 'string' },
   'dry-run': { kind: 'boolean' },
   'receipt-out': { kind: 'string' },
   'no-cache': { kind: 'boolean' },
@@ -69,6 +70,7 @@ export const FLAGS: Record<string, { kind: FlagKind; alias?: string }> = {
   address: { kind: 'string' },
   policy: { kind: 'boolean' },
   'no-policy': { kind: 'boolean' },
+  'allow-permit2': { kind: 'boolean' },
   install: { kind: 'boolean' },
   'install-global': { kind: 'boolean' },
 

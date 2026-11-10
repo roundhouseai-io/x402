@@ -1,4 +1,4 @@
-import type { TypedData } from './eip3009.js';
+import type { TypedDataDocument } from './eip3009.js';
 
 /**
  * The signer-backend interface (spec §5.3).
@@ -53,7 +53,7 @@ export interface SignerBackend {
   capabilities(): Promise<SignerCapabilities>;
   getAccounts(): Promise<SignerAccount[]>;
   getAddress(chain?: string): Promise<string>;
-  signTypedData(typedData: TypedData): Promise<string>;
+  signTypedData(typedData: TypedDataDocument): Promise<string>;
   /**
    * Optional: present only when `capabilities().svm` is true. Receives the
    * serialized message of the transaction to pay with, and returns the 64-byte

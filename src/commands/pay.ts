@@ -54,6 +54,7 @@ export async function payCommand(parsed: ParsedArgs): Promise<number> {
       ? [str(parsed.flags, 'chain')!]
       : [ctx.config.defaults.chain],
     preferChain: ctx.config.defaults.chain,
+    scheme: str(parsed.flags, 'scheme'),
   });
 
   runGates({

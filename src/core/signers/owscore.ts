@@ -1,6 +1,6 @@
 import { X402Error, ExitCode, type ExitCodeValue } from '../errors.js';
 import { findChain } from '../assets.js';
-import type { TypedData } from '../eip3009.js';
+import type { TypedDataDocument } from '../eip3009.js';
 import type { SignerAccount, SignerBackend, SignerCapabilities } from '../signer.js';
 import type { OwsCoreBackendConfig } from '../config.js';
 
@@ -253,7 +253,7 @@ export class OwsCoreSigner implements SignerBackend {
     return evmAddressOf(wallet);
   }
 
-  async signTypedData(typedData: TypedData): Promise<string> {
+  async signTypedData(typedData: TypedDataDocument): Promise<string> {
     const ows = await this.load();
     const chain = owsChainName(String(typedData.domain.chainId ?? ''));
     // Resolved outside the try: this can refuse on its own terms, and its exit

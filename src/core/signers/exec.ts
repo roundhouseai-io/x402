@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { X402Error, ExitCode, type ExitCodeValue } from '../errors.js';
 import type { ExecBackendConfig } from '../config.js';
-import type { TypedData } from '../eip3009.js';
+import type { TypedDataDocument } from '../eip3009.js';
 import type { SignerAccount, SignerBackend, SignerBalance, SignerCapabilities } from '../signer.js';
 
 /**
@@ -185,7 +185,7 @@ export class ExecSigner implements SignerBackend {
     return address;
   }
 
-  async signTypedData(typedData: TypedData): Promise<string> {
+  async signTypedData(typedData: TypedDataDocument): Promise<string> {
     const result = await this.call('signTypedData', { typedData });
     const signature = result.signature;
     if (typeof signature !== 'string' || !/^0x[0-9a-fA-F]+$/.test(signature)) {

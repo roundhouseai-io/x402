@@ -21,6 +21,18 @@ export interface TypedData {
   };
 }
 
+/**
+ * Any EIP-712 document a signer backend can be asked to sign. `TypedData` is the
+ * EIP-3009 one; the `upto` scheme also signs a Permit2 witness transfer and an
+ * EIP-2612 permit (see permit2.ts). The domain has no `version` for Permit2.
+ */
+export interface TypedDataDocument {
+  types: Record<string, TypedDataField[]>;
+  primaryType: string;
+  domain: { name: string; version?: string; chainId: number; verifyingContract: string };
+  message: Record<string, unknown>;
+}
+
 export const TRANSFER_WITH_AUTHORIZATION_TYPES: Record<string, TypedDataField[]> = {
   EIP712Domain: [
     { name: 'name', type: 'string' },
@@ -111,7 +123,23 @@ export interface SvmSchemePayload {
   transaction: string;
 }
 
-export type SchemePayload = EvmSchemePayload | SvmSchemePayload;
+/** The Permit2 authorization an `upto` payload carries (see permit2.ts). */
+export interface UptoAuthorization {
+  from: string;
+  permitted: { token: string; amount: string };
+  spender: string;
+  nonce: string;
+  deadline: string;
+  witness: { to: string; facilitator: string; validAfter: string };
+}
+
+/** The EVM `upto` payload: a Permit2 witness signature and the authorization it covers. */
+export interface UptoSchemePayload {
+  signature: string;
+  permit2Authorization: UptoAuthorization;
+}
+
+export type SchemePayload = EvmSchemePayload | SvmSchemePayload | UptoSchemePayload;
 
 /** The v1 payload: the chosen option is described by `scheme` + `network`. */
 export interface PaymentPayloadV1<P extends SchemePayload = EvmSchemePayload> {

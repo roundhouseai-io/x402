@@ -20,7 +20,7 @@ import {
   type PaymentPayload,
   type PaymentPayloadContext,
   type SchemePayload,
-  type TypedData,
+  type TypedDataDocument,
 } from './eip3009.js';
 import { authKey, readAuth, writeAuth, pruneAuthCache, type AuthCacheEntry } from './authcache.js';
 import { runGates, SessionBudget } from './gates.js';
@@ -29,6 +29,14 @@ import { agentContext, summarizeHeaders, summarizePayload, TelemetrySink } from 
 import { resolveTarget, type Provider } from './discover.js';
 import { parseUnits, formatUnits, findChain } from './assets.js';
 import { rpcUrlFor } from './rpc.js';
+import {
+  EIP2612_GAS_SPONSORING_KEY,
+  buildEip2612Permit,
+  buildUptoPermit2,
+  readPermit2Allowance,
+  readPermitNonce,
+  type UptoSchemePayload,
+} from './permit2.js';
 import {
   attachPayerSignature,
   buildSvmTransaction,
@@ -39,6 +47,9 @@ import { ulid, tagged } from './ids.js';
 import type { PayloadLevel, X402Config } from './config.js';
 import type { SignerBackend, SignerFactory } from './signer.js';
 
+const isRecord = (v: unknown): v is Record<string, unknown> =>
+  typeof v === 'object' && v !== null && !Array.isArray(v);
+
 /** What signing a payment produces, whichever chain family it was for. */
 interface SignedPayment {
   /** The EIP-3009 nonce, or the blockhash a Solana transaction is bound to. */
@@ -46,7 +57,7 @@ interface SignedPayment {
   /** Unix seconds after which the signed payment cannot settle. */
   validBefore: number;
   signature: string;
-  typedData?: TypedData;
+  typedData?: TypedDataDocument;
   payload: PaymentPayload<SchemePayload>;
 }
 
@@ -61,6 +72,8 @@ export interface CallOptions {
   max?: string | undefined;
   /** Acceptable chains. Defaults to config `defaults.chain`. */
   chains?: string[] | undefined;
+  /** Force `exact` or `upto`. Absent: upto where the provider offers it. */
+  scheme?: string | undefined;
   dryRun?: boolean;
   noCache?: boolean;
   form?: boolean;
@@ -324,6 +337,7 @@ export class Engine {
     const selected = selectOption(requirements, {
       chains: opts.chains ?? [this.config.defaults.chain],
       preferChain: this.config.defaults.chain,
+      scheme: opts.scheme,
     });
     return {
       url: prepared.url,
@@ -425,6 +439,7 @@ export class Engine {
       option = selectOption(requirements, {
         chains: opts.chains ?? [this.config.defaults.chain],
         preferChain: this.config.defaults.chain,
+        scheme: opts.scheme,
       });
       // Before the gates, and well before signing: an authorization this build
       // cannot address correctly is money at risk on a call that cannot succeed.
@@ -678,6 +693,7 @@ export class Engine {
         // payload shape, different header), so the version is part of the
         // request identity rather than something a cache hit can paper over.
         x402Version: requirements.x402Version,
+        scheme: option.scheme,
       });
 
       if (!opts.noCache) {
@@ -695,7 +711,9 @@ export class Engine {
       const signed =
         option.family === 'svm'
           ? await this.signSvm(option, signer, from, context)
-          : await this.signEvm(option, signer, from, context);
+          : option.scheme === 'upto'
+            ? await this.signUpto(option, signer, from, context)
+            : await this.signEvm(option, signer, from, context);
       const entry: AuthCacheEntry = {
         key,
         url: prepared.url,
@@ -762,6 +780,70 @@ export class Engine {
       signature,
       typedData: built.typedData,
       payload: buildPaymentPayload(option, built.typedData, signature, context),
+    };
+  }
+
+  /**
+   * Sign an `upto` payment: a Permit2 witness transfer for the quoted ceiling.
+   *
+   * A wallet that has not yet approved Permit2 to move the token also signs an
+   * EIP-2612 permit for the facilitator to submit first, when the quote declares
+   * `eip2612GasSponsoring`. Deciding that needs two read-only RPC calls. If the
+   * allowance read fails the permit is signed anyway, as the reference client
+   * does: a redundant permit is harmless, a missing one is a failed payment. If
+   * the permit's own nonce read fails, nothing is signed.
+   */
+  private async signUpto(
+    option: PaymentOption,
+    signer: SignerBackend,
+    from: string,
+    context: PaymentPayloadContext,
+  ): Promise<SignedPayment> {
+    const nowSeconds = Math.floor(this.now() / 1000);
+    const built = buildUptoPermit2({ option, from, now: nowSeconds });
+    const signature = await signer.signTypedData(built.typedData);
+
+    let extensions = context.extensions;
+    const wantsPermit =
+      isRecord(context.extensions) && context.extensions[EIP2612_GAS_SPONSORING_KEY] !== undefined;
+    if (wantsPermit) {
+      const chain = findChain(option.chain);
+      const rpcUrl = chain ? rpcUrlFor(chain, this.config.rpc) : undefined;
+      if (!rpcUrl) {
+        throw new X402Error(ExitCode.INVALID_402, `no RPC endpoint for ${option.network}`);
+      }
+      let covered = false;
+      try {
+        covered = (await readPermit2Allowance(rpcUrl, option.asset, from)) >= option.amountAtomic;
+      } catch {
+        // Unknown allowance: fall through and sign the permit.
+      }
+      if (!covered) {
+        const nonce = await readPermitNonce(rpcUrl, option.asset, from);
+        const permit = buildEip2612Permit({
+          option,
+          from,
+          nonce,
+          deadline: built.authorization.deadline,
+        });
+        const permitSignature = await signer.signTypedData(permit.typedData);
+        extensions = {
+          ...context.extensions,
+          [EIP2612_GAS_SPONSORING_KEY]: { info: { ...permit.info, signature: permitSignature } },
+        };
+      }
+    }
+
+    const payload: UptoSchemePayload = {
+      signature,
+      permit2Authorization: built.authorization,
+    };
+    return {
+      nonce: built.authorization.nonce,
+      validBefore: Number(built.authorization.deadline),
+      signature,
+      typedData: built.typedData,
+      payload: wrapPaymentPayload(option, payload, { ...context, extensions }),
     };
   }
 
@@ -839,7 +921,7 @@ export class Engine {
       amount: option.amount,
       amountAtomic: option.amountAtomic.toString(),
       payTo: option.payTo,
-      from: auth.from ?? auth.typedData?.message.from ?? '',
+      from: auth.from ?? (auth.typedData?.message.from as string | undefined) ?? '',
       nonce: auth.nonce,
       validBefore: auth.validBefore,
       authHash: tagged(auth.signature),

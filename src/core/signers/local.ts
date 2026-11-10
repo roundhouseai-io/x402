@@ -1,16 +1,16 @@
 import { X402Error, ExitCode } from '../errors.js';
 import { decryptEntry, keystorePath, findEntry } from '../keystore.js';
 import type { LocalBackendConfig } from '../config.js';
-import type { TypedData } from '../eip3009.js';
+import type { TypedDataDocument } from '../eip3009.js';
 import type { SignerAccount, SignerBackend, SignerCapabilities } from '../signer.js';
 import { readKeystore } from '../keystore.js';
 
 interface EthersWallet {
   address: string;
   signTypedData(
-    domain: TypedData['domain'],
+    domain: TypedDataDocument['domain'],
     types: Record<string, unknown>,
-    message: TypedData['message'],
+    message: TypedDataDocument['message'],
   ): Promise<string>;
 }
 
@@ -99,7 +99,7 @@ export class LocalSigner implements SignerBackend {
     return findEntry(this.config.keystore, this.wallet).address;
   }
 
-  async signTypedData(typedData: TypedData): Promise<string> {
+  async signTypedData(typedData: TypedDataDocument): Promise<string> {
     const entry = findEntry(this.config.keystore, this.wallet);
     const key = decryptEntry(entry, passphraseFor(this.config));
     const { Wallet } = await loadEthers();

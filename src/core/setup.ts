@@ -42,6 +42,8 @@ export interface SetupOptions {
   policy?: boolean;
   chains?: string[];
   expires?: string;
+  /** Let the policy sign Permit2 documents, which the `upto` scheme needs. */
+  allowPermit2?: boolean;
 }
 
 export interface SetupResult {
@@ -341,6 +343,7 @@ async function maybeGrantPolicy(
     wallet,
     chains: opts.chains && opts.chains.length > 0 ? opts.chains : ['base'],
     ...(opts.expires ? { expires: opts.expires } : {}),
+    ...(opts.allowPermit2 ? { allowPermit2: true } : {}),
     ...(opts.vaultPath ? { vaultPath: opts.vaultPath } : {}),
     ...(passphrase ? { passphrase } : {}),
   });

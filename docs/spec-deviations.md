@@ -127,3 +127,13 @@ The scope is `@roundhouseai`, matching the `roundhouseai-io` GitHub org.
 **Implementation:** the `solana-env` backend reads one ed25519 key from `X402_SOLANA_PRIVATE_KEY` (or the variable named by `wallet.backends.solana-env.keyEnv`). It warns on stderr at every signature, never prints the key or quotes a malformed one, and is documented as development and CI only. The key is never read from argv and never written to config, the ledger or the authorization cache.
 
 **Why:** the operator asked for it. It is the weakest custody the CLI offers: an env var is inherited by child processes, readable from `/proc/<pid>/environ`, and easy to paste into a log. A hardware wallet or KMS behind the `exec` backend is the better answer for real funds, and a Solana backend on the encrypted keystore is open work.
+
+## 16. `upto` on EVM, and a payment that reads the chain
+
+**Spec:** the design is EIP-3009 `exact` throughout (§5.3: the engine hands a backend one EIP-712 payload), and `core/rpc.ts` says nothing in the payment path calls an RPC.
+
+**Implementation:** an `upto` quote is paid with a Permit2 `PermitWitnessTransferFrom` signature for the ceiling (`core/permit2.ts`), in the v2 envelope with `payload.permit2Authorization`. The backend signs a second typed-data document, an EIP-2612 `Permit` for Permit2, when the quote declares `eip2612GasSponsoring` and the wallet's Permit2 allowance is short. Two read-only `eth_call`s decide that (`allowance`, `nonces`) against `rpc.<chain>`. The OWS policy gains an opt-in `--allow-permit2`, because the typed-data contract rule cannot name a token or spender.
+
+**Why:** a provider that settles for real usage (token-metered inference) cannot be paid with `exact`, which takes the whole quote. Invariant 7 holds: the RPC reads happen after the gates, and a failed nonce read exits `1` with nothing sent. Amounts are not weakened: `--max` and the daily cap read the ceiling, the most the signature can move.
+
+**Cost of the deviation:** a payment can now fail on an unreachable RPC where `exact` could not. `--scheme exact` avoids it when the provider offers both. The ledger records the ceiling as the amount even when the provider settles less, so the daily cap errs high.

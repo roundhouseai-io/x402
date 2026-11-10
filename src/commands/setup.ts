@@ -37,6 +37,7 @@ function flagsFrom(parsed: ParsedArgs): SetupFlags {
     keyFile: str(parsed.flags, 'key-file'),
     keystore: str(parsed.flags, 'keystore'),
     expires: str(parsed.flags, 'expires'),
+    allowPermit2: bool(parsed.flags, 'allow-permit2'),
     maxPerCall: str(parsed.flags, 'max-per-call'),
     dailyCap: str(parsed.flags, 'daily-cap'),
     telemetry: str(parsed.flags, 'telemetry'),

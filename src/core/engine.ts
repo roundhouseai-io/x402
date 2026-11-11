@@ -22,13 +22,48 @@ import {
   type SchemePayload,
   type TypedDataDocument,
 } from './eip3009.js';
-import { authKey, readAuth, writeAuth, pruneAuthCache, type AuthCacheEntry } from './authcache.js';
+import {
+  authKey,
+  dropAuth,
+  readAuth,
+  writeAuth,
+  pruneAuthCache,
+  type AuthCacheEntry,
+} from './authcache.js';
 import { runGates, SessionBudget } from './gates.js';
 import { appendRecord, readRecords, spentToday, type LedgerRecord } from './ledger.js';
+import { decodePaymentHeader } from './eip3009.js';
 import { agentContext, summarizeHeaders, summarizePayload, TelemetrySink } from './telemetry.js';
 import { resolveTarget, type Provider } from './discover.js';
 import { parseUnits, formatUnits, findChain } from './assets.js';
 import { rpcUrlFor } from './rpc.js';
+import {
+  BATCH_SETTLEMENT_SCHEME,
+  buildChannelConfig,
+  channelSalt,
+  computeChannelId,
+  depositMethodOf,
+  depositPayload,
+  eip3009DepositDocument,
+  permit2DepositDocument,
+  afterRefund,
+  planChannelPayment,
+  refundPayload,
+  voucherDocument,
+  voucherPayload,
+  type ChannelPlan,
+} from './channel.js';
+import { AUTH_CAPTURE_SCHEME, buildAuthCapture } from './authcapture.js';
+import {
+  onChainReader,
+  prepareChannel,
+  recordChannelResponse,
+  recordSigned,
+  repairFromPaymentRequired,
+  slotFor,
+  type SentChannelPayload,
+} from './channelflow.js';
+import { deleteChannel, lockChannel, readChannel, writeChannel } from './channelstore.js';
 import {
   AMOUNT_TOO_LOW_HINT,
   isAmountTooLow,
@@ -80,8 +115,13 @@ export interface CallOptions {
   max?: string | undefined;
   /** Acceptable chains. Defaults to config `defaults.chain`. */
   chains?: string[] | undefined;
-  /** Force `exact` or `upto`. Absent: upto where the provider offers it. */
+  /**
+   * Force a scheme: `exact`, `upto`, `batch-settlement` or `auth-capture`. Absent: upto
+   * where the provider offers it, else exact. The last two are never chosen unless named.
+   */
   scheme?: string | undefined;
+  /** `--deposit`: how much to put in a new or topped-up channel, human decimal. */
+  deposit?: string | undefined;
   dryRun?: boolean;
   noCache?: boolean;
   form?: boolean;
@@ -380,8 +420,27 @@ export class Engine {
     };
   }
 
-  /** The whole loop: request, 402, gate, sign, retry, record. */
+  /**
+   * The whole loop: request, 402, gate, sign, retry, record.
+   *
+   * A payment channel is held for the length of the call: a voucher names a
+   * cumulative amount, so two calls signing from the same state would name the
+   * same number. The lock is taken after the gates pass and released here, on
+   * every way out.
+   */
   async call(opts: CallOptions): Promise<CallResult> {
+    const hold: { release?: () => void } = {};
+    try {
+      return await this.callWithHold(opts, hold);
+    } finally {
+      hold.release?.();
+    }
+  }
+
+  private async callWithHold(
+    opts: CallOptions,
+    hold: { release?: () => void },
+  ): Promise<CallResult> {
     const id = ulid(this.now());
     const startedAt = this.now();
     const level = this.payloadLevel(opts.payloadLevel);
@@ -491,8 +550,13 @@ export class Engine {
     record.payment.amount = option.amount;
 
     // 4. Gates, in order.
+    let plan: ChannelPlan | undefined;
     try {
-      this.gate(option, prepared.url, opts);
+      // A channel call is gated on what it moves: a deposit counts the deposit, a
+      // voucher counts the request against the per-call cap and nothing more.
+      plan =
+        option.scheme === BATCH_SETTLEMENT_SCHEME ? this.planFromStore(option, opts) : undefined;
+      this.gate(option, prepared.url, opts, plan);
     } catch (err) {
       record.payment.paid = false;
       record.payment.amount = '0';
@@ -505,6 +569,7 @@ export class Engine {
     }
 
     if (opts.dryRun) {
+      const dryWarnings = [...quoteWarnings(option), ...channelWarnings(plan, option)];
       record.payment.paid = false;
       record.payment.amount = '0';
       record.exitCode = ExitCode.OK;
@@ -516,18 +581,38 @@ export class Engine {
         status: 402,
         paid: false,
         paymentState: 'none',
-        amount: option.amount,
+        amount:
+          plan?.kind === 'deposit' ? formatUnits(plan.deposit, option.decimals) : option.amount,
         asset: option.assetSymbol,
         receiptId: id,
         url: prepared.url,
         requirements,
         selected: option,
-        ...(quoteWarnings(option).length > 0 ? { warnings: quoteWarnings(option) } : {}),
+        ...(dryWarnings.length > 0 ? { warnings: dryWarnings } : {}),
         provider: resolved.provider,
         capability: resolved.capability,
         dryRun: true,
         record,
       };
+    }
+
+    // The channel is held from here to the end of the call.
+    if (option.scheme === BATCH_SETTLEMENT_SCHEME) {
+      try {
+        const lockSigner = await this.deps.signer({ backend: opts.signer, wallet: opts.wallet });
+        hold.release = await lockChannel(
+          slotFor(option, lockSigner.wallet, lockSigner.backend, channelSalt(option)),
+        );
+      } catch (err) {
+        record.payment.paid = false;
+        record.payment.amount = '0';
+        record.exitCode = exitCodeOf(err);
+        record.error = messageOf(err);
+        record.response.status = 402;
+        record.response.latencyMs = this.now() - startedAt;
+        this.commit(record);
+        return { ...this.errorResult(record, err), requirements, selected: option };
+      }
     }
 
     // 5. Sign (or reuse a cached authorization).
@@ -559,42 +644,64 @@ export class Engine {
     // 6. Paid retry.
     // v1 sends `X-PAYMENT`; v2 sends `PAYMENT-SIGNATURE`. Providers on the
     // current index reject the wrong one outright.
-    const paidHeaders = { ...prepared.headers, [auth.headerName]: auth.header };
-    let second: HttpResponse;
-    try {
-      second = await request({ ...prepared, headers: paidHeaders, timeoutMs });
-    } catch (err) {
-      // The authorization may already be settled: log the receipt, exit 50, and
-      // keep the cache entry so a re-run reuses it instead of paying twice.
-      record.exitCode = ExitCode.PAID_NO_RESPONSE;
-      record.error = messageOf(err);
-      // The authorization left this process; assume it may have settled.
-      record.payment.state = 'submitted';
-      record.payment.paid = true;
-      record.payment.amount = option.amount;
-      record.response.paymentLatencyMs = paymentLatencyMs;
-      record.response.latencyMs = this.now() - startedAt;
-      this.commit(record);
-      const receipt = this.receipt(id, auth, option, null, undefined, 'submitted');
-      return {
-        ok: false,
-        status: null,
-        paid: true,
-        paymentState: 'submitted',
-        amount: option.amount,
-        asset: option.assetSymbol,
-        receiptId: id,
-        url: prepared.url,
-        requirements,
-        selected: option,
-        receipt,
-        provider: resolved.provider,
-        capability: resolved.capability,
-        cacheHit: record.payment.cacheHit,
-        record,
-        errorCode: ExitCode.PAID_NO_RESPONSE,
-        error: messageOf(err),
-      };
+    let second!: HttpResponse;
+    // A channel can be one voucher behind the receiver. If the receiver says so, and
+    // names a total inside what this client has signed, the state is repaired and the
+    // voucher re-signed once. The first attempt was refused, so nothing moved.
+    for (let attempt = 1; ; attempt++) {
+      const paidHeaders = { ...prepared.headers, [auth.headerName]: auth.header };
+      try {
+        second = await request({ ...prepared, headers: paidHeaders, timeoutMs });
+      } catch (err) {
+        // The authorization may already be settled: log the receipt, exit 50, and
+        // keep the cache entry so a re-run reuses it instead of paying twice.
+        record.exitCode = ExitCode.PAID_NO_RESPONSE;
+        record.error = messageOf(err);
+        // The authorization left this process; assume it may have settled.
+        const movedLabel = formatUnits(exposureOf(auth, option), option.decimals);
+        record.payment.state = 'submitted';
+        record.payment.paid = true;
+        record.payment.amount = movedLabel;
+        record.response.paymentLatencyMs = paymentLatencyMs;
+        record.response.latencyMs = this.now() - startedAt;
+        this.commit(record);
+        const receipt = this.receipt(id, auth, option, null, undefined, 'submitted');
+        return {
+          ok: false,
+          status: null,
+          paid: true,
+          paymentState: 'submitted',
+          amount: movedLabel,
+          asset: option.assetSymbol,
+          receiptId: id,
+          url: prepared.url,
+          requirements,
+          selected: option,
+          receipt,
+          provider: resolved.provider,
+          capability: resolved.capability,
+          cacheHit: record.payment.cacheHit,
+          record,
+          errorCode: ExitCode.PAID_NO_RESPONSE,
+          error: messageOf(err),
+        };
+      }
+      if (attempt === 1 && second.status === 402 && this.repairChannel(option, auth, second)) {
+        try {
+          auth = await this.authorize(option, prepared, { ...opts, noCache: true }, requirements);
+        } catch (err) {
+          record.payment.paid = false;
+          record.payment.amount = '0';
+          record.exitCode = exitCodeOf(err);
+          record.error = messageOf(err);
+          record.response.status = 402;
+          record.response.latencyMs = this.now() - startedAt;
+          this.commit(record);
+          return { ...this.errorResult(record, err), requirements, selected: option };
+        }
+        continue;
+      }
+      break;
     }
 
     // Headers first. A streamed response has sent them before the provider settles,
@@ -687,13 +794,54 @@ export class Engine {
     // signature is what the ledger and the daily cap should count. With no usable
     // figure the signed amount stands: counting less than may have moved would
     // quietly disarm the cap.
-    const settled = settledAtomic(settlement, option.amountAtomic);
-    const paidAtomic = settled ?? option.amountAtomic;
+    //
+    // A channel or a hold is different: a voucher draws on money already in escrow,
+    // and the receipt of a hold says nothing about what the receiver will capture.
+    // So a deposit counts as spent when it is sent, a voucher as nothing new, and a
+    // hold as its whole maximum.
+    const holdOrChannel =
+      option.scheme === BATCH_SETTLEMENT_SCHEME || option.scheme === AUTH_CAPTURE_SCHEME;
+    const settled = holdOrChannel ? undefined : settledAtomic(settlement, option.amountAtomic);
+    const sentChannel =
+      option.scheme === BATCH_SETTLEMENT_SCHEME ? decodeSent(auth, option) : undefined;
+    const channelOutcome = sentChannel
+      ? recordChannelResponse(
+          sentChannel.slot,
+          sentChannel.sent,
+          settlement,
+          httpOk,
+          new Date(this.now()).toISOString(),
+        )
+      : undefined;
+    // A voucher that was accepted is spent: replaying it for the next identical
+    // request would name a total the receiver has already moved past.
+    if (channelOutcome?.confirmed) dropAuth(auth.key);
+    const paidAtomic = channelOutcome ? channelOutcome.exposure : (settled ?? option.amountAtomic);
     const paidAmount = formatUnits(paidAtomic, option.decimals);
     record.payment.state = state;
     record.payment.paid = true;
     record.payment.amount = paidAmount;
     if (paidAtomic !== option.amountAtomic) record.payment.ceiling = option.amount;
+    if (sentChannel && channelOutcome) {
+      record.payment.channel = {
+        id: sentChannel.sent.channelId,
+        kind: sentChannel.sent.kind,
+        request: formatUnits(sentChannel.sent.request, option.decimals),
+        ...(channelOutcome.charged !== undefined
+          ? { charged: formatUnits(channelOutcome.charged, option.decimals) }
+          : {}),
+        ...(sentChannel.sent.deposit !== undefined
+          ? { deposit: formatUnits(sentChannel.sent.deposit, option.decimals) }
+          : {}),
+        ...(channelOutcome.record
+          ? { balance: formatUnits(BigInt(channelOutcome.record.balance), option.decimals) }
+          : {}),
+        ...(channelOutcome.record
+          ? { cumulative: formatUnits(BigInt(channelOutcome.record.charged), option.decimals) }
+          : {}),
+        confirmed: channelOutcome.confirmed,
+      };
+    }
     record.exitCode = httpOk ? ExitCode.OK : ExitCode.PAID_NO_RESPONSE;
     if (!httpOk) record.error = `paid, but upstream returned HTTP ${second.status}`;
     this.deps.budget?.record(paidAtomic);
@@ -724,7 +872,7 @@ export class Engine {
     };
   }
 
-  private gate(option: PaymentOption, url: string, opts: CallOptions): void {
+  private gate(option: PaymentOption, url: string, opts: CallOptions, plan?: ChannelPlan): void {
     const dailyCap = this.config.limits.dailyCap;
     let remainingDaily: bigint | undefined;
     if (dailyCap) {
@@ -740,7 +888,445 @@ export class Engine {
       maxPerCall: opts.max ?? this.config.limits.maxPerCall,
       remainingBudgetAtomic: this.deps.budget?.remaining(),
       remainingDailyAtomic: remainingDaily,
+      ...(plan ? { perCallAtomic: plan.perCallAtomic, exposureAtomic: plan.exposureAtomic } : {}),
     });
+  }
+
+  /**
+   * Ask a receiver to refund what is left in a channel.
+   *
+   * The receiver has to expose a URL that answers 402 with a batch-settlement
+   * option, which is how the reference client finds it. The refund request carries
+   * a voucher for the amount charged so far, which tells the receiver the payer
+   * agrees to that total, and an optional amount. Money comes back, so no cap
+   * applies; the domain and payTo allowlists still do.
+   */
+  async refundChannel(opts: {
+    target: string;
+    /** Atomic units are not asked for: a human decimal in the channel's asset. Absent: everything left. */
+    amount?: string | undefined;
+    method?: string | undefined;
+    wallet?: string | undefined;
+    signer?: string | undefined;
+    timeoutSeconds?: number | undefined;
+  }): Promise<RefundResult> {
+    const id = ulid(this.now());
+    const startedAt = this.now();
+    const level = this.payloadLevel(undefined);
+    const resolved = await resolveTarget(opts.target, this.config);
+    const prepared = prepareRequest(resolved.url, undefined, { method: opts.method });
+    const record = this.baseRecord({
+      id,
+      url: prepared.url,
+      method: prepared.method,
+      agent: agentContext(),
+      level,
+    });
+    const timeoutMs = (opts.timeoutSeconds ?? this.config.defaults.timeout) * 1000;
+    const fail = (err: unknown, extra: Partial<RefundResult> = {}): RefundResult => {
+      record.exitCode = exitCodeOf(err);
+      record.error = messageOf(err);
+      record.response.latencyMs = this.now() - startedAt;
+      this.commit(record);
+      return {
+        ok: false,
+        receiptId: id,
+        url: prepared.url,
+        errorCode: exitCodeOf(err),
+        error: messageOf(err),
+        ...extra,
+      };
+    };
+
+    let release: (() => void) | undefined;
+    try {
+      const first = await request({ ...prepared, timeoutMs });
+      if (first.status !== 402) {
+        throw new X402Error(
+          ExitCode.INVALID_402,
+          `the refund probe expected a 402 and got HTTP ${String(first.status)}`,
+        );
+      }
+      const requirements = parsePaymentRequired(
+        requirementsFromHeaders(first.headers) ?? parseJsonBody(first.body) ?? first.body,
+      );
+      assertSupportedVersion(requirements.x402Version);
+      const option = selectOption(requirements, {
+        chains: [this.config.defaults.chain],
+        preferChain: this.config.defaults.chain,
+        scheme: BATCH_SETTLEMENT_SCHEME,
+      });
+      record.payment.scheme = option.scheme;
+      record.payment.asset = option.assetSymbol;
+      record.payment.chain = option.chain;
+      record.payment.payTo = option.payTo;
+      // Allowlists only: nothing leaves the wallet in a refund.
+      runGates({
+        option,
+        url: prepared.url,
+        allowPayTo: this.config.allowlist.payTo,
+        allowDomains: this.config.allowlist.domains,
+        perCallAtomic: 0n,
+        exposureAtomic: 0n,
+      });
+
+      const signer = await this.deps.signer({ backend: opts.signer, wallet: opts.wallet });
+      const from = await signer.getAddress(option.chain);
+      const config = buildChannelConfig(option, from);
+      const channelId = computeChannelId(config, option.chainId);
+      const slot = slotFor(option, signer.wallet, signer.backend, config.salt);
+      release = await lockChannel(slot);
+      const chain = findChain(option.chain);
+      const rpcUrl = chain ? rpcUrlFor(chain, this.config.rpc) : undefined;
+      const rec = await prepareChannel({
+        slot,
+        config,
+        channelId,
+        option,
+        wallet: signer.wallet,
+        backend: signer.backend,
+        url: prepared.url,
+        nowSeconds: Math.floor(this.now() / 1000),
+        read: rpcUrl ? onChainReader(rpcUrl) : undefined,
+      });
+      if (!rec) {
+        throw new X402Error(
+          ExitCode.GENERIC,
+          'no channel is recorded for this receiver, so there is nothing to refund',
+        );
+      }
+      if (BigInt(rec.balance) <= BigInt(rec.charged)) {
+        throw new X402Error(
+          ExitCode.GENERIC,
+          `the channel has no balance left to refund (balance ${rec.balance}, charged ${rec.charged})`,
+        );
+      }
+      const refundAmount =
+        opts.amount === undefined ? undefined : parseUnits(opts.amount, option.decimals);
+      if (refundAmount !== undefined && refundAmount <= 0n) {
+        throw new X402Error(ExitCode.GENERIC, 'the refund amount must be positive');
+      }
+
+      // The voucher names the total already charged: the payer is agreeing to that
+      // total and no more, which is what lets the receiver release the rest.
+      const voucherDoc = voucherDocument(channelId, BigInt(rec.charged), option.chainId);
+      const signature = await signer.signTypedData(voucherDoc);
+      const payload = refundPayload(
+        config,
+        { channelId, maxClaimableAmount: rec.charged, signature },
+        refundAmount?.toString(),
+      );
+      const wire = wrapPaymentPayload(option, payload, {
+        x402Version: requirements.x402Version,
+        resource: requirements.resource,
+        extensions: requirements.extensions,
+      });
+      const res = await request({
+        ...prepared,
+        headers: {
+          ...prepared.headers,
+          [paymentHeaderName(requirements.x402Version)]: encodePaymentHeader(wire),
+        },
+        timeoutMs,
+      });
+      const settlement = settlementFromHeaders(res.headers);
+      record.response.status = res.status;
+      record.response.latencyMs = this.now() - startedAt;
+      if (res.status === 402 || settlement?.success !== true) {
+        const reason = providerRejection(res, settlement);
+        throw new X402Error(ExitCode.INVALID_402, `the refund was not accepted: ${reason}`);
+      }
+
+      const next = afterRefund(rec, refundAmount);
+      if (next === undefined) deleteChannel(slot);
+      else writeChannel({ ...rec, ...next, updatedAt: new Date(this.now()).toISOString() });
+      record.payment.state = 'settled';
+      record.payment.paid = false;
+      record.payment.amount = '0';
+      record.payment.channel = {
+        id: channelId,
+        kind: 'refund',
+        request: '0',
+        confirmed: true,
+        ...(refundAmount !== undefined
+          ? { deposit: formatUnits(refundAmount, option.decimals) }
+          : {}),
+      };
+      record.exitCode = ExitCode.OK;
+      this.commit(record);
+      void level;
+      return {
+        ok: true,
+        receiptId: id,
+        url: prepared.url,
+        channelId,
+        ...(refundAmount !== undefined
+          ? { refunded: formatUnits(refundAmount, option.decimals) }
+          : {}),
+        remaining:
+          next === undefined
+            ? '0'
+            : formatUnits(BigInt(next.balance) - BigInt(next.charged), option.decimals),
+        asset: option.assetSymbol,
+        ...(settlement ? { settlement } : {}),
+      };
+    } catch (err) {
+      return fail(err);
+    } finally {
+      release?.();
+    }
+  }
+
+  /** The per-call cap in atomic units, when one is set. */
+  private perCallCap(option: PaymentOption, opts: CallOptions): bigint | undefined {
+    const raw = opts.max ?? this.config.limits.maxPerCall;
+    if (raw === undefined || raw === '') return undefined;
+    return parseUnits(String(raw), option.decimals);
+  }
+
+  private depositFlag(option: PaymentOption, opts: CallOptions): bigint | undefined {
+    return opts.deposit === undefined || opts.deposit === ''
+      ? undefined
+      : parseUnits(opts.deposit, option.decimals);
+  }
+
+  /**
+   * The plan the gates see, from the channel as last recorded and before the
+   * signer is asked for an address. It is a first look: the real plan is made
+   * again, under the lock, when the payer's address is known.
+   */
+  private planFromStore(option: PaymentOption, opts: CallOptions): ChannelPlan {
+    const wallet = opts.wallet ?? this.deps.walletName ?? '';
+    const backend = opts.signer ?? this.deps.backendName ?? '';
+    const rec = readChannel(slotFor(option, wallet, backend, channelSalt(option)));
+    return planChannelPayment({
+      option,
+      state: rec,
+      depositFlag: this.depositFlag(option, opts),
+      capAtomic: this.perCallCap(option, opts),
+    });
+  }
+
+  /** After a 402 on a voucher: adopt the receiver's total if it is one this client can believe. */
+  private repairChannel(
+    option: PaymentOption,
+    auth: AuthCacheEntry,
+    second: HttpResponse,
+  ): boolean {
+    if (option.scheme !== BATCH_SETTLEMENT_SCHEME) return false;
+    const sent = decodeSent(auth, option);
+    if (!sent) return false;
+    const raw = requirementsFromHeaders(second.headers) ?? parseJsonBody(second.body);
+    return repairFromPaymentRequired(sent.slot, raw);
+  }
+
+  /**
+   * Sign a `batch-settlement` payment: a voucher on the open channel, or a deposit
+   * with a voucher when there is none or it would run out.
+   *
+   * What is signed is written to the channel record before it is returned, so a
+   * crash between signing and sending cannot lose the highest voucher or forget
+   * that a deposit is in flight.
+   */
+  private async signChannel(
+    option: PaymentOption,
+    signer: SignerBackend,
+    from: string,
+    context: PaymentPayloadContext,
+    url: string,
+    opts: CallOptions,
+  ): Promise<SignedPayment> {
+    const nowSeconds = Math.floor(this.now() / 1000);
+    const nowIso = new Date(this.now()).toISOString();
+    const config = buildChannelConfig(option, from);
+    const channelId = computeChannelId(config, option.chainId);
+    const slot = slotFor(option, signer.wallet, signer.backend, config.salt);
+    const chain = findChain(option.chain);
+    const rpcUrl = chain ? rpcUrlFor(chain, this.config.rpc) : undefined;
+
+    const rec = await prepareChannel({
+      slot,
+      config,
+      channelId,
+      option,
+      wallet: signer.wallet,
+      backend: signer.backend,
+      url,
+      nowSeconds,
+      read: rpcUrl ? onChainReader(rpcUrl) : undefined,
+    });
+    const plan = planChannelPayment({
+      option,
+      state: rec,
+      depositFlag: this.depositFlag(option, opts),
+      capAtomic: this.perCallCap(option, opts),
+    });
+    // The plan made under the lock is the one that counts. Gate it again: it can
+    // move more than the first look did.
+    this.gate(option, url, opts, plan);
+
+    const base = {
+      version: 1 as const,
+      slot,
+      channelId,
+      config,
+      network: option.network,
+      chain: option.chain,
+      wallet: signer.wallet,
+      backend: signer.backend,
+      url,
+      asset: option.asset,
+      assetSymbol: option.assetSymbol,
+      decimals: option.decimals,
+    };
+    const voucherDoc = voucherDocument(channelId, plan.maxClaimable, option.chainId);
+    const validBefore = nowSeconds + Math.max(1, option.maxTimeoutSeconds);
+
+    if (plan.kind === 'voucher') {
+      const signature = await signer.signTypedData(voucherDoc);
+      recordSigned(rec, base, { maxClaimable: plan.maxClaimable, signature }, undefined, nowIso);
+      const payload = voucherPayload(config, {
+        channelId,
+        maxClaimableAmount: plan.maxClaimable.toString(),
+        signature,
+      });
+      return {
+        nonce: channelId,
+        validBefore,
+        signature,
+        typedData: voucherDoc,
+        payload: wrapPaymentPayload(option, payload, context),
+      };
+    }
+
+    let authorization: Record<string, unknown>;
+    let until: number;
+    let extensions = context.extensions;
+    if (depositMethodOf(option) === 'eip3009') {
+      const dep = eip3009DepositDocument({
+        option,
+        payer: from,
+        config,
+        channelId,
+        amount: plan.deposit,
+        now: nowSeconds,
+      });
+      const depositSignature = await signer.signTypedData(dep.document);
+      until = dep.validBefore;
+      authorization = {
+        erc3009Authorization: {
+          validAfter: '0',
+          validBefore: String(dep.validBefore),
+          salt: dep.salt,
+          signature: depositSignature,
+        },
+      };
+    } else {
+      const dep = permit2DepositDocument({
+        option,
+        payer: from,
+        config,
+        channelId,
+        amount: plan.deposit,
+        now: nowSeconds,
+      });
+      const depositSignature = await signer.signTypedData(dep.document);
+      until = Number(dep.deadline);
+      authorization = {
+        permit2Authorization: {
+          from,
+          permitted: { token: option.asset, amount: plan.deposit.toString() },
+          spender: dep.document.message.spender,
+          nonce: dep.nonce,
+          deadline: dep.deadline,
+          witness: { channelId },
+          signature: depositSignature,
+        },
+      };
+      extensions = await this.sponsoredPermit(
+        option,
+        signer,
+        from,
+        context,
+        plan.deposit,
+        dep.deadline,
+      );
+    }
+    const signature = await signer.signTypedData(voucherDoc);
+    recordSigned(
+      rec,
+      base,
+      { maxClaimable: plan.maxClaimable, signature },
+      { amount: plan.deposit, until },
+      nowIso,
+    );
+    const payload = depositPayload(
+      config,
+      { channelId, maxClaimableAmount: plan.maxClaimable.toString(), signature },
+      plan.deposit,
+      authorization,
+    );
+    return {
+      nonce: channelId,
+      validBefore: until,
+      signature,
+      typedData: voucherDoc,
+      payload: wrapPaymentPayload(option, payload, { ...context, extensions }),
+    };
+  }
+
+  /** The EIP-2612 permit a Permit2 deposit needs when the wallet has not approved Permit2. */
+  private async sponsoredPermit(
+    option: PaymentOption,
+    signer: SignerBackend,
+    from: string,
+    context: PaymentPayloadContext,
+    amount: bigint,
+    deadline: string,
+  ): Promise<PaymentPayloadContext['extensions']> {
+    const wants =
+      isRecord(context.extensions) && context.extensions[EIP2612_GAS_SPONSORING_KEY] !== undefined;
+    if (!wants) return context.extensions;
+    const chain = findChain(option.chain);
+    const rpcUrl = chain ? rpcUrlFor(chain, this.config.rpc) : undefined;
+    if (!rpcUrl) throw new X402Error(ExitCode.INVALID_402, `no RPC endpoint for ${option.network}`);
+    let covered = false;
+    try {
+      covered = (await readPermit2Allowance(rpcUrl, option.asset, from)) >= amount;
+    } catch {
+      // Unknown allowance: sign the permit.
+    }
+    if (covered) return context.extensions;
+    const nonce = await readPermitNonce(rpcUrl, option.asset, from);
+    const permit = buildEip2612Permit({
+      option: { ...option, amountAtomic: amount },
+      from,
+      nonce,
+      deadline,
+    });
+    const permitSignature = await signer.signTypedData(permit.typedData);
+    return {
+      ...context.extensions,
+      [EIP2612_GAS_SPONSORING_KEY]: { info: { ...permit.info, signature: permitSignature } },
+    };
+  }
+
+  /** Sign an `auth-capture` hold: up to the quoted amount moves into escrow until captured or voided. */
+  private async signAuthCapture(
+    option: PaymentOption,
+    signer: SignerBackend,
+    from: string,
+    context: PaymentPayloadContext,
+  ): Promise<SignedPayment> {
+    const built = buildAuthCapture({ option, payer: from, now: Math.floor(this.now() / 1000) });
+    const signature = await signer.signTypedData(built.document);
+    return {
+      nonce: built.nonce,
+      validBefore: built.expiresAt,
+      signature,
+      typedData: built.document,
+      payload: wrapPaymentPayload(option, built.payload(signature), context),
+    };
   }
 
   /**
@@ -795,7 +1381,11 @@ export class Engine {
           ? await this.signSvm(option, signer, from, context)
           : option.scheme === 'upto'
             ? await this.signUpto(option, signer, from, context)
-            : await this.signEvm(option, signer, from, context);
+            : option.scheme === BATCH_SETTLEMENT_SCHEME
+              ? await this.signChannel(option, signer, from, context, prepared.url, opts)
+              : option.scheme === AUTH_CAPTURE_SCHEME
+                ? await this.signAuthCapture(option, signer, from, context)
+                : await this.signEvm(option, signer, from, context);
       const entry: AuthCacheEntry = {
         key,
         url: prepared.url,
@@ -1099,4 +1689,74 @@ export class Engine {
       ...(err instanceof X402Error && err.detail ? { detail: err.detail } : {}),
     };
   }
+}
+
+/** What a cached or fresh authorization put on the wire for a channel, and the slot it belongs to. */
+function decodeSent(
+  auth: AuthCacheEntry,
+  option: PaymentOption,
+): { slot: string; sent: SentChannelPayload } | undefined {
+  let body: Record<string, unknown>;
+  try {
+    // SAFETY: the header was produced by signChannel, whose payload is a plain object; a
+    // payload that is not one fails the field checks below and returns undefined.
+    body = decodePaymentHeader(auth.header).payload as unknown as Record<string, unknown>;
+  } catch {
+    return undefined;
+  }
+  const voucher = body.voucher as { channelId?: unknown; maxClaimableAmount?: unknown } | undefined;
+  const config = body.channelConfig as { salt?: unknown } | undefined;
+  if (typeof voucher?.channelId !== 'string' || typeof voucher.maxClaimableAmount !== 'string')
+    return undefined;
+  if (typeof config?.salt !== 'string') return undefined;
+  const isDeposit = body.type === 'deposit';
+  const dep = isDeposit ? (body.deposit as { amount?: unknown } | undefined) : undefined;
+  const deposit =
+    typeof dep?.amount === 'string' && /^\d+$/.test(dep.amount) ? BigInt(dep.amount) : undefined;
+  return {
+    slot: slotFor(option, auth.wallet, auth.backend, config.salt),
+    sent: {
+      kind: isDeposit ? 'deposit' : 'voucher',
+      channelId: voucher.channelId,
+      maxClaimable: BigInt(voucher.maxClaimableAmount),
+      deposit,
+      request: option.amountAtomic,
+      depositUntil: isDeposit ? auth.validBefore : undefined,
+    },
+  };
+}
+
+/** What a payment that left this process may have moved: a deposit for a channel, else the amount. */
+function exposureOf(auth: AuthCacheEntry, option: PaymentOption): bigint {
+  if (option.scheme !== BATCH_SETTLEMENT_SCHEME) return option.amountAtomic;
+  return decodeSent(auth, option)?.sent.deposit ?? 0n;
+}
+
+export interface RefundResult {
+  ok: boolean;
+  receiptId: string;
+  url: string;
+  channelId?: string;
+  /** Human decimal. Absent when the refund was for everything left. */
+  refunded?: string;
+  /** What is left refundable in the channel afterwards. */
+  remaining?: string;
+  asset?: string;
+  settlement?: SettlementResponse;
+  errorCode?: number;
+  error?: string;
+}
+
+/** What a dry run should say a channel call would do, since the quote alone understates it. */
+function channelWarnings(plan: ChannelPlan | undefined, option: PaymentOption): string[] {
+  if (!plan) return [];
+  if (plan.kind === 'deposit') {
+    return [
+      `this call would open or top up a payment channel: ${formatUnits(plan.deposit, option.decimals)} ${option.assetSymbol} moves into escrow now, ` +
+        `${option.amount} of it for this request, and the rest stays refundable (rh-x402 channel refund).`,
+    ];
+  }
+  return [
+    `this call would pay a voucher from the open channel: ${option.amount} ${option.assetSymbol} at most, no new money leaves the wallet.`,
+  ];
 }

@@ -41,6 +41,8 @@ export function flagsFrom(parsed: ParsedArgs): SetupFlags {
     // to be able to pay `upto` quotes, which sign a Permit2 document. Opt out with
     // --no-allow-permit2 (docs/spec-deviations.md §16).
     allowPermit2: !bool(parsed.flags, 'no-allow-permit2'),
+    // Off unless asked for: a channel deposits into escrow (docs/spec-deviations.md §17).
+    allowChannels: bool(parsed.flags, 'allow-channels'),
     maxPerCall: str(parsed.flags, 'max-per-call'),
     dailyCap: str(parsed.flags, 'daily-cap'),
     telemetry: str(parsed.flags, 'telemetry'),
@@ -111,7 +113,7 @@ export function realDeps(json: boolean): FlowDeps {
     },
     createWallet: (opts) => runSetup(opts),
     globalInstallWritable: () => globalRootWritable(),
-    mintPolicyKey: async ({ allowPermit2 }) => {
+    mintPolicyKey: async ({ allowPermit2, allowChannels }) => {
       const { config } = loadConfig();
       const wallet = config.wallet.default;
       if (!wallet)
@@ -121,6 +123,7 @@ export function realDeps(json: boolean): FlowDeps {
         wallet,
         chains: [config.defaults.chain],
         ...(allowPermit2 ? { allowPermit2: true } : {}),
+        ...(allowChannels ? { allowChannels: true } : {}),
         ...(core.vaultPath ? { vaultPath: core.vaultPath } : {}),
         ...(core.passphrase ? { passphrase: core.passphrase } : {}),
       });

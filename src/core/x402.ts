@@ -419,6 +419,17 @@ export function parsePaymentRequired(body: unknown): PaymentRequired {
   };
 }
 
+/** Schemes that need the v2 envelope. */
+const V2_ONLY_SCHEMES: ReadonlySet<string> = new Set(['upto', 'batch-settlement', 'auth-capture']);
+
+/**
+ * Schemes the CLI can pay but never picks on its own. `batch-settlement` opens a
+ * channel and deposits into escrow, and `auth-capture` places a hold, so either
+ * moves more money than the single request being asked for. They are used only
+ * when named with `--scheme`.
+ */
+export const OPT_IN_SCHEMES: ReadonlySet<string> = new Set(['batch-settlement', 'auth-capture']);
+
 export interface SelectOptions {
   /** Acceptable chains (names, aliases or CAIP-2). Empty means any supported. */
   chains?: string[];
@@ -436,14 +447,20 @@ export interface SelectOptions {
  */
 export function selectOption(required: PaymentRequired, opts: SelectOptions = {}): PaymentOption {
   const schemes = opts.scheme ? [opts.scheme] : (opts.schemes ?? ['exact', 'upto']);
-  // `upto` exists only in the v2 payload shape; a v1 quote cannot carry it.
+  // `upto` and the channel schemes exist only in the v2 payload shape; a v1 quote cannot carry them.
   let pool = required.options.filter(
-    (o) => schemes.includes(o.scheme) && (o.scheme !== 'upto' || required.x402Version >= 2),
+    (o) =>
+      schemes.includes(o.scheme) && (!V2_ONLY_SCHEMES.has(o.scheme) || required.x402Version >= 2),
   );
   if (pool.length === 0) {
+    const offered = [...new Set(required.options.map((o) => o.scheme))];
+    const optIn = offered.filter((s) => OPT_IN_SCHEMES.has(s));
     throw new X402Error(
       ExitCode.INVALID_402,
-      `no supported payment scheme (offered: ${[...new Set(required.options.map((o) => o.scheme))].join(', ')})`,
+      `no supported payment scheme (offered: ${offered.join(', ')})` +
+        (optIn.length > 0 && !opts.scheme
+          ? `. ${optIn.join(' and ')} ${optIn.length > 1 ? 'are' : 'is'} supported but opt-in: pass --scheme ${optIn[0]!} to allow it`
+          : ''),
     );
   }
 

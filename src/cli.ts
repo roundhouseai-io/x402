@@ -18,6 +18,7 @@ import { callCommand, probeCommand } from './commands/call.js';
 import { payCommand } from './commands/pay.js';
 import { verifyCommand } from './commands/verify.js';
 import { walletCommand } from './commands/wallet.js';
+import { channelCommand } from './commands/channel.js';
 import { historyCommand } from './commands/history.js';
 import { discoverCommand } from './commands/discover.js';
 import { configCommand } from './commands/config.js';
@@ -47,6 +48,8 @@ usage
                                          poll until funded; exits 48 on timeout
   rh-x402 wallet <list|address|forget>   wallet queries against the signer backend
   rh-x402 history [urlSubstring]         query the local ledger
+  rh-x402 channel list                   payment channels: what is in escrow
+  rh-x402 channel refund <url>           ask a receiver to refund the rest of a channel
   rh-x402 discover <capability> [--policy]
                                          providers for a capability, cheapest first;
                                          --policy keeps live, paid-by-someone, near-spot offers
@@ -89,6 +92,7 @@ wallet setup
   --policy / --no-policy              register an OWS policy and mint its key
   --chain <name>                      chains the policy allows (repeatable)
   --allow-permit2                     also let the policy sign Permit2 (the upto scheme); setup does this by default
+  --allow-channels                    also let the policy sign payment-channel vouchers (batch-settlement); opt-in
   --no-allow-permit2                  setup only: keep Permit2 out of the policy (exact-only wallet)
   --expires <30d|12h|ISO>             policy and key expiry
 
@@ -119,7 +123,8 @@ payment
       --max <amount>                  refuse if the quoted price exceeds this
       --budget <amount>               cumulative cap for this process
       --chain <name>                  acceptable chain (default base)
-      --scheme <exact|upto>           force a payment scheme (default: upto when offered)
+      --scheme <name>                 exact | upto | batch-settlement | auth-capture (default: upto when offered)
+      --deposit <amount>              batch-settlement: how much to put in a new channel (default 5 requests' worth)
       --dry-run                       show what would be paid; do not sign
       --no-cache                      force a fresh authorization
       --receipt-out <file>            write the payment receipt JSON
@@ -181,6 +186,8 @@ async function run(parsed: ParsedArgs): Promise<number> {
       return walletCommand(parsed);
     case 'history':
       return historyCommand(parsed);
+    case 'channel':
+      return channelCommand(parsed);
     case 'discover':
       return discoverCommand(parsed);
     case 'serve':

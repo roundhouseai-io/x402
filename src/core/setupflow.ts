@@ -53,6 +53,8 @@ export interface SetupFlags {
   expires?: string | undefined;
   /** Let the OWS policy sign Permit2 documents (the `upto` scheme). */
   allowPermit2?: boolean | undefined;
+  /** Let the OWS policy sign payment-channel vouchers (`batch-settlement`). Opt-in. */
+  allowChannels?: boolean | undefined;
   maxPerCall?: string | undefined;
   dailyCap?: string | undefined;
   telemetry?: string | undefined;
@@ -113,6 +115,7 @@ export interface FlowDeps {
    */
   mintPolicyKey(opts: {
     allowPermit2: boolean;
+    allowChannels?: boolean;
   }): Promise<{ id: string; keyId: string; token: string }>;
   waitForFunds(input: {
     address: string;
@@ -459,7 +462,10 @@ async function mintLostPolicyKey(flags: SetupFlags, deps: FlowDeps, status: Stat
   }
   let grant: { id: string; keyId: string; token: string };
   try {
-    grant = await deps.mintPolicyKey({ allowPermit2: flags.allowPermit2 === true });
+    grant = await deps.mintPolicyKey({
+      allowPermit2: flags.allowPermit2 === true,
+      ...(flags.allowChannels ? { allowChannels: true } : {}),
+    });
   } catch (err) {
     throw fail('create-wallet', exitCodeOf(err), messageOf(err));
   }
@@ -523,6 +529,7 @@ async function walletStep(
     ...(flags.keystore ? { keystore: flags.keystore } : {}),
     ...(flags.expires ? { expires: flags.expires } : {}),
     ...(flags.allowPermit2 ? { allowPermit2: true } : {}),
+    ...(flags.allowChannels ? { allowChannels: true } : {}),
     ...(flags.policy !== undefined ? { policy: flags.policy } : flags.yes ? { policy: true } : {}),
   };
 

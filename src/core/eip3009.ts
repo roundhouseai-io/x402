@@ -139,7 +139,14 @@ export interface UptoSchemePayload {
   permit2Authorization: UptoAuthorization;
 }
 
-export type SchemePayload = EvmSchemePayload | SvmSchemePayload | UptoSchemePayload;
+/**
+ * The payload of a channel or hold scheme (`batch-settlement`, `auth-capture`).
+ * Built by channel.ts and authcapture.ts, which own its shape.
+ */
+export type ChannelSchemePayload = Record<string, unknown>;
+
+export type SchemePayload =
+  EvmSchemePayload | SvmSchemePayload | UptoSchemePayload | ChannelSchemePayload;
 
 /** The v1 payload: the chosen option is described by `scheme` + `network`. */
 export interface PaymentPayloadV1<P extends SchemePayload = EvmSchemePayload> {

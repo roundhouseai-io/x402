@@ -1,5 +1,45 @@
 # @roundhouseai/x402
 
+## 0.7.0
+
+### Minor Changes
+
+- 42cc342: Spend limits are on by default: `limits.maxPerCall` is `1.00` and `limits.dailyCap` is `5.00` (USDC) when you set none.
+
+  Before this, a fresh install had no cap, so a provider could quote any price in a 402 and the CLI would sign for it. Now a quote above 1.00 USDC exits `44` and one that would take the day past 5.00 USDC exits `45`, both before anything is signed.
+
+  - Raise them with `config set limits.maxPerCall <amount>`, `config set limits.dailyCap <amount>`, or `--max` for a single call.
+  - `status` reports which limits are the defaults (`limitsDefault`), and `set-caps` / `setup` still ask the operator to choose caps until they have written their own.
+  - Anything that paid more than 1.00 USDC per call, or more than 5.00 a day, without a configured cap will now fail until a higher cap is set.
+
+- 67691dc: Pay on Solana, and refuse any Solana payment that does not do what the quote says.
+
+  - `--chain solana` (or `defaults.chain`) pays USDC on Solana mainnet or devnet, for both v1 and v2 quotes. The payment is a v0 transaction of a compute unit limit, a compute unit price and one SPL `TransferChecked`, signed as the payer. The facilitator named in `extra.feePayer` adds its signature and submits it.
+  - Before a Solana transaction leaves the process it is decoded again and checked against the quote: mint, amount, decimals, the payer's own token account as source, the recipient's token account as destination, the fee payer, no lookup tables, a genuine payer signature, and a ceiling on the compute budget. A transaction that moves no tokens, or the wrong amount, mint or recipient, exits `40` with nothing sent.
+  - New `solana-env` signer backend reads one key from `X402_SOLANA_PRIVATE_KEY` (base58 or a JSON byte array). Development and CI only: it warns on every signature and has no policy layer. This is a recorded exception to the rule that keys never appear in env vars (`docs/spec-deviations.md` §15).
+  - `@solana/web3.js` is a new optional peer dependency, loaded on demand. A default install is unchanged.
+  - A Solana payment reads one blockhash from `rpc.solana` after the gates pass. A failure there exits `1` with nothing signed.
+  - Solana addresses are compared case-sensitively in `allowlist.payTo` and in the authorization cache key. EVM comparison is unchanged.
+  - A provider can no longer ask for an EIP-3009 authorization that lives for more than 10 minutes (`maxTimeoutSeconds` is capped at 600).
+  - `wallet balance` and `wallet policy` are still EVM only and say so on a Solana chain.
+
+- 8f7cbda: Follow-ups to `upto` support, from a test of paying ioi.
+
+  - **The default `setup` policy is now wider.** `setup` and `setup --yes` create the OWS policy with Permit2 allowed, so the recommended setup can sign `upto`. OWS cannot narrow a contract-level rule to one token, spender or amount, so the wallet can now sign Permit2 documents for any token it has approved to Permit2. Chains and expiry stay bounded. Pass `--no-allow-permit2` to keep the old, narrower policy (an `exact`-only wallet). `wallet policy` and `wallet create --policy` are unchanged and still opt in with `--allow-permit2`. Existing wallets keep the policy they were made with: `upto` needs a new policy or `--scheme exact`.
+  - **The ledger and the daily cap count what was settled.** For `upto`, `amount` is what the provider's receipt reports, from `PAYMENT-RESPONSE` or from the final `x402_settlement` frame of a streamed response, and `ceiling` is what the signature allowed. With no usable figure the signed amount is counted, never less. Gates (`--max`, per-call cap, `--budget`, daily cap) still compare the ceiling.
+  - **New exit code 51, `settlement_failed`.** A provider that runs the request and then cannot settle answers 5xx with `error.code` `settlement_failed`. That is now `signed`, not paid, with the provider's message, instead of exit 50 ("paid, no response", whose advice is to re-run). Do not retry it unchanged. Exit codes are only appended.
+  - **`amount_too_low` is explained.** A payment rejected for it names the provider's code and message and the 0.001 USDC (1000 atomic unit) facilitator minimum. `probe` and `call --dry-run` add a `warnings` entry when a USDC quote is under that.
+  - **Provider `x-*` response headers** (price, venue, settlement transaction) are in the envelope under `response.headers`. Auth-like headers are never included.
+
+- f6e3239: Pay x402 `upto` quotes on EVM, alongside `exact`.
+
+  - `upto` signs a Permit2 witness transfer for the quoted ceiling, and the provider settles what the work actually cost. It is ported from the reference client in `@x402/evm` and checked against it in `test/upto.test.ts`. The spender is a constant (the x402 upto proxy), never read from the quote, so a quote cannot redirect the funds. The quote must carry `extra.facilitatorAddress`, or nothing is signed.
+  - A wallet that has not approved Permit2 for the token also signs an EIP-2612 permit for the facilitator to submit first, when the quote declares `eip2612GasSponsoring`. Deciding that reads `allowance` and the permit `nonces` over `rpc.<chain>` (two read-only `eth_call`s). If the allowance read fails the permit is still signed; if the nonce read fails nothing is signed. This is the one place an EVM payment calls an RPC (`docs/spec-deviations.md` §16).
+  - Selection prefers `upto` when a provider offers both schemes, since its amount is a ceiling the provider settles under and an `exact` amount is taken whole. `--scheme exact|upto` forces one. `upto` is never chosen from a v1 quote.
+  - `--max`, the per-call cap and the daily cap compare against the ceiling, so a call that settles for less still counts at the ceiling.
+  - OWS policies do not allow Permit2 by default, because OWS cannot narrow that to a token or spender. Pass `--allow-permit2` to `setup`, `wallet create --policy` or `wallet policy` to allow it. An existing policy without it makes OWS refuse the `upto` signature; use `--scheme exact` or recreate the policy.
+  - The authorization cache key now includes the scheme for `upto`. Existing `exact` entries still hit.
+
 ## 0.6.0
 
 ### Minor Changes

@@ -20,7 +20,7 @@ import { runSetupFlow, type FlowDeps, type SetupFlags, type StepEvent } from '..
 import { formatStatus } from './status.js';
 import { buildContext } from './context.js';
 
-function flagsFrom(parsed: ParsedArgs): SetupFlags {
+export function flagsFrom(parsed: ParsedArgs): SetupFlags {
   const minBalance = str(parsed.flags, 'min-balance') ?? DEFAULT_MIN_BALANCE;
   try {
     parseUnits(minBalance, 6);
@@ -37,7 +37,10 @@ function flagsFrom(parsed: ParsedArgs): SetupFlags {
     keyFile: str(parsed.flags, 'key-file'),
     keystore: str(parsed.flags, 'keystore'),
     expires: str(parsed.flags, 'expires'),
-    allowPermit2: bool(parsed.flags, 'allow-permit2'),
+    // On by default here, unlike `wallet policy`: the setup this CLI recommends has
+    // to be able to pay `upto` quotes, which sign a Permit2 document. Opt out with
+    // --no-allow-permit2 (docs/spec-deviations.md §16).
+    allowPermit2: !bool(parsed.flags, 'no-allow-permit2'),
     maxPerCall: str(parsed.flags, 'max-per-call'),
     dailyCap: str(parsed.flags, 'daily-cap'),
     telemetry: str(parsed.flags, 'telemetry'),
@@ -108,7 +111,7 @@ export function realDeps(json: boolean): FlowDeps {
     },
     createWallet: (opts) => runSetup(opts),
     globalInstallWritable: () => globalRootWritable(),
-    mintPolicyKey: async () => {
+    mintPolicyKey: async ({ allowPermit2 }) => {
       const { config } = loadConfig();
       const wallet = config.wallet.default;
       if (!wallet)
@@ -117,6 +120,7 @@ export function realDeps(json: boolean): FlowDeps {
       const grant = await grantPolicyKey({
         wallet,
         chains: [config.defaults.chain],
+        ...(allowPermit2 ? { allowPermit2: true } : {}),
         ...(core.vaultPath ? { vaultPath: core.vaultPath } : {}),
         ...(core.passphrase ? { passphrase: core.passphrase } : {}),
       });

@@ -25,6 +25,8 @@ export const ExitCode = {
   WAIT_TIMEOUT: 48,
   /** Payment sent, but no valid response returned. Receipt logged. */
   PAID_NO_RESPONSE: 50,
+  /** The provider ran the request but could not settle the payment. Nothing was paid. */
+  SETTLEMENT_FAILED: 51,
 } as const;
 
 export type ExitCodeValue = (typeof ExitCode)[keyof typeof ExitCode];
@@ -42,6 +44,7 @@ export const ExitCodeName: Record<number, string> = {
   47: 'ows_unavailable',
   48: 'wait_timeout',
   50: 'paid_no_response',
+  51: 'settlement_failed',
 };
 
 export interface ExitCodeRow {
@@ -119,6 +122,13 @@ export const EXIT_CODE_TABLE: readonly ExitCodeRow[] = [
     name: 'paid_no_response',
     meaning: 'The payment was sent and no valid response came back. Money may have moved.',
     next: 'Re-run the identical command. Never add --no-cache.',
+  },
+  {
+    code: 51,
+    name: 'settlement_failed',
+    meaning:
+      'The provider ran the request but could not settle the payment. Nothing was paid and no response came back.',
+    next: 'Do not retry unchanged. Read the message: for amount_too_low, raise max_tokens. Report it if it repeats.',
   },
 ];
 

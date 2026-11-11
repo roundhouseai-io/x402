@@ -323,6 +323,7 @@ export function statusForCode(code: number): number {
     case ExitCode.OWS_UNREACHABLE:
       return 503;
     case ExitCode.PAID_NO_RESPONSE:
+    case ExitCode.SETTLEMENT_FAILED:
       return 502;
     default:
       return 500;

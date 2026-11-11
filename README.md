@@ -495,18 +495,19 @@ On a TTY you get a human summary. Without one — the agent case — stdout is a
 
 `--raw` prints the response body alone. `--out <file>` writes the body to a file.
 
-| Code | Meaning                                                                                                                                                              |
-| ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0    | Success (paid or free)                                                                                                                                               |
-| 1    | Generic / network error                                                                                                                                              |
-| 40   | Invalid 402 payload (endpoint not x402-compliant)                                                                                                                    |
-| 42   | Denied by OWS policy                                                                                                                                                 |
-| 43   | Denied by payTo/domain allowlist                                                                                                                                     |
-| 44   | Price exceeds `--max`                                                                                                                                                |
-| 45   | Session budget or daily cap exhausted                                                                                                                                |
-| 46   | Insufficient wallet balance                                                                                                                                          |
-| 47   | Signer backend unreachable, unauthenticated, **or unable to do what was asked** (see below)                                                                          |
-| 50   | Payment sent, but no valid response returned. **Money may have moved.** Re-run the _identical_ command — it reuses the cached authorization. Never add `--no-cache`. |
+| Code | Meaning                                                                                                                                                                          |
+| ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0    | Success (paid or free)                                                                                                                                                           |
+| 1    | Generic / network error                                                                                                                                                          |
+| 40   | Invalid 402 payload (endpoint not x402-compliant)                                                                                                                                |
+| 42   | Denied by OWS policy                                                                                                                                                             |
+| 43   | Denied by payTo/domain allowlist                                                                                                                                                 |
+| 44   | Price exceeds `--max`                                                                                                                                                            |
+| 45   | Session budget or daily cap exhausted                                                                                                                                            |
+| 46   | Insufficient wallet balance                                                                                                                                                      |
+| 47   | Signer backend unreachable, unauthenticated, **or unable to do what was asked** (see below)                                                                                      |
+| 50   | Payment sent, but no valid response returned. **Money may have moved.** Re-run the _identical_ command — it reuses the cached authorization. Never add `--no-cache`.             |
+| 51   | The provider ran the request but could not settle the payment. **Nothing was paid** and no response came back. Do not retry unchanged; for `amount_too_low`, raise `max_tokens`. |
 
 These are a stability contract from v1. See [`docs/exit-codes.md`](docs/exit-codes.md).
 
@@ -621,7 +622,11 @@ rh-x402 call https://ioi.md/v1/chat/completions \
 
 - `--max` and the daily cap read the **ceiling**, the most the signature can move.
 - A wallet that has never approved Permit2 also signs a permit for the facilitator to submit, which needs two read-only RPC calls (`rpc.<chain>`). See [`docs/spec-deviations.md`](docs/spec-deviations.md) §16.
-- An OWS policy must allow Permit2: create it with `--allow-permit2` (`setup`, `wallet create --policy`, `wallet policy`). It is off by default because OWS cannot narrow it to one token.
+- `--max`, the per-call cap, `--budget` and the daily cap are checked against the **ceiling**. After the call, `amount` is what the provider reports it settled (the `PAYMENT-RESPONSE` header, or the final `x402_settlement` frame of a streamed response) and `ceiling` is what the signature allowed. The ledger and the daily cap count `amount`, or the signed amount when the provider reports none.
+- An OWS policy must allow Permit2. `setup` does this by default (`--no-allow-permit2` to leave it out). `wallet create --policy` and `wallet policy` stay opt-in with `--allow-permit2`, because OWS cannot narrow it to one token.
+- A provider that runs the request and then fails to settle (`settlement_failed`, 5xx) exits `51`: nothing was paid, there is no response, do not retry unchanged.
+- A USDC quote under 0.001 USDC (1000 atomic units) gets a `warnings` entry from `probe` and `call --dry-run`, because some facilitators reject it with `amount_too_low`.
+- The envelope's `response.headers` carries the provider's `x-*` headers (price, venue, settlement transaction), never auth-like ones.
 
 **v0.1, pre-release.** v1 targets Base + USDC, the `exact` scheme, CLI and `serve` HTTP. Five questions block v1 — the load-bearing one is whether OWS exposes EIP-712 typed-data signing at all. They are tracked as issues and summarised in [`docs/roadmap.md`](docs/roadmap.md).
 

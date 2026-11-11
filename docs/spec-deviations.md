@@ -136,4 +136,11 @@ The scope is `@roundhouseai`, matching the `roundhouseai-io` GitHub org.
 
 **Why:** a provider that settles for real usage (token-metered inference) cannot be paid with `exact`, which takes the whole quote. Invariant 7 holds: the RPC reads happen after the gates, and a failed nonce read exits `1` with nothing sent. Amounts are not weakened: `--max` and the daily cap read the ceiling, the most the signature can move.
 
-**Cost of the deviation:** a payment can now fail on an unreachable RPC where `exact` could not. `--scheme exact` avoids it when the provider offers both. The ledger records the ceiling as the amount even when the provider settles less, so the daily cap errs high.
+**Cost of the deviation:** a payment can now fail on an unreachable RPC where `exact` could not. `--scheme exact` avoids it when the provider offers both.
+
+**Follow-ups to the above:**
+
+- **`setup` allows Permit2 by default.** `setup` and `setup --yes` now create the OWS policy with Permit2 in `allowed_typed_data_contracts`, because the setup this CLI recommends has to be able to pay `upto`. `--no-allow-permit2` leaves it out. `wallet policy` and `wallet create --policy` stay opt-in (`--allow-permit2`). The default policy is therefore wider than before: OWS cannot restrict a contract-level rule to one token, spender or amount, so the wallet can sign Permit2 documents for any token it has approved to Permit2. Chains and expiry are still bounded.
+- **The ledger counts what was settled, not the ceiling.** Gates still compare the ceiling. `payment.amount` is the amount the provider's receipt reports (header, or the last `x402_settlement` frame of a stream) when it is present, successful and not above the signed amount; otherwise the signed amount. `payment.ceiling` keeps the signature's amount when it differs. The daily cap and `--budget` count `amount`.
+- **Not implemented:** the reference client's `erc20ApprovalGasSponsoring` fallback, which needs a signed transaction and `SignerBackend` only signs typed data. A token without EIP-2612 permit support on a wallet with no Permit2 allowance cannot be paid with `upto` here.
+- **Exit 51 (`settlement_failed`).** A provider that runs the request and then cannot settle answers 5xx with `error.code` `settlement_failed`. That is recorded as `signed`, not paid, because the authorization was not captured. It is a new code rather than 50, whose guidance (re-run the identical command) is wrong for it.

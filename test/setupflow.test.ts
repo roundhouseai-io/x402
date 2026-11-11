@@ -41,6 +41,7 @@ class World {
   writes = 0;
   walletsCreated = 0;
   keysMinted = 0;
+  mintedWithPermit2: boolean[] = [];
   payments: { dryRun: boolean; noCache: boolean }[] = [];
   said: string[] = [];
   events: StepEvent[] = [];
@@ -151,8 +152,9 @@ class World {
         return result;
       },
       globalInstallWritable: () => true,
-      mintPolicyKey: async () => {
+      mintPolicyKey: async (opts) => {
         world.keysMinted++;
+        world.mintedWithPermit2.push(opts.allowPermit2);
         return {
           id: 'pol',
           keyId: `key${world.keysMinted}`,
@@ -375,6 +377,21 @@ describe('running it again', () => {
       'summary:done',
     ]);
     expect(world.result('summary')?.next).toBe('ready');
+  });
+
+  it('re-mints the lost key with Permit2 only when the flags asked for it', async () => {
+    for (const [flag, expected] of [
+      [true, true],
+      [false, false],
+      [undefined, false],
+    ] as const) {
+      const world = new World();
+      await run(world);
+      delete world.env.OWS_X402_KEY;
+      world.reset();
+      await run(world, { allowPermit2: flag });
+      expect(world.mintedWithPermit2).toEqual([expected]);
+    }
   });
 
   it('in a new shell where the policy key is no longer exported, mints a new one and keeps the wallet', async () => {

@@ -2,7 +2,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { X402Error, ExitCode } from '../core/errors.js';
 import { decodeQuote, parsePaymentRequired } from '../core/x402.js';
 import { buildData } from '../core/data.js';
-import { emitCallResult, writeJson, isTty } from '../core/output.js';
+import { emitCallResult, writeErr, writeJson, isTty } from '../core/output.js';
 import { bool, str, list, parseHeaders, type ParsedArgs } from '../core/args.js';
 import { buildContext, callOptionsFrom } from './context.js';
 import { readStdin } from '../core/stdin.js';
@@ -123,6 +123,7 @@ export async function probeCommand(parsed: ParsedArgs): Promise<number> {
     url: probe.url,
     status: probe.status,
     paymentRequired: probe.status === 402,
+    ...(probe.warnings ? { warnings: probe.warnings } : {}),
     ...(probe.capability ? { capability: probe.capability, provider: probe.provider?.url } : {}),
     ...(probe.selected
       ? {
@@ -155,6 +156,9 @@ export async function probeCommand(parsed: ParsedArgs): Promise<number> {
     ...(probe.body !== undefined && probe.status !== 402 ? { body: probe.body } : {}),
   };
 
+  if (isTty() && probe.warnings) {
+    for (const w of probe.warnings) writeErr(`warning: ${w}`);
+  }
   if (isTty() && probe.selected) {
     const o = probe.selected;
     process.stdout.write(

@@ -495,18 +495,19 @@ On a TTY you get a human summary. Without one — the agent case — stdout is a
 
 `--raw` prints the response body alone. `--out <file>` writes the body to a file.
 
-| Code | Meaning                                                                                                                                                              |
-| ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0    | Success (paid or free)                                                                                                                                               |
-| 1    | Generic / network error                                                                                                                                              |
-| 40   | Invalid 402 payload (endpoint not x402-compliant)                                                                                                                    |
-| 42   | Denied by OWS policy                                                                                                                                                 |
-| 43   | Denied by payTo/domain allowlist                                                                                                                                     |
-| 44   | Price exceeds `--max`                                                                                                                                                |
-| 45   | Session budget or daily cap exhausted                                                                                                                                |
-| 46   | Insufficient wallet balance                                                                                                                                          |
-| 47   | Signer backend unreachable, unauthenticated, **or unable to do what was asked** (see below)                                                                          |
-| 50   | Payment sent, but no valid response returned. **Money may have moved.** Re-run the _identical_ command — it reuses the cached authorization. Never add `--no-cache`. |
+| Code | Meaning                                                                                                                                                                          |
+| ---- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0    | Success (paid or free)                                                                                                                                                           |
+| 1    | Generic / network error                                                                                                                                                          |
+| 40   | Invalid 402 payload (endpoint not x402-compliant)                                                                                                                                |
+| 42   | Denied by OWS policy                                                                                                                                                             |
+| 43   | Denied by payTo/domain allowlist                                                                                                                                                 |
+| 44   | Price exceeds `--max`                                                                                                                                                            |
+| 45   | Session budget or daily cap exhausted                                                                                                                                            |
+| 46   | Insufficient wallet balance                                                                                                                                                      |
+| 47   | Signer backend unreachable, unauthenticated, **or unable to do what was asked** (see below)                                                                                      |
+| 50   | Payment sent, but no valid response returned. **Money may have moved.** Re-run the _identical_ command — it reuses the cached authorization. Never add `--no-cache`.             |
+| 51   | The provider ran the request but could not settle the payment. **Nothing was paid** and no response came back. Do not retry unchanged; for `amount_too_low`, raise `max_tokens`. |
 
 These are a stability contract from v1. See [`docs/exit-codes.md`](docs/exit-codes.md).
 

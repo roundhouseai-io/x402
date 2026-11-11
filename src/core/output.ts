@@ -1,5 +1,6 @@
 import { writeFileSync } from 'node:fs';
 import { ExitCodeName } from './errors.js';
+import { isRedactedHeader } from './telemetry.js';
 import type { CallResult, PaymentState } from './engine.js';
 
 export const isTty = (): boolean => process.stdout.isTTY === true;
@@ -12,6 +13,10 @@ export interface Envelope {
   /** none | signed | submitted | settled. The detail behind `paid`. */
   paymentState: PaymentState;
   amount: string;
+  /** The signed ceiling, when the provider settled less than it. */
+  ceiling?: string;
+  /** Things worth knowing before paying, such as a quote under the facilitator minimum. */
+  warnings?: string[];
   asset?: string;
   receiptId: string;
   url?: string;
@@ -19,6 +24,8 @@ export interface Envelope {
   provider?: string;
   cacheHit?: boolean;
   dryRun?: boolean;
+  /** The provider's own `x-*` response headers. Auth-like ones are never included. */
+  response?: { headers: Record<string, string> };
   body?: unknown;
   errorCode?: number;
   error?: string;
@@ -41,6 +48,10 @@ export function toEnvelope(result: CallResult): Envelope {
   if (result.provider) env.provider = result.provider.url;
   if (result.cacheHit !== undefined) env.cacheHit = result.cacheHit;
   if (result.dryRun) env.dryRun = true;
+  if (result.ceiling) env.ceiling = result.ceiling;
+  if (result.warnings && result.warnings.length > 0) env.warnings = result.warnings;
+  const headers = publicResponseHeaders(result.headers);
+  if (Object.keys(headers).length > 0) env.response = { headers };
   if (result.body !== undefined) env.body = result.body;
   if (result.errorCode !== undefined) {
     env.errorCode = result.errorCode;
@@ -48,6 +59,27 @@ export function toEnvelope(result: CallResult): Envelope {
   }
   if (result.error) env.error = result.error;
   return env;
+}
+
+/**
+ * The provider's `x-*` response headers, for the envelope: what it charged, which
+ * venue served the call, the settlement transaction. The names that carry
+ * credentials or payment instruments are never included, at any level, and
+ * neither is anything whose name says it is a secret. Invariant 4.
+ */
+const SECRET_NAME = /(token|secret|key|auth|cookie|session|password|signature)/i;
+
+export function publicResponseHeaders(
+  headers: Record<string, string> | undefined,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [name, value] of Object.entries(headers ?? {})) {
+    const lower = name.toLowerCase();
+    if (!lower.startsWith('x-')) continue;
+    if (isRedactedHeader(lower) || SECRET_NAME.test(lower)) continue;
+    out[lower] = value;
+  }
+  return out;
 }
 
 export function writeJson(value: unknown): void {
@@ -116,6 +148,7 @@ export function emitCallResult(result: CallResult, opts: EmitOptions = {}): void
       `capability ${result.capability} -> ${result.provider?.url ?? result.url}\n`,
     );
   }
+  if (result.warnings) for (const w of result.warnings) writeErr(`warning: ${w}`);
   if (result.dryRun && result.selected) {
     const o = result.selected;
     process.stdout.write(

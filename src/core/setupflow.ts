@@ -111,7 +111,9 @@ export interface FlowDeps {
    * Mint a fresh OWS policy key for the configured wallet. For a wallet whose
    * key was shown once at creation and is no longer exported.
    */
-  mintPolicyKey(): Promise<{ id: string; keyId: string; token: string }>;
+  mintPolicyKey(opts: {
+    allowPermit2: boolean;
+  }): Promise<{ id: string; keyId: string; token: string }>;
   waitForFunds(input: {
     address: string;
     chain: string;
@@ -457,7 +459,7 @@ async function mintLostPolicyKey(flags: SetupFlags, deps: FlowDeps, status: Stat
   }
   let grant: { id: string; keyId: string; token: string };
   try {
-    grant = await deps.mintPolicyKey();
+    grant = await deps.mintPolicyKey({ allowPermit2: flags.allowPermit2 === true });
   } catch (err) {
     throw fail('create-wallet', exitCodeOf(err), messageOf(err));
   }

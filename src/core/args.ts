@@ -71,6 +71,7 @@ export const FLAGS: Record<string, { kind: FlagKind; alias?: string }> = {
   policy: { kind: 'boolean' },
   'no-policy': { kind: 'boolean' },
   'allow-permit2': { kind: 'boolean' },
+  'no-allow-permit2': { kind: 'boolean' },
   install: { kind: 'boolean' },
   'install-global': { kind: 'boolean' },
 

@@ -88,7 +88,8 @@ wallet setup
   --key-file <path>                   for --path import; a 0600 file, never argv
   --policy / --no-policy              register an OWS policy and mint its key
   --chain <name>                      chains the policy allows (repeatable)
-  --allow-permit2                     also let the policy sign Permit2 (the upto scheme)
+  --allow-permit2                     also let the policy sign Permit2 (the upto scheme); setup does this by default
+  --no-allow-permit2                  setup only: keep Permit2 out of the policy (exact-only wallet)
   --expires <30d|12h|ISO>             policy and key expiry
 
 balances

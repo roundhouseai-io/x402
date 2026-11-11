@@ -6,19 +6,20 @@ The codes are a stability contract from v1. New codes may be appended; existing 
 - **HTTP** (`rh-x402 serve`) — `errorCode` in the response body; the HTTP status is a convenience mapping (see below).
 - **MCP** — `errorCode` inside the tool result, with `isError: true`.
 
-| Code | Name                   | Meaning                                                                                                                                       | Retry?                                                                                      |
-| ---- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
-| 0    | `ok`                   | Success, paid or free                                                                                                                         | —                                                                                           |
-| 1    | `error`                | Generic, network, or usage error. Nothing was paid.                                                                                           | Yes                                                                                         |
-| 40   | `invalid_402`          | The endpoint returned a 402 this tool cannot use, quoted an x402 version this build does not speak, or rejected a valid-looking authorization | No — report the provider                                                                    |
-| 42   | `policy_denied`        | The OWS policy engine refused to sign — a token contract, chain or expiry outside the wallet's policy                                         | No — a human must widen the wallet policy                                                   |
-| 43   | `allowlist_denied`     | `allowlist.payTo` or `allowlist.domains` excluded this call                                                                                   | No — the provider is not approved                                                           |
-| 44   | `over_max`             | The quoted price exceeds `--max` / `limits.maxPerCall`                                                                                        | Only after a human raises the cap                                                           |
-| 45   | `budget_exhausted`     | `--budget` for this process, or `limits.dailyCap` from the ledger, is spent                                                                   | No — stop spending                                                                          |
-| 46   | `insufficient_balance` | The wallet cannot cover the quoted price                                                                                                      | No — fund the wallet                                                                        |
-| 47   | `ows_unavailable`      | Signer backend unreachable, auth failed, or **unable to do what was asked**                                                                   | Read the message first: unreachable is retryable once, incapable never is                   |
-| 48   | `wait_timeout`         | `wallet balance --wait` timed out before the balance reached `--min`. Nothing was paid. CLI only: no HTTP or MCP surface waits on a balance.  | Check the address and chain, then wait again or report it                                   |
-| 50   | `paid_no_response`     | The paid request was sent but no valid response came back. **Money may have moved.** A receipt is logged.                                     | Re-run the _identical_ command; it reuses the cached authorization. Never add `--no-cache`. |
+| Code | Name                   | Meaning                                                                                                                                       | Retry?                                                                                                       |
+| ---- | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| 0    | `ok`                   | Success, paid or free                                                                                                                         | —                                                                                                            |
+| 1    | `error`                | Generic, network, or usage error. Nothing was paid.                                                                                           | Yes                                                                                                          |
+| 40   | `invalid_402`          | The endpoint returned a 402 this tool cannot use, quoted an x402 version this build does not speak, or rejected a valid-looking authorization | No — report the provider                                                                                     |
+| 42   | `policy_denied`        | The OWS policy engine refused to sign — a token contract, chain or expiry outside the wallet's policy                                         | No — a human must widen the wallet policy                                                                    |
+| 43   | `allowlist_denied`     | `allowlist.payTo` or `allowlist.domains` excluded this call                                                                                   | No — the provider is not approved                                                                            |
+| 44   | `over_max`             | The quoted price exceeds `--max` / `limits.maxPerCall`                                                                                        | Only after a human raises the cap                                                                            |
+| 45   | `budget_exhausted`     | `--budget` for this process, or `limits.dailyCap` from the ledger, is spent                                                                   | No — stop spending                                                                                           |
+| 46   | `insufficient_balance` | The wallet cannot cover the quoted price                                                                                                      | No — fund the wallet                                                                                         |
+| 47   | `ows_unavailable`      | Signer backend unreachable, auth failed, or **unable to do what was asked**                                                                   | Read the message first: unreachable is retryable once, incapable never is                                    |
+| 48   | `wait_timeout`         | `wallet balance --wait` timed out before the balance reached `--min`. Nothing was paid. CLI only: no HTTP or MCP surface waits on a balance.  | Check the address and chain, then wait again or report it                                                    |
+| 50   | `paid_no_response`     | The paid request was sent but no valid response came back. **Money may have moved.** A receipt is logged.                                     | Re-run the _identical_ command; it reuses the cached authorization. Never add `--no-cache`.                  |
+| 51   | `settlement_failed`    | The provider ran the request but could not settle the payment. **Nothing was paid** and no response came back.                                | Do not retry unchanged. Read the message: for `amount_too_low`, raise `max_tokens`. Report it if it repeats. |
 
 ## Payment states
 
@@ -38,7 +39,7 @@ ledger — and `limits.dailyCap` counts `paid` records, so the cap would quietly
 stop binding. `settled` is the stronger claim, available when the provider says
 so; `rh-x402 verify <receiptId>` is how you confirm the rest.
 
-Codes 2-39, 41, 49 and 51+ are unassigned. `41` is deliberately skipped to leave room next to `40` for a distinct "payment rejected by provider" code if we decide to split that case out.
+Codes 2-39, 41, 49 and 52+ are unassigned. `41` is deliberately skipped to leave room next to `40` for a distinct "payment rejected by provider" code if we decide to split that case out.
 
 ## HTTP status mapping
 
@@ -47,7 +48,7 @@ Codes 2-39, 41, 49 and 51+ are unassigned. `41` is deliberately skipped to leave
 | Exit code           | HTTP status |
 | ------------------- | ----------- |
 | 0                   | 200         |
-| 40, 50              | 502         |
+| 40, 50, 51          | 502         |
 | 42, 43              | 403         |
 | 44, 45              | 429         |
 | 46                  | 402         |

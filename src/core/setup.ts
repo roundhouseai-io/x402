@@ -334,7 +334,10 @@ async function maybeGrantPolicy(
     (interactive() &&
       (await confirm(
         'Put an OWS policy in front of this wallet? It refuses any chain or token ' +
-          'contract outside x402, inside OWS, whatever this CLI does.',
+          'contract outside x402, inside OWS, whatever this CLI does.' +
+          (opts.allowPermit2
+            ? ' It also allows Permit2, which the upto scheme signs (--no-allow-permit2 to leave it out).'
+            : ''),
         true,
       )));
   if (!wanted) return undefined;

@@ -30,6 +30,14 @@ import { resolveTarget, type Provider } from './discover.js';
 import { parseUnits, formatUnits, findChain } from './assets.js';
 import { rpcUrlFor } from './rpc.js';
 import {
+  AMOUNT_TOO_LOW_HINT,
+  isAmountTooLow,
+  quoteWarnings,
+  settledAtomic,
+  settlementFailure,
+  settlementFromStream,
+} from './settlement.js';
+import {
   EIP2612_GAS_SPONSORING_KEY,
   buildEip2612Permit,
   buildUptoPermit2,
@@ -129,6 +137,8 @@ export interface Receipt {
   assetSymbol: string;
   amount: string;
   amountAtomic: string;
+  /** What the provider reports it settled, when it says. Absent means the signed amount is the best figure. */
+  settledAmount?: string | undefined;
   payTo: string;
   from: string;
   nonce: string;
@@ -150,6 +160,13 @@ export interface CallResult {
   /** The honest detail behind `paid`. See {@link PaymentState}. */
   paymentState: PaymentState;
   amount: string;
+  /**
+   * What the signature allowed, when it differs from `amount`. An `upto` payment
+   * signs a ceiling and settles what the work cost.
+   */
+  ceiling?: string | undefined;
+  /** Things worth knowing about the quote, such as one below the facilitator minimum. */
+  warnings?: string[] | undefined;
   asset?: string | undefined;
   receiptId: string;
   body?: unknown;
@@ -270,7 +287,17 @@ export function providerRejection(
   }
 
   const body = parseJsonBody(res.body) as { error?: unknown; message?: unknown } | undefined;
-  for (const value of [body?.error, body?.message]) {
+  // `{"error":"amount_too_low"}` and the OpenAI shape `{"error":{"code","message"}}`.
+  const errorObj =
+    typeof body?.error === 'object' && body.error !== null
+      ? (body.error as { code?: unknown; message?: unknown })
+      : undefined;
+  for (const value of [
+    typeof body?.error === 'string' ? body.error : undefined,
+    errorObj?.code,
+    errorObj?.message,
+    body?.message,
+  ]) {
     if (typeof value === 'string' && value !== '') reasons.push(value);
   }
   if (reasons.length === 0 && res.body.trim() !== '') {
@@ -279,7 +306,8 @@ export function providerRejection(
 
   const unique = [...new Set(reasons.map((r) => r.slice(0, REJECTION_BODY_LIMIT)))];
   if (unique.length === 0) return 'provider rejected the payment authorization';
-  return `provider rejected the payment authorization: ${unique.join(' | ')}`;
+  const hint = unique.some(isAmountTooLow) ? ` ${AMOUNT_TOO_LOW_HINT}` : '';
+  return `provider rejected the payment authorization: ${unique.join(' | ')}.${hint}`;
 }
 
 export class Engine {
@@ -312,6 +340,7 @@ export class Engine {
     status: number;
     requirements?: PaymentRequired;
     selected?: PaymentOption;
+    warnings?: string[];
     provider?: Provider;
     capability?: string;
     body?: unknown;
@@ -339,11 +368,13 @@ export class Engine {
       preferChain: this.config.defaults.chain,
       scheme: opts.scheme,
     });
+    const warnings = quoteWarnings(selected);
     return {
       url: prepared.url,
       status: res.status,
       requirements,
       selected,
+      ...(warnings.length > 0 ? { warnings } : {}),
       provider: resolved.provider,
       capability: resolved.capability,
     };
@@ -491,6 +522,7 @@ export class Engine {
         url: prepared.url,
         requirements,
         selected: option,
+        ...(quoteWarnings(option).length > 0 ? { warnings: quoteWarnings(option) } : {}),
         provider: resolved.provider,
         capability: resolved.capability,
         dryRun: true,
@@ -565,7 +597,9 @@ export class Engine {
       };
     }
 
-    const settlement = settlementFromHeaders(second.headers);
+    // Headers first. A streamed response has sent them before the provider settles,
+    // so its receipt is the final `x402_settlement` frame in the body.
+    const settlement = settlementFromHeaders(second.headers) ?? settlementFromStream(second.body);
     record.payment.settlement = settlement;
     this.recordResponse(record, second, level);
     record.response.paymentLatencyMs = paymentLatencyMs;
@@ -606,16 +640,63 @@ export class Engine {
       };
     }
 
+    // The provider ran the request and then could not settle. It says so in an
+    // OpenAI-shaped error, and the authorization was not captured: nothing moved
+    // and no response comes with it. That is not "paid, no response" (50), which
+    // tells an agent to re-run the identical command. Retrying this one only has
+    // the provider run the work again, so it gets its own code and its own words.
+    // The cache entry stays, for the same reason it does after a 402: the
+    // signature is still live at the provider, and a fresh one is the only way two
+    // transfers can happen.
+    const failure = settlementFailure(second.status, second.body);
+    if (failure !== undefined) {
+      record.payment.state = 'signed';
+      record.payment.paid = false;
+      record.payment.amount = '0';
+      record.exitCode = ExitCode.SETTLEMENT_FAILED;
+      const hint = isAmountTooLow(failure) ? ` ${AMOUNT_TOO_LOW_HINT}` : '';
+      record.error = `the provider could not settle the payment, so nothing was paid and no response was returned: ${failure}${hint}`;
+      this.commit(record);
+      return {
+        ok: false,
+        status: second.status,
+        paid: false,
+        paymentState: 'signed',
+        amount: '0',
+        asset: option.assetSymbol,
+        receiptId: id,
+        url: prepared.url,
+        requirements,
+        selected: option,
+        receipt: this.receipt(id, auth, option, second.status, settlement, 'signed'),
+        provider: resolved.provider,
+        capability: resolved.capability,
+        cacheHit: record.payment.cacheHit,
+        record,
+        errorCode: ExitCode.SETTLEMENT_FAILED,
+        error: record.error,
+      };
+    }
+
     const httpOk = second.status >= 200 && second.status < 400;
     // A settlement receipt is the only proof the transfer happened; without one
     // the honest answer is that the authorization was submitted and accepted.
     const state: PaymentState = settlement?.success === true ? 'settled' : 'submitted';
+    // What left the wallet. An upto payment signs a ceiling and the provider
+    // settles what the work cost, so a receipt that names an amount within the
+    // signature is what the ledger and the daily cap should count. With no usable
+    // figure the signed amount stands: counting less than may have moved would
+    // quietly disarm the cap.
+    const settled = settledAtomic(settlement, option.amountAtomic);
+    const paidAtomic = settled ?? option.amountAtomic;
+    const paidAmount = formatUnits(paidAtomic, option.decimals);
     record.payment.state = state;
     record.payment.paid = true;
-    record.payment.amount = option.amount;
+    record.payment.amount = paidAmount;
+    if (paidAtomic !== option.amountAtomic) record.payment.ceiling = option.amount;
     record.exitCode = httpOk ? ExitCode.OK : ExitCode.PAID_NO_RESPONSE;
     if (!httpOk) record.error = `paid, but upstream returned HTTP ${second.status}`;
-    this.deps.budget?.record(option.amountAtomic);
+    this.deps.budget?.record(paidAtomic);
     this.commit(record);
 
     const body = parseJsonBody(second.body);
@@ -624,7 +705,8 @@ export class Engine {
       status: second.status,
       paid: true,
       paymentState: state,
-      amount: option.amount,
+      amount: paidAmount,
+      ...(paidAtomic !== option.amountAtomic ? { ceiling: option.amount } : {}),
       asset: option.assetSymbol,
       receiptId: id,
       body: body ?? second.body,
@@ -633,7 +715,7 @@ export class Engine {
       url: prepared.url,
       requirements,
       selected: option,
-      receipt: this.receipt(id, auth, option, second.status, settlement, state),
+      receipt: this.receipt(id, auth, option, second.status, settlement, state, settled),
       provider: resolved.provider,
       capability: resolved.capability,
       cacheHit: record.payment.cacheHit,
@@ -905,6 +987,7 @@ export class Engine {
     status: number | null,
     settlement: SettlementResponse | undefined,
     state: PaymentState,
+    settledAtomicAmount?: bigint,
   ): Receipt {
     return {
       id,
@@ -920,6 +1003,9 @@ export class Engine {
       assetSymbol: option.assetSymbol,
       amount: option.amount,
       amountAtomic: option.amountAtomic.toString(),
+      ...(settledAtomicAmount !== undefined
+        ? { settledAmount: formatUnits(settledAtomicAmount, option.decimals) }
+        : {}),
       payTo: option.payTo,
       from: auth.from ?? (auth.typedData?.message.from as string | undefined) ?? '',
       nonce: auth.nonce,

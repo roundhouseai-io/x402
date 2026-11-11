@@ -32,7 +32,10 @@ export interface LedgerRecord {
     state?: 'none' | 'signed' | 'submitted' | 'settled';
     /** x402 protocol version the payment was constructed for. */
     x402Version?: number;
+    /** What the wallet is assumed to have spent: the settled amount when the provider reports it, else the signed one. */
     amount: string;
+    /** The signed ceiling, present only when it differs from `amount`. */
+    ceiling?: string;
     asset?: string;
     chain?: string;
     payTo?: string;

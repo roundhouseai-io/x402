@@ -1,0 +1,575 @@
+{
+  "keccak": {
+    "empty": "0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470",
+    "abc": "0x4e03657aea45a94fc7d47ba826c8d667c0d1e6e33a64a036ec44f58fa12d6c45",
+    "long200": "0x96ea54061def936c4be90b518992fdc6f12f535068a256229aca54267b4d084d",
+    "exactly136": "0x121b76d0b19f3c2c7632310b92c54cddd59d16a6b5aafe84696426f10e5733bf",
+    "channelConfigTypehash": "0x1c9a06ceab9b0ebbd3301dc56c9111bb6d9af421356dc9ccb3b7084c755db308",
+    "channelsSelector": "0x7a7ebd7b"
+  },
+  "batchDeposit": {
+    "requirements": {
+      "scheme": "batch-settlement",
+      "network": "eip155:8453",
+      "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "amount": "1000",
+      "payTo": "0x2222222222222222222222222222222222222222",
+      "maxTimeoutSeconds": 300,
+      "extra": {
+        "name": "USD Coin",
+        "version": "2",
+        "receiverAuthorizer": "0x3333333333333333333333333333333333333333"
+      }
+    },
+    "result": {
+      "x402Version": 2,
+      "payload": {
+        "type": "deposit",
+        "channelConfig": {
+          "payer": "0x1111111111111111111111111111111111111111",
+          "payerAuthorizer": "0x1111111111111111111111111111111111111111",
+          "receiver": "0x2222222222222222222222222222222222222222",
+          "receiverAuthorizer": "0x3333333333333333333333333333333333333333",
+          "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "withdrawDelay": 900,
+          "salt": "0x0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "voucher": {
+          "channelId": "0xce278639f012a1b47c1c73d493283bba877b8724306aec0ac8b91043d96f7f94",
+          "maxClaimableAmount": "1000",
+          "signature": "0xababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababab"
+        },
+        "deposit": {
+          "amount": "5000",
+          "authorization": {
+            "erc3009Authorization": {
+              "validAfter": "0",
+              "validBefore": "1794400300",
+              "salt": "0x01080f161d242b323940474e555c636a71787f868d949ba2a9b0b7bec5ccd3da",
+              "signature": "0xababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababab"
+            }
+          }
+        }
+      }
+    },
+    "signed": [
+      {
+        "domain": {
+          "name": "USD Coin",
+          "version": "2",
+          "chainId": 8453,
+          "verifyingContract": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+        },
+        "types": {
+          "ReceiveWithAuthorization": [
+            {
+              "name": "from",
+              "type": "address"
+            },
+            {
+              "name": "to",
+              "type": "address"
+            },
+            {
+              "name": "value",
+              "type": "uint256"
+            },
+            {
+              "name": "validAfter",
+              "type": "uint256"
+            },
+            {
+              "name": "validBefore",
+              "type": "uint256"
+            },
+            {
+              "name": "nonce",
+              "type": "bytes32"
+            }
+          ]
+        },
+        "primaryType": "ReceiveWithAuthorization",
+        "message": {
+          "from": "0x1111111111111111111111111111111111111111",
+          "to": "0x4020806089470a89826cB9fB1f4059150b550004",
+          "value": "5000",
+          "validAfter": "0",
+          "validBefore": "1794400300",
+          "nonce": "0x5999f1d23e07912f04ef0901a95a26f43e0477b98e382df7452a2f8534cf91ec"
+        }
+      },
+      {
+        "domain": {
+          "name": "x402 Batch Settlement",
+          "version": "1",
+          "chainId": 8453,
+          "verifyingContract": "0x4020074e9dF2ce1deE5A9C1b5c3f541D02a10003"
+        },
+        "types": {
+          "Voucher": [
+            {
+              "name": "channelId",
+              "type": "bytes32"
+            },
+            {
+              "name": "maxClaimableAmount",
+              "type": "uint128"
+            }
+          ]
+        },
+        "primaryType": "Voucher",
+        "message": {
+          "channelId": "0xce278639f012a1b47c1c73d493283bba877b8724306aec0ac8b91043d96f7f94",
+          "maxClaimableAmount": "1000"
+        }
+      }
+    ]
+  },
+  "batchVoucher": {
+    "result": {
+      "x402Version": 2,
+      "payload": {
+        "type": "voucher",
+        "channelConfig": {
+          "payer": "0x1111111111111111111111111111111111111111",
+          "payerAuthorizer": "0x1111111111111111111111111111111111111111",
+          "receiver": "0x2222222222222222222222222222222222222222",
+          "receiverAuthorizer": "0x3333333333333333333333333333333333333333",
+          "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "withdrawDelay": 900,
+          "salt": "0x0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "voucher": {
+          "channelId": "0xce278639f012a1b47c1c73d493283bba877b8724306aec0ac8b91043d96f7f94",
+          "maxClaimableAmount": "2000",
+          "signature": "0xababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababab"
+        }
+      }
+    },
+    "signed": [
+      {
+        "domain": {
+          "name": "x402 Batch Settlement",
+          "version": "1",
+          "chainId": 8453,
+          "verifyingContract": "0x4020074e9dF2ce1deE5A9C1b5c3f541D02a10003"
+        },
+        "types": {
+          "Voucher": [
+            {
+              "name": "channelId",
+              "type": "bytes32"
+            },
+            {
+              "name": "maxClaimableAmount",
+              "type": "uint128"
+            }
+          ]
+        },
+        "primaryType": "Voucher",
+        "message": {
+          "channelId": "0xce278639f012a1b47c1c73d493283bba877b8724306aec0ac8b91043d96f7f94",
+          "maxClaimableAmount": "2000"
+        }
+      }
+    ],
+    "channelId": "0xce278639f012a1b47c1c73d493283bba877b8724306aec0ac8b91043d96f7f94"
+  },
+  "batchPermit2Deposit": {
+    "requirements": {
+      "scheme": "batch-settlement",
+      "network": "eip155:8453",
+      "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "amount": "1000",
+      "payTo": "0x4444444444444444444444444444444444444444",
+      "maxTimeoutSeconds": 300,
+      "extra": {
+        "name": "USD Coin",
+        "version": "2",
+        "receiverAuthorizer": "0x3333333333333333333333333333333333333333",
+        "assetTransferMethod": "permit2"
+      }
+    },
+    "result": {
+      "x402Version": 2,
+      "payload": {
+        "type": "deposit",
+        "channelConfig": {
+          "payer": "0x1111111111111111111111111111111111111111",
+          "payerAuthorizer": "0x1111111111111111111111111111111111111111",
+          "receiver": "0x4444444444444444444444444444444444444444",
+          "receiverAuthorizer": "0x3333333333333333333333333333333333333333",
+          "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+          "withdrawDelay": 900,
+          "salt": "0x0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "voucher": {
+          "channelId": "0x8e54f09250873917267aab44dcc6c42ef1aab08a1117448608ab89ec1fc69e39",
+          "maxClaimableAmount": "1000",
+          "signature": "0xababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababab"
+        },
+        "deposit": {
+          "amount": "5000",
+          "authorization": {
+            "permit2Authorization": {
+              "from": "0x1111111111111111111111111111111111111111",
+              "permitted": {
+                "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                "amount": "5000"
+              },
+              "spender": "0x4020425FAf3B746C082C2f942b4E5159887B0005",
+              "nonce": "102181955626432958698888532850763390074419811676463043043205032519175544550330",
+              "deadline": "1794400300",
+              "witness": {
+                "channelId": "0x8e54f09250873917267aab44dcc6c42ef1aab08a1117448608ab89ec1fc69e39"
+              },
+              "signature": "0xababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababab"
+            }
+          }
+        }
+      }
+    },
+    "signed": [
+      {
+        "domain": {
+          "name": "Permit2",
+          "chainId": 8453,
+          "verifyingContract": "0x000000000022D473030F116dDEE9F6B43aC78BA3"
+        },
+        "types": {
+          "PermitWitnessTransferFrom": [
+            {
+              "name": "permitted",
+              "type": "TokenPermissions"
+            },
+            {
+              "name": "spender",
+              "type": "address"
+            },
+            {
+              "name": "nonce",
+              "type": "uint256"
+            },
+            {
+              "name": "deadline",
+              "type": "uint256"
+            },
+            {
+              "name": "witness",
+              "type": "DepositWitness"
+            }
+          ],
+          "TokenPermissions": [
+            {
+              "name": "token",
+              "type": "address"
+            },
+            {
+              "name": "amount",
+              "type": "uint256"
+            }
+          ],
+          "DepositWitness": [
+            {
+              "name": "channelId",
+              "type": "bytes32"
+            }
+          ]
+        },
+        "primaryType": "PermitWitnessTransferFrom",
+        "message": {
+          "permitted": {
+            "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+            "amount": "5000"
+          },
+          "spender": "0x4020425FAf3B746C082C2f942b4E5159887B0005",
+          "nonce": "102181955626432958698888532850763390074419811676463043043205032519175544550330",
+          "deadline": "1794400300",
+          "witness": {
+            "channelId": "0x8e54f09250873917267aab44dcc6c42ef1aab08a1117448608ab89ec1fc69e39"
+          }
+        }
+      },
+      {
+        "domain": {
+          "name": "x402 Batch Settlement",
+          "version": "1",
+          "chainId": 8453,
+          "verifyingContract": "0x4020074e9dF2ce1deE5A9C1b5c3f541D02a10003"
+        },
+        "types": {
+          "Voucher": [
+            {
+              "name": "channelId",
+              "type": "bytes32"
+            },
+            {
+              "name": "maxClaimableAmount",
+              "type": "uint128"
+            }
+          ]
+        },
+        "primaryType": "Voucher",
+        "message": {
+          "channelId": "0x8e54f09250873917267aab44dcc6c42ef1aab08a1117448608ab89ec1fc69e39",
+          "maxClaimableAmount": "1000"
+        }
+      }
+    ]
+  },
+  "authCapture3009": {
+    "requirements": {
+      "scheme": "auth-capture",
+      "network": "eip155:8453",
+      "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "amount": "5000",
+      "payTo": "0x2222222222222222222222222222222222222222",
+      "maxTimeoutSeconds": 300,
+      "extra": {
+        "name": "USD Coin",
+        "version": "2",
+        "captureAuthorizer": "0x5555555555555555555555555555555555555555",
+        "feeRecipient": "0x6666666666666666666666666666666666666666",
+        "captureDeadline": 1794500000,
+        "refundDeadline": 1794600000,
+        "minFeeBps": 0,
+        "maxFeeBps": 100
+      }
+    },
+    "result": {
+      "x402Version": 2,
+      "payload": {
+        "authorization": {
+          "from": "0x1111111111111111111111111111111111111111",
+          "to": "0x8612dfdc421f80336cd14E8EF9cb1E765dB5ab88",
+          "value": "5000",
+          "validAfter": "0",
+          "validBefore": "1794400300",
+          "nonce": "0xbca0b0110229e5efa1cebbbc195df7e9df4e2257d36eafc85e12514b8c1c7abb"
+        },
+        "signature": "0xababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababab",
+        "salt": "0xc1c8cfd6dde4ebf2f900070e151c232a31383f464d545b626970777e858c939a"
+      }
+    },
+    "signed": [
+      {
+        "domain": {
+          "name": "USD Coin",
+          "version": "2",
+          "chainId": 8453,
+          "verifyingContract": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+        },
+        "types": {
+          "ReceiveWithAuthorization": [
+            {
+              "name": "from",
+              "type": "address"
+            },
+            {
+              "name": "to",
+              "type": "address"
+            },
+            {
+              "name": "value",
+              "type": "uint256"
+            },
+            {
+              "name": "validAfter",
+              "type": "uint256"
+            },
+            {
+              "name": "validBefore",
+              "type": "uint256"
+            },
+            {
+              "name": "nonce",
+              "type": "bytes32"
+            }
+          ]
+        },
+        "primaryType": "ReceiveWithAuthorization",
+        "message": {
+          "from": "0x1111111111111111111111111111111111111111",
+          "to": "0x8612dfdc421f80336cd14E8EF9cb1E765dB5ab88",
+          "value": "5000",
+          "validAfter": "0",
+          "validBefore": "1794400300",
+          "nonce": "0xbca0b0110229e5efa1cebbbc195df7e9df4e2257d36eafc85e12514b8c1c7abb"
+        }
+      }
+    ]
+  },
+  "authCapturePermit2": {
+    "requirements": {
+      "scheme": "auth-capture",
+      "network": "eip155:8453",
+      "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "amount": "5000",
+      "payTo": "0x2222222222222222222222222222222222222222",
+      "maxTimeoutSeconds": 300,
+      "extra": {
+        "name": "USD Coin",
+        "version": "2",
+        "captureAuthorizer": "0x5555555555555555555555555555555555555555",
+        "feeRecipient": "0x6666666666666666666666666666666666666666",
+        "captureDeadline": 1794500000,
+        "refundDeadline": 1794600000,
+        "minFeeBps": 0,
+        "maxFeeBps": 100,
+        "assetTransferMethod": "permit2"
+      }
+    },
+    "result": {
+      "x402Version": 2,
+      "payload": {
+        "permit2Authorization": {
+          "from": "0x1111111111111111111111111111111111111111",
+          "permitted": {
+            "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+            "amount": "5000"
+          },
+          "spender": "0xD69831Aed5bfe262067ec4c751f4F830EcdD446e",
+          "nonce": "39132065583335139292993693572711263536068728885209931615519035072182188039164",
+          "deadline": "1794400300"
+        },
+        "signature": "0xababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababab",
+        "salt": "0xa1a8afb6bdc4cbd2d9e0e7eef5fc030a11181f262d343b424950575e656c737a"
+      }
+    },
+    "signed": [
+      {
+        "domain": {
+          "name": "Permit2",
+          "chainId": 8453,
+          "verifyingContract": "0x000000000022D473030F116dDEE9F6B43aC78BA3"
+        },
+        "types": {
+          "PermitTransferFrom": [
+            {
+              "name": "permitted",
+              "type": "TokenPermissions"
+            },
+            {
+              "name": "spender",
+              "type": "address"
+            },
+            {
+              "name": "nonce",
+              "type": "uint256"
+            },
+            {
+              "name": "deadline",
+              "type": "uint256"
+            }
+          ],
+          "TokenPermissions": [
+            {
+              "name": "token",
+              "type": "address"
+            },
+            {
+              "name": "amount",
+              "type": "uint256"
+            }
+          ]
+        },
+        "primaryType": "PermitTransferFrom",
+        "message": {
+          "permitted": {
+            "token": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+            "amount": "5000"
+          },
+          "spender": "0xD69831Aed5bfe262067ec4c751f4F830EcdD446e",
+          "nonce": "39132065583335139292993693572711263536068728885209931615519035072182188039164",
+          "deadline": "1794400300"
+        }
+      }
+    ]
+  },
+  "authCaptureBound": {
+    "requirements": {
+      "scheme": "auth-capture",
+      "network": "eip155:8453",
+      "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+      "amount": "5000",
+      "payTo": "0x2222222222222222222222222222222222222222",
+      "maxTimeoutSeconds": 300,
+      "extra": {
+        "name": "USD Coin",
+        "version": "2",
+        "captureAuthorizer": "0x5555555555555555555555555555555555555555",
+        "feeRecipient": "0x6666666666666666666666666666666666666666",
+        "captureDeadline": 1794500000,
+        "refundDeadline": 1794600000,
+        "minFeeBps": 0,
+        "maxFeeBps": 100,
+        "receiverAuthorizer": "0x7777777777777777777777777777777777777777",
+        "policy": "0x8888888888888888888888888888888888888888"
+      }
+    },
+    "result": {
+      "x402Version": 2,
+      "payload": {
+        "authorization": {
+          "from": "0x1111111111111111111111111111111111111111",
+          "to": "0x8612dfdc421f80336cd14E8EF9cb1E765dB5ab88",
+          "value": "5000",
+          "validAfter": "0",
+          "validBefore": "1794400300",
+          "nonce": "0x4800338e28641cef585b7e45fed87df2903e1033e206f3d0cc072fe6280af596"
+        },
+        "signature": "0xababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababababab",
+        "salt": "0x28ab1ecb40f1506c39cb7603269bf20be4f03099cdfe1e1c606cd053dd5be08d",
+        "saltNonce": "0x81888f969da4abb2b9c0c7ced5dce3eaf1f8ff060d141b222930373e454c535a"
+      }
+    },
+    "signed": [
+      {
+        "domain": {
+          "name": "USD Coin",
+          "version": "2",
+          "chainId": 8453,
+          "verifyingContract": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+        },
+        "types": {
+          "ReceiveWithAuthorization": [
+            {
+              "name": "from",
+              "type": "address"
+            },
+            {
+              "name": "to",
+              "type": "address"
+            },
+            {
+              "name": "value",
+              "type": "uint256"
+            },
+            {
+              "name": "validAfter",
+              "type": "uint256"
+            },
+            {
+              "name": "validBefore",
+              "type": "uint256"
+            },
+            {
+              "name": "nonce",
+              "type": "bytes32"
+            }
+          ]
+        },
+        "primaryType": "ReceiveWithAuthorization",
+        "message": {
+          "from": "0x1111111111111111111111111111111111111111",
+          "to": "0x8612dfdc421f80336cd14E8EF9cb1E765dB5ab88",
+          "value": "5000",
+          "validAfter": "0",
+          "validBefore": "1794400300",
+          "nonce": "0x4800338e28641cef585b7e45fed87df2903e1033e206f3d0cc072fe6280af596"
+        }
+      }
+    ]
+  },
+  "nowSeconds": 1794400000
+}

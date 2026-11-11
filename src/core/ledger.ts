@@ -43,6 +43,21 @@ export interface LedgerRecord {
     authHash?: string;
     cacheHit?: boolean;
     settlement?: unknown;
+    /**
+     * For `batch-settlement`: what this call did to the channel. `amount` above is
+     * the new money that left the wallet (the deposit, or 0 for a voucher drawn on
+     * funds already in escrow); `charged` is what the receiver took for this request.
+     */
+    channel?: {
+      id: string;
+      kind: 'voucher' | 'deposit' | 'refund';
+      request: string;
+      charged?: string;
+      deposit?: string;
+      balance?: string;
+      cumulative?: string;
+      confirmed: boolean;
+    };
   };
   response: {
     status: number | null;

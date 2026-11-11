@@ -1,3 +1,4 @@
+import { BATCH_SETTLEMENT_ADDRESS } from './channel.js';
 import { PERMIT2_ADDRESS } from './permit2.js';
 import { X402Error, ExitCode } from './errors.js';
 import { CHAINS, ASSETS, findChain } from './assets.js';
@@ -44,6 +45,13 @@ export interface PolicyInput {
    * or a spender, so it is the wider grant and has to be asked for.
    */
   allowPermit2?: boolean;
+  /**
+   * Also allow signing `batch-settlement` vouchers, which are EIP-712 documents under
+   * the escrow contract's domain. Off by default: like Permit2 it is a contract-level
+   * rule OWS cannot narrow to one channel or receiver, so a policy with it lets the
+   * wallet sign a voucher for any channel it could open, up to what it deposited.
+   */
+  allowChannels?: boolean;
 }
 
 /**
@@ -99,6 +107,9 @@ export function buildX402Policy(input: PolicyInput): OwsPolicy {
     ...ASSETS.filter((a) => ids.includes(a.caip2)).map((a) => a.address),
     // Permit2 only when asked for: see `allowPermit2`.
     ...(input.allowPermit2 ? [PERMIT2_ADDRESS] : []),
+    // The escrow whose domain a channel voucher is signed under, only when asked for:
+    // see `allowChannels`.
+    ...(input.allowChannels ? [BATCH_SETTLEMENT_ADDRESS] : []),
   ];
   if (contracts.length === 0) {
     throw new X402Error(
@@ -163,6 +174,8 @@ export interface GrantOptions {
   now?: Date;
   /** Allow Permit2 signing, for the `upto` scheme. See PolicyInput. */
   allowPermit2?: boolean;
+  /** Allow signing channel vouchers, for `batch-settlement`. See PolicyInput. */
+  allowChannels?: boolean;
 }
 
 /**
@@ -181,6 +194,7 @@ export async function grantPolicyKey(
     name: `x402 payer: ${opts.chains.join(', ')}`,
     chains: opts.chains,
     ...(opts.allowPermit2 ? { allowPermit2: true } : {}),
+    ...(opts.allowChannels ? { allowChannels: true } : {}),
     ...(opts.expires ? { expiresAt: resolveExpiry(opts.expires, opts.now) ?? '' } : {}),
     ...(opts.now ? { now: opts.now } : {}),
   });

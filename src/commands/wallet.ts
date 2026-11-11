@@ -262,6 +262,7 @@ async function walletCreate(parsed: ParsedArgs): Promise<number> {
     ...(list(parsed.flags, 'chain').length > 0 ? { chains: list(parsed.flags, 'chain') } : {}),
     ...(str(parsed.flags, 'expires') ? { expires: str(parsed.flags, 'expires')! } : {}),
     ...(bool(parsed.flags, 'allow-permit2') ? { allowPermit2: true } : {}),
+    ...(bool(parsed.flags, 'allow-channels') ? { allowChannels: true } : {}),
   });
 
   if (isTty()) {
@@ -325,6 +326,7 @@ async function walletPolicy(parsed: ParsedArgs): Promise<number> {
     chains: chains.length > 0 ? chains : [ctx.config.defaults.chain],
     ...(str(parsed.flags, 'expires') ? { expires: str(parsed.flags, 'expires')! } : {}),
     ...(bool(parsed.flags, 'allow-permit2') ? { allowPermit2: true } : {}),
+    ...(bool(parsed.flags, 'allow-channels') ? { allowChannels: true } : {}),
     ...(core.vaultPath ? { vaultPath: core.vaultPath } : {}),
     ...(core.passphrase ? { passphrase: core.passphrase } : {}),
   });

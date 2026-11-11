@@ -14,6 +14,7 @@ export const paths = {
   config: () => join(x402Home(), 'config.json'),
   ledger: () => join(x402Home(), 'ledger.jsonl'),
   authcache: () => join(x402Home(), 'authcache'),
+  channels: () => join(x402Home(), 'channels'),
   outbox: () => join(x402Home(), 'outbox'),
   tokens: () => join(x402Home(), 'tokens.json'),
 };

@@ -628,6 +628,25 @@ rh-x402 call https://ioi.md/v1/chat/completions \
 - A USDC quote under 0.001 USDC (1000 atomic units) gets a `warnings` entry from `probe` and `call --dry-run`, because some facilitators reject it with `amount_too_low`.
 - The envelope's `response.headers` carries the provider's `x-*` headers (price, venue, settlement transaction), never auth-like ones.
 
+### Payment channels and holds (`batch-settlement`, `auth-capture`)
+
+Two more schemes, used only when you name them, because both move more money than the one request in hand.
+
+```bash
+# Open a channel on the first call (deposits five requests' worth), pay later calls with vouchers
+rh-x402 call https://api.example/v1/thing --scheme batch-settlement --json '{"q":"hi"}' --max 0.05
+rh-x402 channel list                       # what is in escrow, what has been charged, what could come back
+rh-x402 channel refund https://api.example/refund   # ask the receiver to return the rest
+
+# Place a hold: up to the quoted maximum moves into escrow, the receiver captures what the work cost
+rh-x402 call https://api.example/v1/thing --scheme auth-capture --json '{"q":"hi"}'
+```
+
+- **Caps.** A deposit counts, in full, against `--max`, the per-call cap, `--budget` and the daily cap. A voucher counts only its request against `--max` and adds nothing to the budget or the daily cap, because it draws on money already counted. A hold counts its whole maximum. `--deposit <amount>` sets the deposit; the default is five requests' worth, held to the per-call cap.
+- **State** is in `~/.x402/channels` (0600). A deposit that was sent and never confirmed blocks a different request until it can no longer land.
+- An OWS policy needs `--allow-channels` to let a wallet sign vouchers (opt-in: OWS cannot narrow it to one channel). Holds signed with ERC-3009 need nothing new.
+- Not implemented: the payer's own on-chain withdrawal, and capture or void of a hold. See [`docs/spec-deviations.md`](docs/spec-deviations.md) §17.
+
 **v0.1, pre-release.** v1 targets Base + USDC, the `exact` scheme, CLI and `serve` HTTP. Five questions block v1 — the load-bearing one is whether OWS exposes EIP-712 typed-data signing at all. They are tracked as issues and summarised in [`docs/roadmap.md`](docs/roadmap.md).
 
 ## Docs

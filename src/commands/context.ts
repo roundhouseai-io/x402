@@ -111,6 +111,7 @@ export function callOptionsFrom(parsed: ParsedArgs) {
     max: str(parsed.flags, 'max'),
     chains: str(parsed.flags, 'chain') ? [str(parsed.flags, 'chain')!] : undefined,
     scheme: str(parsed.flags, 'scheme'),
+    deposit: str(parsed.flags, 'deposit'),
     dryRun: bool(parsed.flags, 'dry-run'),
     noCache: bool(parsed.flags, 'no-cache'),
     form: bool(parsed.flags, 'form'),

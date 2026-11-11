@@ -44,6 +44,8 @@ export interface SetupOptions {
   expires?: string;
   /** Let the policy sign Permit2 documents, which the `upto` scheme needs. */
   allowPermit2?: boolean;
+  /** Let the policy sign channel vouchers (`batch-settlement`). Opt-in. */
+  allowChannels?: boolean;
 }
 
 export interface SetupResult {
@@ -347,6 +349,7 @@ async function maybeGrantPolicy(
     chains: opts.chains && opts.chains.length > 0 ? opts.chains : ['base'],
     ...(opts.expires ? { expires: opts.expires } : {}),
     ...(opts.allowPermit2 ? { allowPermit2: true } : {}),
+    ...(opts.allowChannels ? { allowChannels: true } : {}),
     ...(opts.vaultPath ? { vaultPath: opts.vaultPath } : {}),
     ...(passphrase ? { passphrase } : {}),
   });

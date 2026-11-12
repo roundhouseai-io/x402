@@ -630,7 +630,7 @@ rh-x402 call https://ioi.md/v1/chat/completions \
 
 ### Payment channels and holds (`batch-settlement`, `auth-capture`)
 
-Two more schemes, used only when you name them, because both move more money than the one request in hand.
+`upto`, then `exact`, stay the default. Name `batch-settlement` or `auth-capture` with `--scheme` or `defaults.scheme`. An open channel that can already cover the quote is used on its own, because that call deposits nothing.
 
 ```bash
 # Open a channel on the first call (deposits five requests' worth), pay later calls with vouchers
@@ -642,8 +642,10 @@ rh-x402 channel refund https://api.example/refund   # ask the receiver to return
 rh-x402 call https://api.example/v1/thing --scheme auth-capture --json '{"q":"hi"}'
 ```
 
-- **Caps.** A deposit counts, in full, against `--max`, the per-call cap, `--budget` and the daily cap. A voucher counts only its request against `--max` and adds nothing to the budget or the daily cap, because it draws on money already counted. A hold counts its whole maximum. `--deposit <amount>` sets the deposit; the default is five requests' worth, held to the per-call cap.
-- **State** is in `~/.x402/channels` (0600). A deposit that was sent and never confirmed blocks a different request until it can no longer land.
+- **Caps.** A deposit counts, in full, against `--max`, the per-call cap, `--budget` and the daily cap. A voucher counts only its request against `--max` and adds nothing to the budget or the daily cap, because it draws on money already counted. A hold counts its whole maximum. `--deposit <amount>` sets the deposit. The default is `channels.depositMultiplier` requests' worth (5, minimum 3), or the server's `extra.minDeposit` when that is at least the request, held to the per-call cap. `--max-deposit` is a hard ceiling on top of that: a deposit is never signed above it.
+- **Confirming a deposit.** The amount is printed before it is signed. On a terminal the deposit waits for a yes; `--yes` skips the question. With no terminal (an agent) the caps are the consent and the deposit proceeds.
+- **State** is in `~/.x402/channels` (0600), read back by the official `BatchSettlementEvmScheme` when `@x402/evm` is installed. A deposit that was sent and never confirmed blocks a different request until it can no longer land.
+- **Refund.** `rh-x402 channel refund <url>` returns what is left. `--amount <n>` returns part of it.
 - An OWS policy needs `--allow-channels` to let a wallet sign vouchers (opt-in: OWS cannot narrow it to one channel). Holds signed with ERC-3009 need nothing new.
 - Not implemented: the payer's own on-chain withdrawal, and capture or void of a hold. See [`docs/spec-deviations.md`](docs/spec-deviations.md) §17.
 

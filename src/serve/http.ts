@@ -146,6 +146,10 @@ export function createServeServer(deps: ServeDeps): Server {
           : [String(body.chain)],
       scheme: body.scheme === undefined ? undefined : String(body.scheme),
       deposit: body.deposit === undefined ? undefined : String(body.deposit),
+      maxDeposit: body.maxDeposit === undefined ? undefined : String(body.maxDeposit),
+      depositMultiplier:
+        body.depositMultiplier === undefined ? undefined : Number(body.depositMultiplier),
+      yes: body.yes === true,
       dryRun: body.dryRun === true,
       noCache: body.noCache === true,
       form: body.form === true,

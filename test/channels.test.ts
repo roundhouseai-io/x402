@@ -186,6 +186,67 @@ describe('choosing a channel scheme', () => {
     expect(signer.signed).toHaveLength(0);
   });
 
+  it('prefers an open channel that can cover the quote, and leaves a top-up opt-in', async () => {
+    appQueue.push(
+      () => quoted(required(batchAccept())),
+      () => ok({ 'payment-response': receipt('600', '600') }),
+    );
+    rpcQueue.push(() => rpc(0n, 0n));
+    const signer = new FakeSigner();
+    await callOnce(signer);
+
+    const upto = quote('upto', {
+      facilitatorAddress: '0x0000000000000000000000000000000000000001',
+    });
+    appQueue.push(
+      () => quoted(required(batchAccept(), upto)),
+      () => ok({ 'payment-response': receipt('400', '1000') }),
+    );
+    const covered = await engineFor(signer).call({ target: URL, data: { model: 'm' } });
+    expect(covered.selected?.scheme).toBe('batch-settlement');
+    expect(covered.ok).toBe(true);
+    expect(covered.amount).toBe('0');
+
+    appQueue.push(() => quoted(required(batchAccept('9000'), upto)));
+    const topUp = await engineFor(signer).call({ target: URL, data: { model: 'm' }, dryRun: true });
+    expect(topUp.selected?.scheme).toBe('upto');
+  });
+
+  it('defaults.scheme opts in to batch-settlement, and exact still wins when it is the preference', async () => {
+    appQueue.push(() => quoted(required(batchAccept(), quote('exact', {}))));
+    const opted = await engineFor(new FakeSigner(), {
+      defaults: { chain: 'base', timeout: 30, scheme: 'batch-settlement' },
+    }).call({ target: URL, data: {}, dryRun: true });
+    expect(opted.selected?.scheme).toBe('batch-settlement');
+
+    const upto = quote('upto', {
+      facilitatorAddress: '0x0000000000000000000000000000000000000001',
+    });
+    appQueue.push(() => quoted(required(upto, quote('exact', {}))));
+    const exact = await engineFor(new FakeSigner(), {
+      defaults: { chain: 'base', timeout: 30, scheme: 'exact' },
+    }).call({ target: URL, data: {}, dryRun: true });
+    expect(exact.selected?.scheme).toBe('exact');
+  });
+
+  it('refuses a deposit above --max-deposit and signs one clamped to it', async () => {
+    appQueue.push(() => quoted(required(batchAccept())));
+    const refused = await callOnce(new FakeSigner(), { maxDeposit: '0.0005' });
+    expect(refused.ok).toBe(false);
+    expect(refused.errorCode).toBe(ExitCode.OVER_MAX);
+    expect(refused.error).toMatch(/max-deposit/);
+
+    appQueue.push(
+      () => quoted(required(batchAccept())),
+      () => ok({ 'payment-response': receipt('600', '600') }),
+    );
+    rpcQueue.push(() => rpc(0n, 0n));
+    const signer = new FakeSigner();
+    const res = await callOnce(signer, { maxDeposit: '0.002' });
+    expect(res.ok).toBe(true);
+    expect(sentPayload(2).deposit.amount).toBe('2000');
+  });
+
   it('prefers upto over a channel scheme when both are offered and no scheme is named', async () => {
     const upto = quote('upto', {
       facilitatorAddress: '0x0000000000000000000000000000000000000001',

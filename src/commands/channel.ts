@@ -26,15 +26,22 @@ function channelList(): number {
   const rows = listChannels().map((c) => {
     const balance = BigInt(c.balance);
     const charged = BigInt(c.charged);
+    const refundable = balance > charged ? balance - charged : 0n;
     return {
       channelId: c.channelId,
       wallet: c.wallet,
       chain: c.chain,
+      network: c.network,
+      payTo: c.config.receiver,
       receiver: c.config.receiver,
-      asset: c.assetSymbol,
+      asset: c.asset,
+      assetSymbol: c.assetSymbol,
+      deposited: formatUnits(balance, c.decimals),
       balance: formatUnits(balance, c.decimals),
+      spent: formatUnits(charged, c.decimals),
       charged: formatUnits(charged, c.decimals),
-      refundable: formatUnits(balance > charged ? balance - charged : 0n, c.decimals),
+      remaining: formatUnits(refundable, c.decimals),
+      refundable: formatUnits(refundable, c.decimals),
       highestVoucher: formatUnits(BigInt(c.signedMax), c.decimals),
       ...(c.pendingDeposit
         ? {
@@ -50,8 +57,8 @@ function channelList(): number {
     if (rows.length === 0) process.stdout.write('no payment channels\n');
     for (const r of rows) {
       process.stdout.write(
-        `${r.channelId.slice(0, 12)}…  ${r.balance} ${r.asset} in escrow, ${r.charged} charged, ` +
-          `${r.refundable} refundable  ${r.receiver}${r.pendingDeposit ? `  (deposit of ${r.pendingDeposit} unconfirmed until ${r.pendingUntil})` : ''}\n`,
+        `${r.channelId.slice(0, 12)}…  ${r.deposited} ${r.assetSymbol} deposited, ${r.spent} spent, ` +
+          `${r.remaining} remaining  ${r.payTo} on ${r.network}${r.pendingDeposit ? `  (deposit of ${r.pendingDeposit} unconfirmed until ${r.pendingUntil})` : ''}\n`,
       );
     }
   } else {

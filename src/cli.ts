@@ -48,8 +48,9 @@ usage
                                          poll until funded; exits 48 on timeout
   rh-x402 wallet <list|address|forget>   wallet queries against the signer backend
   rh-x402 history [urlSubstring]         query the local ledger
-  rh-x402 channel list                   payment channels: what is in escrow
-  rh-x402 channel refund <url>           ask a receiver to refund the rest of a channel
+  rh-x402 channel list                   payment channels: payTo, network, deposited, spent, remaining
+  rh-x402 channel refund <url> [--amount <n>]
+                                         ask a receiver to refund the rest, or --amount of it
   rh-x402 discover <capability> [--policy]
                                          providers for a capability, cheapest first;
                                          --policy keeps live, paid-by-someone, near-spot offers
@@ -123,8 +124,14 @@ payment
       --max <amount>                  refuse if the quoted price exceeds this
       --budget <amount>               cumulative cap for this process
       --chain <name>                  acceptable chain (default base)
-      --scheme <name>                 exact | upto | batch-settlement | auth-capture (default: upto when offered)
-      --deposit <amount>              batch-settlement: how much to put in a new channel (default 5 requests' worth)
+      --scheme <name>                 exact | upto | batch-settlement | auth-capture
+                                      (default: upto when offered; an open channel that can
+                                      cover the quote is used without this flag)
+      --deposit <amount>              batch-settlement: how much to put in a new channel
+                                      (default: deposit multiplier × the request, or extra.minDeposit)
+      --max-deposit <amount>          hard ceiling on one deposit (also channels.maxDeposit)
+      --deposit-multiplier <n>        requests of headroom a deposit targets (min 3, default 5)
+      --yes                           deposit without a confirmation prompt
       --dry-run                       show what would be paid; do not sign
       --no-cache                      force a fresh authorization
       --receipt-out <file>            write the payment receipt JSON

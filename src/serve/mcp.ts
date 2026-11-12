@@ -45,6 +45,19 @@ export const TOOLS = [
           type: 'string',
           description: 'Refuse if the quoted price exceeds this, e.g. "0.01"',
         },
+        scheme: {
+          type: 'string',
+          description: 'exact, upto, batch-settlement or auth-capture. Omit to keep the default.',
+        },
+        maxDeposit: {
+          type: 'string',
+          description: 'Hard ceiling on a batch-settlement deposit, e.g. "1.00"',
+        },
+        deposit: {
+          type: 'string',
+          description: 'Exact batch-settlement deposit, human decimal',
+        },
+        yes: { type: 'boolean', description: 'Confirm a channel deposit without a prompt' },
         dryRun: { type: 'boolean', description: 'Report the price without paying' },
       },
       required: ['url'],
@@ -183,6 +196,10 @@ async function callTool(
         data: args.data,
         headers: args.headers,
         max: args.max,
+        scheme: args.scheme === undefined ? undefined : String(args.scheme),
+        deposit: args.deposit === undefined ? undefined : String(args.deposit),
+        maxDeposit: args.maxDeposit === undefined ? undefined : String(args.maxDeposit),
+        yes: args.yes === true,
         dryRun: args.dryRun === true,
         agentToken: 'mcp',
       });

@@ -423,12 +423,33 @@ export function parsePaymentRequired(body: unknown): PaymentRequired {
 const V2_ONLY_SCHEMES: ReadonlySet<string> = new Set(['upto', 'batch-settlement', 'auth-capture']);
 
 /**
- * Schemes the CLI can pay but never picks on its own. `batch-settlement` opens a
- * channel and deposits into escrow, and `auth-capture` places a hold, so either
- * moves more money than the single request being asked for. They are used only
- * when named with `--scheme`.
+ * Schemes the CLI can pay but does not pick on its own.
+ *
+ * `batch-settlement` deposits into escrow, and `auth-capture` places a hold, so
+ * either moves more than the request in hand. They are used when named with
+ * `--scheme` or `defaults.scheme`. `batch-settlement` is also chosen, ahead of
+ * `upto` and `exact`, when an open channel can cover the quote with a voucher
+ * and no new deposit.
  */
 export const OPT_IN_SCHEMES: ReadonlySet<string> = new Set(['batch-settlement', 'auth-capture']);
+
+const SCHEME_NAMES: ReadonlySet<string> = new Set([
+  'exact',
+  'upto',
+  'batch-settlement',
+  'auth-capture',
+]);
+
+/**
+ * An open channel that can pay the next request without moving more money.
+ * `remainingAtomic` is the escrow balance minus what the receiver has charged.
+ */
+export interface ChannelCoverage {
+  chain: string;
+  payTo: string;
+  asset: string;
+  remainingAtomic: bigint;
+}
 
 export interface SelectOptions {
   /** Acceptable chains (names, aliases or CAIP-2). Empty means any supported. */
@@ -437,8 +458,34 @@ export interface SelectOptions {
   preferChain?: string;
   /** Schemes this build can settle. */
   schemes?: string[];
-  /** Force one scheme (`--scheme`). Absent means upto where offered, else exact. */
+  /** Force one scheme (`--scheme`). Absent means the preference rules below. */
   scheme?: string | undefined;
+  /**
+   * Config `defaults.scheme`. Used when `--scheme` is absent. An opt-in scheme
+   * named here is opted in. When the quote does not offer it, selection falls
+   * through to upto, then exact.
+   */
+  preferScheme?: string | undefined;
+  /** Open channels. A covering `batch-settlement` option is preferred to upto. */
+  openChannels?: ChannelCoverage[];
+}
+
+function sameParty(family: ChainFamily, left: string, right: string): boolean {
+  return family === 'svm' ? left === right : left.toLowerCase() === right.toLowerCase();
+}
+
+/** True when `option` can be paid from `channels` with a voucher and no deposit. */
+export function channelCovers(
+  option: PaymentOption,
+  channels: readonly ChannelCoverage[],
+): boolean {
+  return channels.some(
+    (c) =>
+      c.chain === option.chain &&
+      c.remainingAtomic >= option.amountAtomic &&
+      sameParty(option.family, c.payTo, option.payTo) &&
+      sameParty(option.family, c.asset, option.asset),
+  );
 }
 
 /**
@@ -446,20 +493,41 @@ export interface SelectOptions {
  * Ties break on the provider's own ordering, which keeps selection deterministic.
  */
 export function selectOption(required: PaymentRequired, opts: SelectOptions = {}): PaymentOption {
-  const schemes = opts.scheme ? [opts.scheme] : (opts.schemes ?? ['exact', 'upto']);
+  const explicit = opts.scheme;
+  const prefer = explicit ?? opts.preferScheme;
+  if (prefer !== undefined && prefer !== '' && !SCHEME_NAMES.has(prefer)) {
+    throw new X402Error(
+      ExitCode.GENERIC,
+      `unknown scheme "${prefer}". Use exact, upto, batch-settlement or auth-capture.`,
+    );
+  }
+  const listed = explicit ? [explicit] : (opts.schemes ?? ['exact', 'upto']);
+  const schemeAllowed = new Set(listed);
+  // A configured preference opts in. An explicit `--scheme` is already the whole list.
+  if (
+    !explicit &&
+    opts.schemes === undefined &&
+    prefer !== undefined &&
+    OPT_IN_SCHEMES.has(prefer)
+  ) {
+    schemeAllowed.add(prefer);
+  }
+  const open = opts.openChannels ?? [];
+  const autoBatch = !explicit && opts.schemes === undefined;
   // `upto` and the channel schemes exist only in the v2 payload shape; a v1 quote cannot carry them.
-  let pool = required.options.filter(
-    (o) =>
-      schemes.includes(o.scheme) && (!V2_ONLY_SCHEMES.has(o.scheme) || required.x402Version >= 2),
-  );
+  let pool = required.options.filter((o) => {
+    if (V2_ONLY_SCHEMES.has(o.scheme) && required.x402Version < 2) return false;
+    if (schemeAllowed.has(o.scheme)) return true;
+    return autoBatch && o.scheme === 'batch-settlement' && channelCovers(o, open);
+  });
   if (pool.length === 0) {
     const offered = [...new Set(required.options.map((o) => o.scheme))];
     const optIn = offered.filter((s) => OPT_IN_SCHEMES.has(s));
     throw new X402Error(
       ExitCode.INVALID_402,
       `no supported payment scheme (offered: ${offered.join(', ')})` +
-        (optIn.length > 0 && !opts.scheme
-          ? `. ${optIn.join(' and ')} ${optIn.length > 1 ? 'are' : 'is'} supported but opt-in: pass --scheme ${optIn[0]!} to allow it`
+        (optIn.length > 0 && !explicit
+          ? `. ${optIn.join(' and ')} ${optIn.length > 1 ? 'are' : 'is'} supported but opt-in: pass --scheme ${optIn[0]!} to allow it, or set defaults.scheme`
           : ''),
     );
   }
@@ -479,9 +547,18 @@ export function selectOption(required: PaymentRequired, opts: SelectOptions = {}
   }
 
   const preferred = findChain(opts.preferChain)?.caip2;
-  // `upto` first: its amount is a ceiling the provider settles under, where an
-  // `exact` amount is taken whole. Within a scheme, the cheapest quote wins.
-  const rank = (o: PaymentOption) => (o.scheme === 'upto' ? 0 : 1);
+  // Named preference first. Otherwise a channel that can pay with a voucher
+  // beats `upto`, and `upto` beats `exact`: its amount is a ceiling the
+  // provider settles under, where an `exact` amount is taken whole. Within a
+  // rank, the cheapest quote wins.
+  const covered = (o: PaymentOption) => o.scheme === 'batch-settlement' && channelCovers(o, open);
+  const rank = (o: PaymentOption) => {
+    if (prefer !== undefined && prefer !== '' && o.scheme === prefer) return 0;
+    if ((prefer === undefined || prefer === '') && covered(o)) return 0;
+    if (o.scheme === 'upto') return 1;
+    if (o.scheme === 'exact') return 2;
+    return 3;
+  };
   const cheapest = (list: PaymentOption[]) =>
     list.reduce((best, o) => {
       if (rank(o) !== rank(best)) return rank(o) < rank(best) ? o : best;

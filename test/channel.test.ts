@@ -275,6 +275,33 @@ describe('planning a channel call', () => {
       deposit: 9000n,
     });
   });
+
+  it('uses the deposit multiplier when no minimum is announced', () => {
+    expect(planChannelPayment({ option, state: undefined, multiplier: 3n })).toMatchObject({
+      kind: 'deposit',
+      deposit: 3000n,
+    });
+  });
+
+  it('clamps a default deposit to --max-deposit and refuses one the ceiling cannot cover', () => {
+    expect(planChannelPayment({ option, state: undefined, maxDepositAtomic: 2000n })).toMatchObject(
+      {
+        kind: 'deposit',
+        deposit: 2000n,
+      },
+    );
+    expect(() => planChannelPayment({ option, state: undefined, maxDepositAtomic: 500n })).toThrow(
+      /max-deposit/,
+    );
+    expect(() =>
+      planChannelPayment({
+        option,
+        state: undefined,
+        depositFlag: 9000n,
+        maxDepositAtomic: 2000n,
+      }),
+    ).toThrow(/max-deposit/);
+  });
 });
 
 describe('believing what the receiver reports', () => {

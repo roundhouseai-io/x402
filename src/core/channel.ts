@@ -1,4 +1,5 @@
 import { ExitCode, X402Error } from './errors.js';
+import { formatUnits } from './assets.js';
 import { randomNonce } from './ids.js';
 import {
   abi,
@@ -338,6 +339,16 @@ export interface PlanInput {
   depositFlag?: bigint | undefined;
   /** The per-call cap in atomic units, when one is set. A default deposit never exceeds it. */
   capAtomic?: bigint | undefined;
+  /**
+   * How many requests a default deposit targets. Default {@link DEPOSIT_MULTIPLIER}.
+   * The reference client refuses a multiplier below 3.
+   */
+  multiplier?: bigint | undefined;
+  /**
+   * `--max-deposit` / `channels.maxDeposit`, in atomic units. A hard ceiling:
+   * a deposit is never signed above it, and a request that needs more is refused.
+   */
+  maxDepositAtomic?: bigint | undefined;
 }
 
 /**
@@ -365,6 +376,14 @@ export function planChannelPayment(input: PlanInput): ChannelPlan {
     return { kind: 'voucher', maxClaimable, perCallAtomic: request, exposureAtomic: 0n };
   }
 
+  const multiplier = input.multiplier ?? DEPOSIT_MULTIPLIER;
+  if (multiplier < 3n) {
+    throw new X402Error(
+      ExitCode.GENERIC,
+      `deposit multiplier must be an integer >= 3, got ${multiplier.toString()}`,
+    );
+  }
+
   const needed = maxClaimable - balance;
   let deposit: bigint;
   if (input.depositFlag !== undefined) {
@@ -376,12 +395,24 @@ export function planChannelPayment(input: PlanInput): ChannelPlan {
     }
     deposit = input.depositFlag;
   } else {
-    const target = announcedMinDeposit(option) ?? DEPOSIT_MULTIPLIER * request;
+    const target = announcedMinDeposit(option) ?? multiplier * request;
     deposit = needed > target ? needed : target;
     // A default deposit never exceeds the cap on one call; only an explicit one can.
     if (input.capAtomic !== undefined && deposit > input.capAtomic && needed <= input.capAtomic) {
       deposit = input.capAtomic;
     }
+  }
+  const ceiling = input.maxDepositAtomic;
+  if (ceiling !== undefined && (needed > ceiling || deposit > ceiling)) {
+    const human = (n: bigint) => `${formatUnits(n, option.decimals)} ${option.assetSymbol}`;
+    if (needed > ceiling || input.depositFlag !== undefined) {
+      throw new X402Error(
+        ExitCode.OVER_MAX,
+        `deposit of ${human(deposit)} exceeds --max-deposit ${human(ceiling)} ` +
+          `(this request needs ${human(needed)} in escrow). Nothing was signed.`,
+      );
+    }
+    deposit = ceiling;
   }
   return {
     kind: 'deposit',

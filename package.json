@@ -69,12 +69,17 @@
     "prettier": "^3.3.3",
     "tsx": "^4.19.2",
     "typescript": "^5.6.3",
-    "vitest": "^2.1.4"
+    "vitest": "^2.1.4",
+    "@x402/core": "2.30.0",
+    "@x402/evm": "2.30.0",
+    "viem": "^2.48.11"
   },
   "peerDependencies": {
     "@open-wallet-standard/core": "^1.4.2",
     "ethers": "^6.13.0",
-    "@solana/web3.js": "^3.1.1"
+    "@solana/web3.js": "^3.1.1",
+    "@x402/core": "2.30.0",
+    "@x402/evm": "2.30.0"
   },
   "peerDependenciesMeta": {
     "ethers": {
@@ -84,6 +89,12 @@
       "optional": true
     },
     "@solana/web3.js": {
+      "optional": true
+    },
+    "@x402/core": {
+      "optional": true
+    },
+    "@x402/evm": {
       "optional": true
     }
   },

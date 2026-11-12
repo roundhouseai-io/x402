@@ -128,6 +128,22 @@ export interface X402Config {
   defaults: {
     chain: string;
     timeout: number;
+    /**
+     * Preferred scheme when a 402 offers more than one.
+     * `exact`, `upto`, `batch-settlement` or `auth-capture`. Absent: upto, then exact.
+     * Naming `batch-settlement` or `auth-capture` opts in to it.
+     */
+    scheme?: string;
+  };
+  /**
+   * How a `batch-settlement` channel is funded. The deposit is still held to
+   * `--max`, the per-call cap, the session budget and the daily cap.
+   */
+  channels: {
+    /** Requests of headroom a new deposit targets. Default 5, minimum 3. */
+    depositMultiplier: number;
+    /** Human-decimal ceiling on one deposit. Absent: no extra ceiling. */
+    maxDeposit?: string;
   };
   discover: {
     /** Roundhouse read API base. Queried as `<indexUrl>/endpoints?q=<term>`. */
@@ -210,6 +226,7 @@ export const DEFAULT_CONFIG: X402Config = {
     sink: { enabled: true, url: TELEMETRY_URL, batchSize: 50, batchIntervalMs: 10_000 },
   },
   defaults: { chain: 'base', timeout: 30 },
+  channels: { depositMultiplier: 5 },
   discover: {
     indexUrl: 'https://api.roundhouseai.io/v0',
     unifiedUrl: 'https://api.roundhouseai.io/v0/unified',
@@ -231,7 +248,11 @@ export const DEFAULT_CONFIG: X402Config = {
  * normalised to strings on write and again on read, so a file written by an
  * older build behaves too.
  */
-export const AMOUNT_KEYS: readonly string[] = ['limits.maxPerCall', 'limits.dailyCap'];
+export const AMOUNT_KEYS: readonly string[] = [
+  'limits.maxPerCall',
+  'limits.dailyCap',
+  'channels.maxDeposit',
+];
 
 /**
  * Config values that are switches, and must be booleans.
@@ -260,14 +281,18 @@ export function normalizeConfigValue(key: string, value: unknown): unknown {
 
 /** Coerce every amount in a loaded config to a string, in place of the caller. */
 export function normalizeAmounts<T>(config: T): T {
-  const limits = (config as { limits?: Record<string, unknown> }).limits;
-  if (!limits) return config;
-  const fixed: Record<string, unknown> = { ...limits };
+  if (!isPlainObject(config)) return config;
+  let next: Json = { ...config };
   for (const key of AMOUNT_KEYS) {
-    const leaf = key.split('.')[1]!;
-    if (typeof fixed[leaf] === 'number') fixed[leaf] = String(fixed[leaf]);
+    const dot = key.indexOf('.');
+    if (dot < 0) continue;
+    const head = key.slice(0, dot);
+    const leaf = key.slice(dot + 1);
+    const group = next[head];
+    if (!isPlainObject(group) || typeof group[leaf] !== 'number') continue;
+    next = { ...next, [head]: { ...group, [leaf]: String(group[leaf]) } };
   }
-  return { ...config, limits: fixed } as T;
+  return next as T;
 }
 
 export type Json = Record<string, unknown>;
@@ -504,6 +529,10 @@ export const CONFIG_KEYS: readonly string[] = [
   'defaults',
   'defaults.chain',
   'defaults.timeout',
+  'defaults.scheme',
+  'channels',
+  'channels.depositMultiplier',
+  'channels.maxDeposit',
   'discover',
   'discover.indexUrl',
   'discover.unifiedUrl',

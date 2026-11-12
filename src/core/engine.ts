@@ -6,8 +6,10 @@ import {
   parsePaymentRequired,
   requirementsFromHeaders,
   selectOption,
+  type ChannelCoverage,
   type PaymentOption,
   type PaymentRequired,
+  type SelectOptions,
 } from './x402.js';
 import {
   buildAuthorization,
@@ -63,7 +65,14 @@ import {
   slotFor,
   type SentChannelPayload,
 } from './channelflow.js';
-import { deleteChannel, lockChannel, readChannel, writeChannel } from './channelstore.js';
+import {
+  deleteChannel,
+  listChannels,
+  lockChannel,
+  readChannel,
+  writeChannel,
+  type ChannelRecord,
+} from './channelstore.js';
 import {
   AMOUNT_TOO_LOW_HINT,
   isAmountTooLow,
@@ -87,6 +96,8 @@ import {
   verifySvmTransaction,
 } from './svm.js';
 import { ulid, tagged } from './ids.js';
+import { confirm, interactive } from './prompt.js';
+import { createEvmBatchPayment } from './batchclient.js';
 import type { PayloadLevel, X402Config } from './config.js';
 import type { SignerBackend, SignerFactory } from './signer.js';
 
@@ -122,6 +133,12 @@ export interface CallOptions {
   scheme?: string | undefined;
   /** `--deposit`: how much to put in a new or topped-up channel, human decimal. */
   deposit?: string | undefined;
+  /** `--max-deposit`: hard ceiling on one deposit, human decimal. */
+  maxDeposit?: string | undefined;
+  /** `--deposit-multiplier`. Minimum 3. Default comes from config, then 5. */
+  depositMultiplier?: number | undefined;
+  /** `--yes`: deposit without a terminal confirmation. */
+  yes?: boolean;
   dryRun?: boolean;
   noCache?: boolean;
   form?: boolean;
@@ -403,11 +420,7 @@ export class Engine {
     const requirements = parsePaymentRequired(
       requirementsFromHeaders(res.headers) ?? parseJsonBody(res.body) ?? res.body,
     );
-    const selected = selectOption(requirements, {
-      chains: opts.chains ?? [this.config.defaults.chain],
-      preferChain: this.config.defaults.chain,
-      scheme: opts.scheme,
-    });
+    const selected = selectOption(requirements, this.selection(opts));
     const warnings = quoteWarnings(selected);
     return {
       url: prepared.url,
@@ -526,11 +539,7 @@ export class Engine {
       requirements = parsePaymentRequired(
         requirementsFromHeaders(first.headers) ?? parseJsonBody(first.body) ?? first.body,
       );
-      option = selectOption(requirements, {
-        chains: opts.chains ?? [this.config.defaults.chain],
-        preferChain: this.config.defaults.chain,
-        scheme: opts.scheme,
-      });
+      option = selectOption(requirements, this.selection(opts));
       // Before the gates, and well before signing: an authorization this build
       // cannot address correctly is money at risk on a call that cannot succeed.
       assertSupportedVersion(requirements.x402Version);
@@ -1104,7 +1113,59 @@ export class Engine {
       state: rec,
       depositFlag: this.depositFlag(option, opts),
       capAtomic: this.perCallCap(option, opts),
+      multiplier: this.depositMultiplier(opts),
+      maxDepositAtomic: this.maxDepositAtomic(option, opts),
     });
+  }
+
+  /** Scheme selection shared by probe and call. Refund forces its own scheme. */
+  private selection(opts: CallOptions): SelectOptions {
+    return {
+      chains: opts.chains ?? [this.config.defaults.chain],
+      preferChain: this.config.defaults.chain,
+      scheme: opts.scheme,
+      preferScheme: opts.scheme ? undefined : this.config.defaults.scheme,
+      openChannels: this.openChannels(opts),
+    };
+  }
+
+  /** Channels this wallet can spend a voucher from, with no new deposit. */
+  private openChannels(opts: CallOptions): ChannelCoverage[] {
+    const wallet = opts.wallet ?? this.deps.walletName ?? '';
+    const backend = opts.signer ?? this.deps.backendName ?? '';
+    const out: ChannelCoverage[] = [];
+    for (const rec of listChannels()) {
+      if (wallet !== '' && rec.wallet !== wallet) continue;
+      if (backend !== '' && rec.backend !== backend) continue;
+      const balance = BigInt(rec.balance);
+      const charged = BigInt(rec.charged);
+      const remaining = balance > charged ? balance - charged : 0n;
+      if (remaining <= 0n) continue;
+      out.push({
+        chain: rec.chain,
+        payTo: rec.config.receiver,
+        asset: rec.asset,
+        remainingAtomic: remaining,
+      });
+    }
+    return out;
+  }
+
+  private depositMultiplier(opts: CallOptions): bigint {
+    const raw = opts.depositMultiplier ?? this.config.channels?.depositMultiplier ?? 5;
+    if (!Number.isInteger(raw) || raw < 3) {
+      throw new X402Error(
+        ExitCode.GENERIC,
+        `deposit multiplier must be an integer >= 3, got ${String(raw)}`,
+      );
+    }
+    return BigInt(raw);
+  }
+
+  private maxDepositAtomic(option: PaymentOption, opts: CallOptions): bigint | undefined {
+    const raw = opts.maxDeposit ?? this.config.channels?.maxDeposit;
+    if (raw === undefined || raw === '') return undefined;
+    return parseUnits(String(raw), option.decimals);
   }
 
   /** After a 402 on a voucher: adopt the receiver's total if it is one this client can believe. */
@@ -1118,6 +1179,131 @@ export class Engine {
     if (!sent) return false;
     const raw = requirementsFromHeaders(second.headers) ?? parseJsonBody(second.body);
     return repairFromPaymentRequired(sent.slot, raw);
+  }
+
+  /** Say what is about to leave the wallet, and ask when a person is at the terminal. */
+  private async confirmDeposit(
+    deposit: bigint,
+    option: PaymentOption,
+    opts: CallOptions,
+  ): Promise<void> {
+    const amount = formatUnits(deposit, option.decimals);
+    process.stderr.write(
+      `depositing ${amount} ${option.assetSymbol} into escrow for ${option.payTo} on ${option.network} ` +
+        `(this request is ${option.amount}; the rest stays refundable with \`rh-x402 channel refund\`).\n`,
+    );
+    if (opts.yes || !interactive()) return;
+    const accepted = await confirm(`Deposit ${amount} ${option.assetSymbol} now?`, false);
+    if (!accepted) {
+      throw new X402Error(ExitCode.GENERIC, 'deposit declined. Nothing was signed.');
+    }
+  }
+
+  /**
+   * Build the payment with `@x402/evm` `BatchSettlementEvmScheme`, registered for
+   * `eip155:*`. Returns undefined when that package is not installed, and the
+   * caller signs with the vendored port instead. The deposit amount is the one
+   * the gates and `--max-deposit` already accepted.
+   */
+  private async payWithBatchScheme(
+    option: PaymentOption,
+    signer: SignerBackend,
+    from: string,
+    context: PaymentPayloadContext,
+    opts: CallOptions,
+    slot: string,
+    rec: ChannelRecord | undefined,
+    plan: ChannelPlan,
+    base: Omit<
+      ChannelRecord,
+      | 'balance'
+      | 'charged'
+      | 'signedMax'
+      | 'updatedAt'
+      | 'createdAt'
+      | 'voucherSignature'
+      | 'pendingDeposit'
+    >,
+    nowIso: string,
+    validBefore: number,
+  ): Promise<SignedPayment | undefined> {
+    if (option.family !== 'evm') return undefined;
+    const extra = isRecord(option.raw.extra) ? { ...option.raw.extra } : {};
+    if (option.eip712) {
+      if (extra.name === undefined) extra.name = option.eip712.name;
+      if (extra.version === undefined) extra.version = option.eip712.version;
+    }
+    const cap = this.perCallCap(option, opts);
+    const built = await createEvmBatchPayment({
+      signer,
+      payer: from,
+      slot,
+      x402Version: context.x402Version,
+      requirements: {
+        scheme: option.scheme,
+        network: option.chain,
+        amount: option.amountAtomic.toString(),
+        asset: option.asset,
+        payTo: option.payTo,
+        maxTimeoutSeconds: option.maxTimeoutSeconds,
+        extra,
+      },
+      depositMultiplier: Number(this.depositMultiplier(opts)),
+      voucherOnly: plan.kind === 'voucher',
+      ...(plan.kind === 'deposit' ? { depositAtomic: plan.deposit } : {}),
+      ...(cap !== undefined ? { maxAmountPerPayment: cap.toString() } : {}),
+    });
+    if (!built) return undefined;
+
+    const voucher = isRecord(built.payload.voucher) ? built.payload.voucher : undefined;
+    const signedChannel = typeof voucher?.channelId === 'string' ? voucher.channelId : '';
+    const maxRaw =
+      typeof voucher?.maxClaimableAmount === 'string' ? voucher.maxClaimableAmount : '';
+    const signature = typeof voucher?.signature === 'string' ? voucher.signature : '';
+    if (signedChannel === '' || !/^\d+$/.test(maxRaw) || !signature.startsWith('0x')) {
+      throw new X402Error(
+        ExitCode.GENERIC,
+        'the batch-settlement scheme returned a payload this CLI cannot send. Nothing was signed.',
+      );
+    }
+    const maxClaimable = BigInt(maxRaw);
+    const depositBody = isRecord(built.payload.deposit) ? built.payload.deposit : undefined;
+    const depositRaw = typeof depositBody?.amount === 'string' ? depositBody.amount : undefined;
+    const deposit =
+      depositRaw !== undefined && /^\d+$/.test(depositRaw) ? BigInt(depositRaw) : undefined;
+    const isDeposit = built.payload.type === 'deposit';
+    if (plan.kind === 'voucher' && isDeposit) {
+      throw new X402Error(
+        ExitCode.GENERIC,
+        'the batch-settlement scheme tried to deposit into a channel that can already cover this request. Nothing was signed.',
+      );
+    }
+    if (plan.kind === 'deposit' && deposit !== plan.deposit) {
+      throw new X402Error(
+        ExitCode.GENERIC,
+        `the batch-settlement scheme signed a deposit of ${deposit?.toString() ?? 'nothing'} atomic units, ` +
+          `not the ${plan.deposit.toString()} the caps allowed. Nothing was signed.`,
+      );
+    }
+    // The cache and the pending-deposit window follow the engine clock. The
+    // scheme's own expiry is wall-clock, which a test (and a retry) cannot
+    // share; in production the two clocks are the same.
+    recordSigned(
+      rec,
+      { ...base, channelId: signedChannel },
+      { maxClaimable, signature },
+      isDeposit && deposit !== undefined ? { amount: deposit, until: validBefore } : undefined,
+      nowIso,
+    );
+    return {
+      nonce: signedChannel,
+      validBefore,
+      signature,
+      payload: wrapPaymentPayload(option, built.payload, {
+        ...context,
+        ...(built.extensions ? { extensions: built.extensions } : {}),
+      }),
+    };
   }
 
   /**
@@ -1160,10 +1346,13 @@ export class Engine {
       state: rec,
       depositFlag: this.depositFlag(option, opts),
       capAtomic: this.perCallCap(option, opts),
+      multiplier: this.depositMultiplier(opts),
+      maxDepositAtomic: this.maxDepositAtomic(option, opts),
     });
     // The plan made under the lock is the one that counts. Gate it again: it can
     // move more than the first look did.
     this.gate(option, url, opts, plan);
+    if (plan.kind === 'deposit') await this.confirmDeposit(plan.deposit, option, opts);
 
     const base = {
       version: 1 as const,
@@ -1181,6 +1370,21 @@ export class Engine {
     };
     const voucherDoc = voucherDocument(channelId, plan.maxClaimable, option.chainId);
     const validBefore = nowSeconds + Math.max(1, option.maxTimeoutSeconds);
+
+    const viaSdk = await this.payWithBatchScheme(
+      option,
+      signer,
+      from,
+      context,
+      opts,
+      slot,
+      rec,
+      plan,
+      base,
+      nowIso,
+      validBefore,
+    );
+    if (viaSdk) return viaSdk;
 
     if (plan.kind === 'voucher') {
       const signature = await signer.signTypedData(voucherDoc);

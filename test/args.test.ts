@@ -68,6 +68,27 @@ describe('parseArgs', () => {
     expect(() => parseArgs(['--max'])).toThrow(/needs a value/);
   });
 
+  it('parses a partial channel refund and the deposit cap', () => {
+    const parsed = parseArgs([
+      'channel',
+      'refund',
+      'https://api.example/v1/thing',
+      '--amount',
+      '0.25',
+      '--max-deposit',
+      '1.00',
+      '--deposit-multiplier',
+      '3',
+      '--yes',
+    ]);
+    expect(parsed.command).toBe('channel');
+    expect(parsed.positionals).toEqual(['refund', 'https://api.example/v1/thing']);
+    expect(parsed.flags.amount).toBe('0.25');
+    expect(parsed.flags['max-deposit']).toBe('1.00');
+    expect(parsed.flags['deposit-multiplier']).toBe(3);
+    expect(parsed.flags.yes).toBe(true);
+  });
+
   it('stops flag parsing at --', () => {
     const parsed = parseArgs(['call', 'https://x.test', '--', '--not-a-flag']);
     expect(parsed.positionals).toEqual(['https://x.test', '--not-a-flag']);
